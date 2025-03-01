@@ -11,12 +11,14 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
+    "lodash.debounce": "^4.0.8",
     "next": "^15.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-zoom-pan-pinch": "^3.4.3"
   },
   "devDependencies": {
+    "@types/lodash.debounce": "^4.0.9",
     "@types/node": "^20.11.30",
     "@types/react": "^18.2.67",
     "@types/react-dom": "^18.2.22",

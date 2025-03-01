@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, memo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, memo, useRef, useMemo } from 'react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { GalleryImage, ColorFilter } from '@/lib/types';
 import Image from 'next/image';
 import path from 'path';
+import debounce from 'lodash.debounce';
 
 // Memoized Modal component to prevent unnecessary re-renders
 const ImageModal = memo(({ 
@@ -34,7 +35,7 @@ const ImageModal = memo(({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[1500]" onClick={onClose}>
-      <div className="relative max-w-[90vw] max-h-[90vh] flex flex-col items-center overflow-scroll" onClick={(e) => e.stopPropagation()}>
+      <div className="relative max-w-[90vw] max-h-[90vh] flex flex-col items-center overflow-auto" onClick={(e) => e.stopPropagation()}>
         {/* Close button at the top */}
         <div className="w-full flex justify-end mb-2">
           <button 
@@ -170,6 +171,31 @@ export default function ZoomableGallery({ images }: ZoomableGalleryProps) {
   const [colorFilter, setColorFilter] = useState<ColorFilter>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  
+  // Create a debounced function (300ms is a common debounce delay)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const debouncedSetSearch = useCallback(
+    debounce((value: string) => {
+      setDebouncedSearchQuery(value);
+    }, 500),
+    [] // Empty dependency array ensures this is only created once
+  );
+  
+  // Update the debounced value whenever searchQuery changes
+  useEffect(() => {
+    debouncedSetSearch(searchQuery);
+    
+    // Cleanup function to cancel any pending debounce calls
+    return () => {
+      debouncedSetSearch.cancel();
+    };
+  }, [searchQuery, debouncedSetSearch]);
+  
+  // Handle search input change
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(e.target.value);
+  };
   
   // Memoize filtered images to prevent recalculation on every render
   const filteredImages = React.useMemo(() => {
@@ -179,7 +205,7 @@ export default function ZoomableGallery({ images }: ZoomableGalleryProps) {
       : images.filter(img => img.color === colorFilter);
     
     // Then filter by search query if it exists
-    if (searchQuery.trim() === '') {
+    if (debouncedSearchQuery.trim() === '') {
       return colorFiltered;
     }
     
@@ -190,7 +216,7 @@ export default function ZoomableGallery({ images }: ZoomableGalleryProps) {
       const tags = img.tags || [];
       const tagString = tags.join(' ').toLowerCase();
       
-      const searchLower = searchQuery.toLowerCase();
+      const searchLower = debouncedSearchQuery.toLowerCase();
       
       return (
         filename.toLowerCase().includes(searchLower) ||
@@ -198,7 +224,7 @@ export default function ZoomableGallery({ images }: ZoomableGalleryProps) {
         tagString.includes(searchLower)
       );
     });
-  }, [images, colorFilter, searchQuery]);
+  }, [images, colorFilter, debouncedSearchQuery]);
   
   const handleClick = useCallback((index: number) => {
     setCurrentImage(index);
@@ -290,9 +316,9 @@ export default function ZoomableGallery({ images }: ZoomableGalleryProps) {
         <div className="search-box">
           <input
             type="text"
-            placeholder="Search..."
+            placeholder="Search images..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={handleSearchChange}
             className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
