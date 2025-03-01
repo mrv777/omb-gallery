@@ -319,7 +319,7 @@ export default function ZoomableGallery({ images }: ZoomableGalleryProps) {
             minScale={1}
             maxScale={10}
             wheel={{ step: 0.1 }}
-            limitToBounds={false}
+            limitToBounds={true}
             doubleClick={{ disabled: true }} // Disable double click to prevent conflicts with image click
           >
             <TransformComponent wrapperStyle={{ width: '100%', height: '100vh' }}>
