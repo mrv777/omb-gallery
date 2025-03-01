@@ -18,6 +18,16 @@ const nextConfig = {
         hostname: 'via.placeholder.com',
         pathname: '/**',
       },
+      {
+        protocol: 'https',
+        hostname: 'ordinalmaxibiz.wiki',
+        pathname: '/**',
+      },
+      {
+        protocol: 'http',
+        hostname: 'ordinalmaxibiz.wiki',
+        pathname: '/**',
+      },
     ],
   },
   // Increase the size limit for images
