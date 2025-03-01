@@ -59,13 +59,15 @@ const ImageModal = memo(({
               src={image.src} 
               alt={image.caption || `Image ${currentImage}`}
               className="object-contain"
-              width={1000}
-              height={1000}
+              width={336}
+              height={336}
               style={{
                 maxWidth: '80vw',
                 maxHeight: '75vh',
                 width: 'auto',
-                height: 'auto'
+                height: 'auto',
+                minWidth: '336px',
+                minHeight: '336px'
               }}
               priority
               unoptimized={false} // Let Next.js optimize the image
