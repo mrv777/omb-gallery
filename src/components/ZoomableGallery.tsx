@@ -34,7 +34,7 @@ const ImageModal = memo(({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[1500]" onClick={onClose}>
-      <div className="relative max-w-[90vw] max-h-[90vh] flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
+      <div className="relative max-w-[90vw] max-h-[90vh] flex flex-col items-center overflow-scroll" onClick={(e) => e.stopPropagation()}>
         {/* Close button at the top */}
         <div className="w-full flex justify-end mb-2">
           <button 
@@ -62,7 +62,7 @@ const ImageModal = memo(({
               width={336}
               height={336}
               style={{
-                maxWidth: '80vw',
+                maxWidth: '75vw',
                 maxHeight: '75vh',
                 width: 'auto',
                 height: 'auto',
@@ -186,7 +186,17 @@ export default function ZoomableGallery({ images }: ZoomableGalleryProps) {
     // Extract filename from src and check if it contains the search query
     return colorFiltered.filter(img => {
       const filename = img.src.split('/').pop() || '';
-      return filename.toLowerCase().includes(searchQuery.toLowerCase());
+      const description = img.caption || '';
+      const tags = img.tags || [];
+      const tagString = tags.join(' ').toLowerCase();
+      
+      const searchLower = searchQuery.toLowerCase();
+      
+      return (
+        filename.toLowerCase().includes(searchLower) ||
+        description.toLowerCase().includes(searchLower) ||
+        tagString.includes(searchLower)
+      );
     });
   }, [images, colorFilter, searchQuery]);
   

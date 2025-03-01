@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const prettier = require('prettier');
 
 // Path to the images directory
 const imagesDir = path.join(process.cwd(), 'public/images');
@@ -13,12 +14,12 @@ const imagesByColor = {};
 // Scan each color folder
 colorFolders.forEach(color => {
   const colorDir = path.join(imagesDir, color);
-  
+
   // Check if the color directory exists
   if (fs.existsSync(colorDir)) {
     // Get all files in the directory
     const files = fs.readdirSync(colorDir);
-    
+
     // Filter for image files and sort them
     const imageFiles = files
       .filter(file => {
@@ -26,11 +27,18 @@ colorFolders.forEach(color => {
         return ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
       })
       .sort(); // Sort filenames alphabetically
-    
-    // Store the sorted array
-    imagesByColor[color] = imageFiles;
-    
-    console.log(`Found ${imageFiles.length} images in ${color} folder`);
+
+    // Transform into objects with filename and description
+    const imageObjects = imageFiles.map(filename => ({
+      filename,
+      description: '', // Empty description field that can be populated later
+      tags: [], // Empty tags array
+    }));
+
+    // Store the sorted array of objects
+    imagesByColor[color] = imageObjects;
+
+    console.log(`Found ${imageObjects.length} images in ${color} folder`);
   } else {
     console.log(`Directory not found: ${colorDir}`);
     imagesByColor[color] = [];
@@ -47,43 +55,47 @@ export function loadImages(): GalleryImage[] {
   const images: GalleryImage[] = [];
   
   // Define all available images by color
-  const imagesByColor: Record<string, string[]> = {
+  const imagesByColor: Record<string, Array<{filename: string, description: string, tags: string[]}>> = {
 `;
 
 // Add each color's array to the code
 colorFolders.forEach(color => {
   code += `    ${color}: [\n`;
-  
+
   // Split the array into chunks for better readability
   const files = imagesByColor[color];
-  const chunkSize = 5;
-  
+  const chunkSize = 3;
+
   for (let i = 0; i < files.length; i += chunkSize) {
     const chunk = files.slice(i, i + chunkSize);
-    const line = chunk.map(file => `'${file}'`).join(', ');
+    const line = chunk
+      .map(img => `{ filename: '${img.filename}', description: '${img.description}', tags: [] }`)
+      .join(', ');
     code += `      ${line},\n`;
   }
-  
+
   code += `    ],\n`;
 });
 
 code += `  };
   
   colorFolders.forEach(color => {
-    const fileNames = imagesByColor[color];
+    const imageObjects = imagesByColor[color];
     
-    fileNames.forEach(fileName => {
+    imageObjects.forEach(imageObj => {
       // Generate a smaller thumbnail path for the gallery view
       // Use Next.js Image component's built-in optimization
       const thumbnailSize = 100; // Smaller thumbnail for the grid view
       
       images.push({
-        src: \`/images/\${color}/\${fileName}\`,
+        src: \`/images/\${color}/\${imageObj.filename}\`,
         // Use a smaller thumbnail for the grid view with lower quality
-        thumbnail: \`/images/\${color}/\${fileName}?w=\${thumbnailSize}&q=50\`,
+        thumbnail: \`/images/\${color}/\${imageObj.filename}?w=\${thumbnailSize}&q=50\`,
         thumbnailWidth: thumbnailSize,
         thumbnailHeight: thumbnailSize,
         color: color,
+        caption: imageObj.description,
+        tags: imageObj.tags
       });
     });
   });
@@ -91,10 +103,33 @@ code += `  };
   return images;
 }`;
 
-// Write the code to the correct file in the src/lib directory
-fs.writeFileSync('src/lib/imageLoader.ts', code);
-console.log('Generated code written to src/lib/imageLoader.ts');
+// Format the code with Prettier
+async function formatAndSaveCode() {
+  try {
+    // Get Prettier config
+    const prettierConfig = await prettier.resolveConfig(process.cwd());
 
-// Also output to console
-console.log('\nGenerated code sample (first few lines):');
-console.log(code.split('\n').slice(0, 20).join('\n'));
+    // Format the code
+    const formattedCode = await prettier.format(code, {
+      ...prettierConfig,
+      parser: 'typescript',
+    });
+
+    // Write the formatted code to the correct file in the src/lib directory
+    fs.writeFileSync('src/lib/imageLoader.ts', formattedCode);
+    console.log('Generated and formatted code written to src/lib/imageLoader.ts');
+
+    // Also output to console
+    console.log('\nGenerated code sample (first few lines):');
+    console.log(formattedCode.split('\n').slice(0, 20).join('\n'));
+  } catch (error) {
+    console.error('Error formatting code:', error);
+
+    // Fallback to unformatted code if formatting fails
+    fs.writeFileSync('src/lib/imageLoader.ts', code);
+    console.log('Unformatted code written to src/lib/imageLoader.ts due to formatting error');
+  }
+}
+
+// Run the async function
+formatAndSaveCode();
