@@ -149,10 +149,12 @@ const ThumbnailImage = memo(({
           src={image.thumbnail} 
           alt={image.caption || `Image ${index}`}
           className="rounded-md"
-          width={336}
-          height={336}
+          width={image.thumbnailWidth || 100}
+          height={image.thumbnailHeight || 100}
           loading="lazy" // Explicitly set lazy loading
           unoptimized={false} // Let Next.js optimize the image
+          sizes="100px" // Explicitly tell Next.js we want the 100px version
+          quality={50} // Explicitly set lower quality for thumbnails
         />
       </div>
     </div>
