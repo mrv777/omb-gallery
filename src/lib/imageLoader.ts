@@ -1826,15 +1826,20 @@ export function loadImages(): GalleryImage[] {
     const fileNames = imagesByColor[color];
     
     fileNames.forEach(fileName => {
-            images.push({
+      // Generate a smaller thumbnail path for the gallery view
+      // Use Next.js Image component's built-in optimization
+      const thumbnailSize = 100; // Smaller thumbnail for the grid view
+      
+      images.push({
         src: `/images/${color}/${fileName}`,
-        thumbnail: `/images/${color}/${fileName}`,
-              thumbnailWidth: 250,
-              thumbnailHeight: 250,
-              color: color,
-            });
-        });
+        // Use a smaller thumbnail for the grid view with lower quality
+        thumbnail: `/images/${color}/${fileName}?w=${thumbnailSize}&q=50`,
+        thumbnailWidth: thumbnailSize,
+        thumbnailHeight: thumbnailSize,
+        color: color,
+      });
+    });
   });
   
   return images;
-} 
+}

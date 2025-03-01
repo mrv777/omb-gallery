@@ -73,11 +73,16 @@ code += `  };
     const fileNames = imagesByColor[color];
     
     fileNames.forEach(fileName => {
+      // Generate a smaller thumbnail path for the gallery view
+      // Use Next.js Image component's built-in optimization
+      const thumbnailSize = 100; // Smaller thumbnail for the grid view
+      
       images.push({
         src: \`/images/\${color}/\${fileName}\`,
-        thumbnail: \`/images/\${color}/\${fileName}\`,
-        thumbnailWidth: 250,
-        thumbnailHeight: 250,
+        // Use a smaller thumbnail for the grid view with lower quality
+        thumbnail: \`/images/\${color}/\${fileName}?w=\${thumbnailSize}&q=50\`,
+        thumbnailWidth: thumbnailSize,
+        thumbnailHeight: thumbnailSize,
         color: color,
       });
     });
@@ -86,10 +91,10 @@ code += `  };
   return images;
 }`;
 
-// Write the code to a file
-fs.writeFileSync('generated-image-loader.ts', code);
-console.log('Generated code written to generated-image-loader.ts');
+// Write the code to the correct file in the src/lib directory
+fs.writeFileSync('src/lib/imageLoader.ts', code);
+console.log('Generated code written to src/lib/imageLoader.ts');
 
 // Also output to console
-console.log('\nGenerated code:');
-console.log(code); 
+console.log('\nGenerated code sample (first few lines):');
+console.log(code.split('\n').slice(0, 20).join('\n'));
