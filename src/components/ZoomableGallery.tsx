@@ -6,6 +6,7 @@ import { GalleryImage, ColorFilter } from '@/lib/types';
 import Image from 'next/image';
 import path from 'path';
 import debounce from 'lodash.debounce';
+import { useTheme } from '@/lib/ThemeContext';
 
 // Memoized Modal component to prevent unnecessary re-renders
 const ImageModal = memo(({ 
@@ -34,12 +35,12 @@ const ImageModal = memo(({
   const filenameWithoutExt = fullFilename.split('.')[0];
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[1500]" onClick={onClose}>
+    <div className="fixed inset-0 bg-black bg-opacity-75 dark:bg-black dark:bg-opacity-90 flex items-center justify-center z-[1500]" onClick={onClose}>
       <div className="relative max-w-[90vw] max-h-[90vh] flex flex-col items-center overflow-auto" onClick={(e) => e.stopPropagation()}>
         {/* Close button at the top */}
         <div className="w-full flex justify-end mb-2">
           <button 
-            className="bg-black bg-opacity-50 text-white px-3 py-1.5 rounded-full hover:bg-opacity-70"
+            className="bg-black bg-opacity-50 text-white px-3 py-1.5 rounded-full hover:bg-opacity-70 dark:bg-gray-800 dark:bg-opacity-70"
             onClick={(e) => { e.stopPropagation(); onClose(); }}
           >
             ✕
@@ -49,7 +50,7 @@ const ImageModal = memo(({
         {/* Image and navigation row */}
         <div className="flex items-center justify-center w-full">
           <button 
-            className="mr-4 bg-black bg-opacity-50 text-white px-2 py-1 rounded-full hover:bg-opacity-70"
+            className="mr-4 bg-black bg-opacity-50 text-white px-2 py-1 rounded-full hover:bg-opacity-70 dark:bg-gray-800 dark:bg-opacity-70"
             onClick={(e) => { e.stopPropagation(); onPrev(); }}
           >
             ←
@@ -76,7 +77,7 @@ const ImageModal = memo(({
           </div>
           
           <button 
-            className="ml-4 bg-black bg-opacity-50 text-white px-2 py-1 rounded-full hover:bg-opacity-70"
+            className="ml-4 bg-black bg-opacity-50 text-white px-2 py-1 rounded-full hover:bg-opacity-70 dark:bg-gray-800 dark:bg-opacity-70"
             onClick={(e) => { e.stopPropagation(); onNext(); }}
           >
             →
@@ -137,7 +138,7 @@ const ThumbnailImage = memo(({
 
   return (
     <div 
-      className="gallery-item cursor-pointer transition-transform hover:scale-125 hover:z-10"
+      className="gallery-item cursor-pointer transition-transform hover:scale-150 hover:z-10"
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}
       onMouseLeave={() => setMouseDownTime(null)} // Reset if mouse leaves the element
@@ -167,6 +168,7 @@ interface ZoomableGalleryProps {
 }
 
 export default function ZoomableGallery({ images }: ZoomableGalleryProps) {
+  const { theme } = useTheme();
   const [currentImage, setCurrentImage] = useState<number>(-1);
   const [colorFilter, setColorFilter] = useState<ColorFilter>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -280,28 +282,28 @@ export default function ZoomableGallery({ images }: ZoomableGalleryProps) {
   const colorFilterButtons = React.useMemo(() => (
     <div className="flex space-x-2">
       <button 
-        className={`w-6 h-6 rounded-full ${colorFilter === 'all' ? 'ring-2 ring-gray-500' : ''}`}
+        className={`w-6 h-6 rounded-full ${colorFilter === 'all' ? 'ring-2 ring-gray-500 dark:ring-gray-300' : ''}`}
         onClick={() => setColorFilter('all')}
         style={{ background: 'linear-gradient(to right, red, blue, green, orange, black)' }}
       />
       <button 
-        className={`w-6 h-6 rounded-full bg-red-600 ${colorFilter === 'red' ? 'ring-2 ring-gray-500' : ''}`}
+        className={`w-6 h-6 rounded-full bg-red-600 ${colorFilter === 'red' ? 'ring-2 ring-gray-500 dark:ring-gray-300' : ''}`}
         onClick={() => setColorFilter('red')}
       />
       <button 
-        className={`w-6 h-6 rounded-full bg-blue-600 ${colorFilter === 'blue' ? 'ring-2 ring-gray-500' : ''}`}
+        className={`w-6 h-6 rounded-full bg-blue-600 ${colorFilter === 'blue' ? 'ring-2 ring-gray-500 dark:ring-gray-300' : ''}`}
         onClick={() => setColorFilter('blue')}
       />
       <button 
-        className={`w-6 h-6 rounded-full bg-green-600 ${colorFilter === 'green' ? 'ring-2 ring-gray-500' : ''}`}
+        className={`w-6 h-6 rounded-full bg-green-600 ${colorFilter === 'green' ? 'ring-2 ring-gray-500 dark:ring-gray-300' : ''}`}
         onClick={() => setColorFilter('green')}
       />
       <button 
-        className={`w-6 h-6 rounded-full bg-orange-500 ${colorFilter === 'orange' ? 'ring-2 ring-gray-500' : ''}`}
+        className={`w-6 h-6 rounded-full bg-orange-500 ${colorFilter === 'orange' ? 'ring-2 ring-gray-500 dark:ring-gray-300' : ''}`}
         onClick={() => setColorFilter('orange')}
       />
       <button 
-        className={`w-6 h-6 rounded-full bg-black ${colorFilter === 'black' ? 'ring-2 ring-gray-500' : ''}`}
+        className={`w-6 h-6 rounded-full bg-black ${colorFilter === 'black' ? 'ring-2 ring-gray-500 dark:ring-gray-300' : ''}`}
         onClick={() => setColorFilter('black')}
       />
     </div>
@@ -309,7 +311,7 @@ export default function ZoomableGallery({ images }: ZoomableGalleryProps) {
   
   return (
     <div className="gallery-container">
-      <div className="filter-controls flex flex-col md:flex-row justify-between items-center mb-4 p-2 gap-2">
+      <div className="filter-controls flex flex-col md:flex-row justify-between items-center mb-4 p-2 gap-2 dark:bg-gray-800">
         <div className="color-filters mb-2 md:mb-0">
           {colorFilterButtons}
         </div>
@@ -319,7 +321,7 @@ export default function ZoomableGallery({ images }: ZoomableGalleryProps) {
             placeholder="Search images..."
             value={searchQuery}
             onChange={handleSearchChange}
-            className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:placeholder-gray-400"
           />
         </div>
       </div>

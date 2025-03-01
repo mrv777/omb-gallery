@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
+import { ThemeProvider } from '@/lib/ThemeContext';
+import ThemeToggle from '@/components/ThemeToggle';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -21,8 +23,41 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={inter.className}>{children}</body>
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Inline script to apply theme before page renders */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  // Check localStorage for theme
+                  const storedTheme = localStorage.getItem('theme');
+                  
+                  // Check system preference
+                  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                  
+                  // Apply theme based on stored preference or system preference
+                  if (storedTheme === 'dark' || (!storedTheme && prefersDark)) {
+                    document.documentElement.classList.add('dark');
+                  } else {
+                    document.documentElement.classList.remove('dark');
+                  }
+                } catch (e) {
+                  // Fail silently if localStorage is not available
+                  console.error('Error applying theme:', e);
+                }
+              })();
+            `,
+          }}
+        />
+      </head>
+      <body className={`${inter.className} transition-colors duration-300`}>
+        <ThemeProvider>
+          <ThemeToggle />
+          {children}
+        </ThemeProvider>
+      </body>
     </html>
   );
 } 
