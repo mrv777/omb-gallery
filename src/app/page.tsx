@@ -38,16 +38,16 @@ export default function Home() {
     if ('connection' in navigator && (navigator as any).connection) {
       const connection = (navigator as any).connection;
       
-      // Adjust batch size based on connection type
+      // Adjust batch size based on connection type - optimized for HTTP/2
       if (connection.effectiveType === '4g') {
-        setBatchSize(isMobile ? 20 : 40);
+        setBatchSize(isMobile ? 50 : 100); // Increased from 20/40
       } else if (connection.effectiveType === '3g') {
-        setBatchSize(isMobile ? 10 : 20);
+        setBatchSize(isMobile ? 25 : 50);  // Increased from 10/20
       } else if (connection.effectiveType === '2g' || connection.effectiveType === 'slow-2g') {
-        setBatchSize(isMobile ? 5 : 10);
+        setBatchSize(isMobile ? 10 : 20);  // Increased from 5/10
       } else {
         // Default fallback
-        setBatchSize(isMobile ? 15 : 30);
+        setBatchSize(isMobile ? 30 : 60);  // Increased from 15/30
       }
       
       // Adjust initial visible count based on connection type
@@ -63,7 +63,7 @@ export default function Home() {
       }
     } else {
       // Fallback if the Connection API is not available
-      setBatchSize(isMobile ? 15 : 30);
+      setBatchSize(isMobile ? 30 : 60);  // Increased from 15/30
       setInitialVisibleCount(isMobile ? 50 : 100);
     }
     
