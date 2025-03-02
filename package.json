@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "optimize-images": "node scripts/optimize-images.js"
   },
   "dependencies": {
     "lodash.debounce": "^4.0.8",

@@ -138,7 +138,7 @@ const ThumbnailImage = memo(({
 
   return (
     <div 
-      className="gallery-item cursor-pointer transition-transform hover:scale-150 hover:z-10"
+      className="gallery-item cursor-pointer transition-transform hover:scale-125 hover:z-10"
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}
       onMouseLeave={() => setMouseDownTime(null)} // Reset if mouse leaves the element

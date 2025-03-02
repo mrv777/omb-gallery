@@ -9027,12 +9027,13 @@ export function loadImages(): GalleryImage[] {
     imageObjects.forEach((imageObj) => {
       // Generate a smaller thumbnail path for the gallery view
       // Use Next.js Image component's built-in optimization
-      const thumbnailSize = 100; // Smaller thumbnail for the grid view
+      const thumbnailSize = 168; // Smaller thumbnail for the grid view
+      const filename = imageObj.filename.split('.')[0]; // Remove extension
 
       images.push({
         src: `/images/${color}/${imageObj.filename}`,
         // Use a smaller thumbnail for the grid view with lower quality
-        thumbnail: `/images/${color}/${imageObj.filename}?w=${thumbnailSize}&q=50`,
+        thumbnail: `/optimized-images/${color}/${filename}_${thumbnailSize}.webp`,
         thumbnailWidth: thumbnailSize,
         thumbnailHeight: thumbnailSize,
         color: color,
