@@ -2,12 +2,14 @@
 
 import { GalleryImage } from '@/lib/types';
 import ZoomableGallery from '@/components/ZoomableGallery';
+import ImagePreloader from '@/components/ImagePreloader';
 import { useEffect, useState } from 'react';
 import { loadImages } from '@/lib/imageLoader';
 
 export default function Home() {
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [preloading, setPreloading] = useState(false);
 
   useEffect(() => {
     try {
@@ -15,6 +17,7 @@ export default function Home() {
       const galleryImages = loadImages();
       setImages(galleryImages);
       setLoading(false);
+      setPreloading(true); // Start preloading images
     } catch (error) {
       console.error('Error loading images:', error);
       setLoading(false);
@@ -36,8 +39,13 @@ export default function Home() {
       });
       
       setImages(placeholderImages);
+      setPreloading(true); // Start preloading placeholder images
     }
   }, []);
+
+  const handlePreloadComplete = () => {
+    setPreloading(false);
+  };
   
   return (
     <main className="flex min-h-screen flex-col items-center justify-between p-0">
@@ -45,9 +53,15 @@ export default function Home() {
         <div className="flex items-center justify-center h-screen">
           <div className="text-center">
             <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite] dark:border-white dark:border-r-transparent"></div>
-            <p className="mt-2 dark:text-white">Loading gallery...</p>
+            <p className="mt-2 dark:text-white">Loading gallery metadata...</p>
           </div>
         </div>
+      ) : preloading ? (
+        <ImagePreloader 
+          images={images} 
+          onComplete={handlePreloadComplete} 
+          batchSize={20} // Process 20 images at a time
+        />
       ) : (
         <ZoomableGallery images={images} />
       )}
