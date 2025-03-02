@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  minimumCacheTTL: 2592000,
   images: {
     // Enable image optimization
     unoptimized: false,
@@ -10,6 +11,7 @@ const nextConfig = {
     formats: ['image/webp', 'image/avif'],
     // Set a reasonable limit for image dimensions
     minimumCacheTTL: 3600, // Cache optimized images for 1 hour
+    qualities: [50, 75, 100],
     dangerouslyAllowSVG: false,
     contentDispositionType: 'inline',
     remotePatterns: [

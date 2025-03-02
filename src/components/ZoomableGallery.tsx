@@ -150,7 +150,6 @@ const ThumbnailImage = memo(({
         <Image 
           src={image.thumbnail} 
           alt={image.caption || `Image ${index}`}
-          className="rounded-md"
           width={image.thumbnailWidth || 100}
           height={image.thumbnailHeight || 100}
           loading="lazy" // Explicitly set lazy loading
@@ -331,16 +330,23 @@ export default function ZoomableGallery({ images }: ZoomableGalleryProps) {
         // Calculate the appropriate number of columns based on image count
         let gridColsClass = "grid-cols-10"; // Default for < 50 images
         
-        if (filteredImages.length >= 500) {
+        if (filteredImages.length >= 405) {
           gridColsClass = "grid-cols-50";
-        } else if (filteredImages.length >= 400) {
+        } else if (filteredImages.length >= 360) {
+          gridColsClass = "grid-cols-45";
+        } else if (filteredImages.length >= 315) {
           gridColsClass = "grid-cols-40";
-        } else if (filteredImages.length >= 300) {
+        } else if (filteredImages.length >= 270) {
+          gridColsClass = "grid-cols-35";
+        } else if (filteredImages.length >= 225) {
           gridColsClass = "grid-cols-30";
-        } else if (filteredImages.length >= 100) {
+        } else if (filteredImages.length >= 180) {
+          gridColsClass = "grid-cols-25";
+        } else if (filteredImages.length >= 135) {
           gridColsClass = "grid-cols-20";
+        } else if (filteredImages.length >= 90) {
+          gridColsClass = "grid-cols-15";
         }
-        
         return (
           <TransformWrapper
             initialScale={4}
@@ -352,7 +358,7 @@ export default function ZoomableGallery({ images }: ZoomableGalleryProps) {
           >
             <TransformComponent wrapperStyle={{ width: '100%', height: '100vh' }}>
               <div className="grid-gallery-container">
-                <div className={`grid ${gridColsClass} gap-0.5 p-4`}>
+                <div className={`grid ${gridColsClass} gap-0 p-4`}>
                   {filteredImages.map((image, index) => (
                     <ThumbnailImage 
                       key={`${image.src}-${index}`}
