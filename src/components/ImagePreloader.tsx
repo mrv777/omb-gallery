@@ -168,12 +168,12 @@ export default function ImagePreloader({
         {/* Stats */}
         <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
           <div className="bg-white dark:bg-gray-800 p-2 rounded-md shadow">
-            <p className="text-gray-600 dark:text-gray-300">
+            <p className="text-gray-600 dark:text-gray-300 text-xs">
               {loadedCount} of {totalImages} images
             </p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-2 rounded-md shadow">
-            <p className="text-gray-600 dark:text-gray-300">
+            <p className="text-gray-600 dark:text-gray-300 text-xs">
               {timeElapsed}s elapsed
             </p>
           </div>
