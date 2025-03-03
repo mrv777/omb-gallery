@@ -167,7 +167,6 @@ interface ZoomableGalleryProps {
 }
 
 export default function ZoomableGallery({ images }: ZoomableGalleryProps) {
-  const { theme } = useTheme();
   const [currentImage, setCurrentImage] = useState<number>(-1);
   const [colorFilter, setColorFilter] = useState<ColorFilter>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -349,7 +348,7 @@ export default function ZoomableGallery({ images }: ZoomableGalleryProps) {
         }
         return (
           <TransformWrapper
-            initialScale={4}
+            initialScale={1}
             minScale={1}
             maxScale={10}
             wheel={{ step: 0.1 }}
