@@ -116,6 +116,7 @@ export function loadImages(): GalleryImage[] {
       { filename: "89945.jpg", description: "", tags: [] },
     ],
     blue: [
+      { filename: "964781.jpg", description: "", tags: [] },
       { filename: "965232.jpg", description: "", tags: [] },
       { filename: "965233.jpg", description: "", tags: [] },
       { filename: "965234.jpg", description: "", tags: [] },
