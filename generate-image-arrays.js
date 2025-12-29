@@ -1,18 +1,17 @@
-const fs = require('fs');
-const path = require('path');
-const prettier = require('prettier');
+const fs = require("fs");
+const path = require("path");
 
 // Path to the images directory
-const imagesDir = path.join(process.cwd(), 'public/images');
+const imagesDir = path.join(process.cwd(), "public/images");
 
 // Color folders to scan
-const colorFolders = ['red', 'blue', 'green', 'orange', 'black'];
+const colorFolders = ["red", "blue", "green", "orange", "black"];
 
-// Object to store image filenames by color
+// Object to store image data by color
 const imagesByColor = {};
 
 // Scan each color folder
-colorFolders.forEach(color => {
+colorFolders.forEach((color) => {
   const colorDir = path.join(imagesDir, color);
 
   // Check if the color directory exists
@@ -22,16 +21,16 @@ colorFolders.forEach(color => {
 
     // Filter for image files and sort them
     const imageFiles = files
-      .filter(file => {
+      .filter((file) => {
         const ext = path.extname(file).toLowerCase();
-        return ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
+        return [".jpg", ".jpeg", ".png", ".gif", ".webp"].includes(ext);
       })
       .sort(); // Sort filenames alphabetically
 
     // Transform into objects with filename and description
-    const imageObjects = imageFiles.map(filename => ({
+    const imageObjects = imageFiles.map((filename) => ({
       filename,
-      description: '', // Empty description field that can be populated later
+      description: "", // Empty description field that can be populated later
       tags: [], // Empty tags array
     }));
 
@@ -45,91 +44,18 @@ colorFolders.forEach(color => {
   }
 });
 
-// Generate the code for imageLoader.ts
-let code = `import { GalleryImage } from './types';
+// Ensure output directory exists
+fs.mkdirSync("src/data", { recursive: true });
 
-// This function returns a list of images for client-side use
-// Generated automatically by script
-export function loadImages(): GalleryImage[] {
-  const colorFolders = ['red', 'blue', 'green', 'orange', 'black'];
-  const images: GalleryImage[] = [];
-  
-  // Define all available images by color
-  const imagesByColor: Record<string, Array<{filename: string, description: string, tags: string[]}>> = {
-`;
+// Write the JSON file
+fs.writeFileSync(
+  "src/data/images.json",
+  JSON.stringify(imagesByColor, null, 2)
+);
 
-// Add each color's array to the code
-colorFolders.forEach(color => {
-  code += `    ${color}: [\n`;
-
-  // Split the array into chunks for better readability
-  const files = imagesByColor[color];
-  const chunkSize = 3;
-
-  for (let i = 0; i < files.length; i += chunkSize) {
-    const chunk = files.slice(i, i + chunkSize);
-    const line = chunk
-      .map(img => `{ filename: '${img.filename}', description: '${img.description}', tags: [] }`)
-      .join(', ');
-    code += `      ${line},\n`;
-  }
-
-  code += `    ],\n`;
-});
-
-code += `  };
-  
-  colorFolders.forEach(color => {
-    const imageObjects = imagesByColor[color];
-    
-    imageObjects.forEach(imageObj => {
-      // Generate a smaller thumbnail path for the gallery view
-      // Use Next.js Image component's built-in optimization
-      const thumbnailSize = 100; // Smaller thumbnail for the grid view
-      
-      images.push({
-        src: \`/images/\${color}/\${imageObj.filename}\`,
-        // Use a smaller thumbnail for the grid view with lower quality
-        thumbnail: \`/images/\${color}/\${imageObj.filename}?w=\${thumbnailSize}&q=50\`,
-        thumbnailWidth: thumbnailSize,
-        thumbnailHeight: thumbnailSize,
-        color: color,
-        caption: imageObj.description,
-        tags: imageObj.tags
-      });
-    });
-  });
-  
-  return images;
-}`;
-
-// Format the code with Prettier
-async function formatAndSaveCode() {
-  try {
-    // Get Prettier config
-    const prettierConfig = await prettier.resolveConfig(process.cwd());
-
-    // Format the code
-    const formattedCode = await prettier.format(code, {
-      ...prettierConfig,
-      parser: 'typescript',
-    });
-
-    // Write the formatted code to the correct file in the src/lib directory
-    fs.writeFileSync('src/lib/imageLoader.ts', formattedCode);
-    console.log('Generated and formatted code written to src/lib/imageLoader.ts');
-
-    // Also output to console
-    console.log('\nGenerated code sample (first few lines):');
-    console.log(formattedCode.split('\n').slice(0, 20).join('\n'));
-  } catch (error) {
-    console.error('Error formatting code:', error);
-
-    // Fallback to unformatted code if formatting fails
-    fs.writeFileSync('src/lib/imageLoader.ts', code);
-    console.log('Unformatted code written to src/lib/imageLoader.ts due to formatting error');
-  }
-}
-
-// Run the async function
-formatAndSaveCode();
+// Output summary
+const total = Object.values(imagesByColor).reduce(
+  (sum, arr) => sum + arr.length,
+  0
+);
+console.log(`\nGenerated src/data/images.json with ${total} images`);
