@@ -65,8 +65,9 @@ const VirtualRow = memo(function VirtualRow({
       style={{
         ...style,
         display: 'flex',
-        contain: 'strict',
+        contain: enableHover ? 'layout style' : 'strict',
         willChange: 'transform',
+        overflow: enableHover ? 'visible' : undefined,
       }}
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}

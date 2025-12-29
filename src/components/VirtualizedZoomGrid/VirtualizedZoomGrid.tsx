@@ -8,7 +8,6 @@ import ImageModal from '../ImageModal';
 import FilterControls from '../FilterControls';
 import ZoomGestureHandler from './ZoomGestureHandler';
 import VirtualRow from './VirtualRow';
-import ZoomControls from './ZoomControls';
 import { useZoomLevel } from './useZoomLevel';
 import { useGridDimensions } from './useGridDimensions';
 
@@ -20,6 +19,11 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
   // Modal state
   const [currentImage, setCurrentImage] = useState<number>(-1);
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Header visibility state
+  const [headerVisible, setHeaderVisible] = useState(true);
+  const lastScrollTop = useRef(0);
+  const scrollThreshold = 10; // Minimum scroll distance to trigger hide/show
 
   // Filter state
   const [colorFilter, setColorFilter] = useState<ColorFilter>('all');
@@ -102,9 +106,14 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
   const rowVirtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => cellSize,
+    estimateSize: useCallback(() => cellSize, [cellSize]),
     overscan,
   });
+
+  // Force virtualizer to recalculate when cellSize changes
+  useEffect(() => {
+    rowVirtualizer.measure();
+  }, [cellSize, rowVirtualizer]);
 
   // Reset scroll when filters change significantly
   useEffect(() => {
@@ -174,20 +183,72 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isModalOpen, handleMovePrev, handleMoveNext, handleClose, zoomIn, zoomOut]);
 
+  // Scroll handler for header visibility
+  const handleScroll = useCallback(() => {
+    const scrollElement = parentRef.current;
+    if (!scrollElement) return;
+
+    const currentScrollTop = scrollElement.scrollTop;
+    const scrollDelta = currentScrollTop - lastScrollTop.current;
+
+    // Show header when at the top
+    if (currentScrollTop <= 0) {
+      setHeaderVisible(true);
+    }
+    // Only trigger hide/show after passing threshold
+    else if (Math.abs(scrollDelta) > scrollThreshold) {
+      if (scrollDelta > 0) {
+        // Scrolling down - hide header
+        setHeaderVisible(false);
+      } else {
+        // Scrolling up - show header
+        setHeaderVisible(true);
+      }
+    }
+
+    lastScrollTop.current = currentScrollTop;
+  }, [scrollThreshold]);
+
+  // Attach scroll listener
+  useEffect(() => {
+    const scrollElement = parentRef.current;
+    if (!scrollElement) return;
+
+    scrollElement.addEventListener('scroll', handleScroll, { passive: true });
+    return () => scrollElement.removeEventListener('scroll', handleScroll);
+  }, [handleScroll]);
+
+  const headerHeight = 52;
+
   return (
-    <div className="gallery-container h-screen flex flex-col">
-      <FilterControls
-        colorFilter={colorFilter}
-        onColorFilterChange={setColorFilter}
-        searchQuery={searchQuery}
-        onSearchChange={handleSearchChange}
-      />
+    <div className="gallery-container h-screen flex flex-col relative">
+      <div
+        className={`header-wrapper fixed top-0 left-0 right-0 z-50 bg-white dark:bg-gray-900 transition-transform duration-300 ease-in-out ${
+          headerVisible ? 'translate-y-0' : '-translate-y-full'
+        }`}
+        style={{ height: headerHeight }}
+      >
+        <FilterControls
+          colorFilter={colorFilter}
+          onColorFilterChange={setColorFilter}
+          searchQuery={searchQuery}
+          onSearchChange={handleSearchChange}
+          columnCount={columnCount}
+          onZoomIn={zoomIn}
+          onZoomOut={zoomOut}
+          canZoomIn={canZoomIn}
+          canZoomOut={canZoomOut}
+        />
+      </div>
 
       <ZoomGestureHandler onZoom={handleZoomGesture}>
         <div
           ref={parentRef}
-          className="virtualized-grid-container flex-1 overflow-y-auto overflow-x-hidden"
-          style={{ height: 'calc(100vh - 80px)' }}
+          className="virtualized-grid-container flex-1 overflow-y-auto overflow-x-hidden transition-[margin-top] duration-300 ease-in-out"
+          style={{
+            height: '100vh',
+            marginTop: headerVisible ? headerHeight : 0,
+          }}
         >
           <div
             style={{
@@ -217,14 +278,6 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
           </div>
         </div>
       </ZoomGestureHandler>
-
-      <ZoomControls
-        columnCount={columnCount}
-        onZoomIn={zoomIn}
-        onZoomOut={zoomOut}
-        canZoomIn={canZoomIn}
-        canZoomOut={canZoomOut}
-      />
 
       {isModalOpen && (
         <ImageModal
