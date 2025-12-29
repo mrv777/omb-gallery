@@ -65,6 +65,7 @@ const VirtualRow = memo(function VirtualRow({
       style={{
         ...style,
         display: 'flex',
+        justifyContent: 'center',
         contain: enableHover ? 'layout style' : 'strict',
         willChange: 'transform',
         overflow: enableHover ? 'visible' : undefined,

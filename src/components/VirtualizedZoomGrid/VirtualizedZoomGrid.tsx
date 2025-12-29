@@ -90,8 +90,8 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     return filtered;
   }, [images, colorFilter, debouncedSearchQuery]);
 
-  // Calculate grid dimensions
-  const cellSize = containerWidth > 0 ? containerWidth / columnCount : 100;
+  // Calculate grid dimensions - use floor to avoid sub-pixel gaps between cells
+  const cellSize = containerWidth > 0 ? Math.floor(containerWidth / columnCount) : 100;
   const rowCount = Math.ceil(filteredImages.length / columnCount);
 
   // Dynamic overscan - fewer extra rows at high column counts to reduce DOM nodes
@@ -271,7 +271,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
                   left: 0,
                   width: '100%',
                   height: cellSize,
-                  transform: `translateY(${virtualRow.start}px)`,
+                  transform: `translateY(${virtualRow.index * cellSize}px)`,
                 }}
               />
             ))}
