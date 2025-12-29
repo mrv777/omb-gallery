@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual';
 import debounce from 'lodash.debounce';
 import { GalleryImage, ColorFilter } from '@/lib/types';
+import { useFavorites } from '@/lib/FavoritesContext';
 import ImageModal from '../ImageModal';
 import FilterControls from '../FilterControls';
 import ZoomGestureHandler from './ZoomGestureHandler';
@@ -29,6 +30,10 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
   const [colorFilter, setColorFilter] = useState<ColorFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+
+  // Favorites
+  const { isFavorite } = useFavorites();
 
   // Zoom state
   const {
@@ -87,8 +92,12 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
       });
     }
 
+    if (showFavoritesOnly) {
+      filtered = filtered.filter((img) => isFavorite(img.src));
+    }
+
     return filtered;
-  }, [images, colorFilter, debouncedSearchQuery]);
+  }, [images, colorFilter, debouncedSearchQuery, showFavoritesOnly, isFavorite]);
 
   // Calculate grid dimensions - use floor to avoid sub-pixel gaps between cells
   const cellSize = containerWidth > 0 ? Math.floor(containerWidth / columnCount) : 100;
@@ -218,7 +227,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     return () => scrollElement.removeEventListener('scroll', handleScroll);
   }, [handleScroll]);
 
-  const headerHeight = 52;
+  const headerHeight = 60;
 
   return (
     <div className="gallery-container h-screen flex flex-col relative">
@@ -238,6 +247,8 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
           onZoomOut={zoomOut}
           canZoomIn={canZoomIn}
           canZoomOut={canZoomOut}
+          showFavoritesOnly={showFavoritesOnly}
+          onToggleFavoritesOnly={() => setShowFavoritesOnly((prev) => !prev)}
         />
       </div>
 
