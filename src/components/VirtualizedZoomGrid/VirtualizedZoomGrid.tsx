@@ -65,9 +65,9 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     };
   }, [searchQuery, debouncedSetSearch]);
 
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(e.target.value);
-  };
+  }, []);
 
   // Filtered images
   const filteredImages = useMemo(() => {
@@ -137,6 +137,10 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
 
   const handleClose = useCallback(() => {
     setIsModalOpen(false);
+  }, []);
+
+  const handleToggleFavoritesOnly = useCallback(() => {
+    setShowFavoritesOnly((prev) => !prev);
   }, []);
 
   const handleMovePrev = useCallback(() => {
@@ -248,7 +252,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
           canZoomIn={canZoomIn}
           canZoomOut={canZoomOut}
           showFavoritesOnly={showFavoritesOnly}
-          onToggleFavoritesOnly={() => setShowFavoritesOnly((prev) => !prev)}
+          onToggleFavoritesOnly={handleToggleFavoritesOnly}
         />
       </div>
 
