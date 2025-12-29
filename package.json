@@ -12,6 +12,8 @@
     "optimize-images": "node scripts/optimize-images.js"
   },
   "dependencies": {
+    "@tanstack/react-virtual": "^3.13.13",
+    "@use-gesture/react": "^10.3.1",
     "lodash.debounce": "^4.0.8",
     "next": "^15.0.0",
     "react": "^18.2.0",

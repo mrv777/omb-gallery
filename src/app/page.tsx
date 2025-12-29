@@ -1,7 +1,7 @@
 "use client";
 
 import { GalleryImage } from '@/lib/types';
-import ZoomableGallery from '@/components/ZoomableGallery';
+import VirtualizedZoomGrid from '@/components/VirtualizedZoomGrid';
 import ImagePreloader from '@/components/ImagePreloader';
 import { useEffect, useState } from 'react';
 import { loadImages } from '@/lib/imageLoader';
@@ -129,7 +129,7 @@ export default function Home() {
           initialVisibleCount={initialVisibleCount}
         />
       ) : (
-        <ZoomableGallery images={images} />
+        <VirtualizedZoomGrid images={images} />
       )}
     </main>
   );

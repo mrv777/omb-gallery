@@ -5,7 +5,7 @@ const sharp = require('sharp');
 // Configuration
 const SOURCE_DIR = path.join(process.cwd(), 'public/images');
 const OUTPUT_DIR = path.join(process.cwd(), 'public/optimized-images');
-const THUMBNAIL_SIZES = [128];
+const THUMBNAIL_SIZES = [48, 128]; // 48px for high zoom-out, 128px for normal
 
 // Ensure output directory exists
 if (!fs.existsSync(OUTPUT_DIR)) {
