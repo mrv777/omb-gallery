@@ -7,32 +7,32 @@
     },
     {
       "filename": "103092.jpg",
-      "description": "",
+      "description": "Bitcoin symbol on head saying go back to your chain",
       "tags": []
     },
     {
       "filename": "103387.jpg",
-      "description": "",
+      "description": "Long dark hair smoking saying go back to your shit chain",
       "tags": []
     },
     {
       "filename": "103416.jpg",
-      "description": "",
+      "description": "Spiral hypnotic nose saying not your keys not your crypto with bitcoin tongue",
       "tags": []
     },
     {
       "filename": "111814.jpg",
-      "description": "",
+      "description": "Braids smoking saying it's 4th dimensional wealth",
       "tags": []
     },
     {
       "filename": "111815.jpg",
-      "description": "",
+      "description": "Devil horns smoking with flames saying burning sats is devil work",
       "tags": []
     },
     {
       "filename": "111816.jpg",
-      "description": "",
+      "description": "Hat saying I'm a block explorer",
       "tags": []
     },
     {
@@ -42,7 +42,7 @@
     },
     {
       "filename": "111914.jpg",
-      "description": "",
+      "description": "Wearing a hood and something dripping from nose saying that block itch",
       "tags": []
     },
     {
@@ -52,12 +52,12 @@
     },
     {
       "filename": "113090.jpg",
-      "description": "",
+      "description": "Messy hair with Bitcoin earring and goatee saying block blocks",
       "tags": []
     },
     {
       "filename": "122543.jpg",
-      "description": "",
+      "description": "Beard saying eat the pill, maybe a reference to Michael Saylor",
       "tags": []
     },
     {
@@ -67,12 +67,12 @@
     },
     {
       "filename": "122638.jpg",
-      "description": "",
+      "description": "Abstract artistic face saying what is so abstract about this",
       "tags": []
     },
     {
       "filename": "122857.jpg",
-      "description": "",
+      "description": "Alien with antenna on head saying ordinals are out of this world",
       "tags": []
     },
     {
@@ -89,12 +89,12 @@
     },
     {
       "filename": "123245.jpg",
-      "description": "",
+      "description": "Ninja like mask thinking buy a Ledger",
       "tags": []
     },
     {
       "filename": "123512.jpg",
-      "description": "",
+      "description": "Bald with beard saying I was early",
       "tags": []
     },
     {
@@ -136,7 +136,7 @@
     },
     {
       "filename": "123628.jpg",
-      "description": "",
+      "description": "Dark hair and glasses saying FUD?",
       "tags": []
     },
     {
@@ -151,7 +151,7 @@
     },
     {
       "filename": "124493.jpg",
-      "description": "",
+      "description": "Pinocchio reference saying OMB NGMI",
       "tags": []
     },
     {
@@ -282,8 +282,12 @@
     },
     {
       "filename": "196028.jpg",
-      "description": "",
-      "tags": []
+      "description": "Warren Buffett reference with glasses saying rat poison",
+      "tags": [
+        "person",
+        "portrait",
+        "real-life"
+      ]
     },
     {
       "filename": "196231.jpg",
@@ -374,8 +378,12 @@
     },
     {
       "filename": "207033.jpg",
-      "description": "",
-      "tags": []
+      "description": "Michael Saylor reference thinking encrypted energy",
+      "tags": [
+        "person",
+        "portrait",
+        "real-life"
+      ]
     },
     {
       "filename": "213924.jpg",
@@ -389,7 +397,7 @@
     },
     {
       "filename": "213963.jpg",
-      "description": "",
+      "description": "Mountain with Bitcoin flag saying Mt. Gone, reference to Mt. Gox",
       "tags": []
     },
     {
@@ -409,7 +417,7 @@
     },
     {
       "filename": "215848.jpg",
-      "description": "",
+      "description": "Dark hair smoking thinking Twitter blue?",
       "tags": []
     },
     {
@@ -434,7 +442,7 @@
     },
     {
       "filename": "233012.jpg",
-      "description": "",
+      "description": "Alien head smoking saying UTXOs?",
       "tags": []
     },
     {
@@ -509,7 +517,7 @@
     },
     {
       "filename": "255777.jpg",
-      "description": "",
+      "description": "Bitcoin B symbol as face saying LFG",
       "tags": []
     },
     {
@@ -519,7 +527,7 @@
     },
     {
       "filename": "489040.jpg",
-      "description": "",
+      "description": "Beard thinking Hell podcast, money",
       "tags": []
     }
   ],
