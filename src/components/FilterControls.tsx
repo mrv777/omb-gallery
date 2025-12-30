@@ -111,7 +111,7 @@ const FilterControls = memo(function FilterControls({
           placeholder="Search..."
           value={searchQuery}
           onChange={onSearchChange}
-          className="w-full max-w-md px-2 sm:px-4 py-1.5 sm:py-2 border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:border-gray-500 dark:focus:border-gray-400 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm"
+          className="w-full max-w-md px-2 sm:px-4 py-1.5 sm:py-2 border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:border-gray-500 dark:focus:border-gray-400 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-base sm:text-sm"
         />
       </div>
 
