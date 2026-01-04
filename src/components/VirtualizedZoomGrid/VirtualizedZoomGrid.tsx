@@ -103,12 +103,12 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
   const cellSize = containerWidth > 0 ? Math.floor(containerWidth / columnCount) : 100;
   const rowCount = Math.ceil(filteredImages.length / columnCount);
 
-  // Dynamic overscan - fewer extra rows at high column counts to reduce DOM nodes
+  // Dynamic overscan based on column count
   const overscan = useMemo(() => {
-    if (columnCount >= 40) return 2;
-    if (columnCount >= 25) return 3;
-    if (columnCount >= 15) return 4;
-    return 5;
+    if (columnCount >= 40) return 3;
+    if (columnCount >= 25) return 4;
+    if (columnCount >= 10) return 6;
+    return 8;
   }, [columnCount]);
 
   // Virtualizer

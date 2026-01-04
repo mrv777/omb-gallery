@@ -49,8 +49,14 @@ export default function ImagePreloader({
       return new Promise<void>((resolve) => {
         const img = new Image();
         img.src = src;
-        img.onload = () => {
+        img.onload = async () => {
           if (!cancelled) {
+            // Decode the image so it's ready to paint immediately on first scroll
+            try {
+              await img.decode();
+            } catch {
+              // Decode failed, but image is still loaded
+            }
             loadedImages++;
             setLoadedCount(loadedImages);
             setProgress(Math.floor((loadedImages / totalImages) * 100));
