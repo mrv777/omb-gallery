@@ -42,21 +42,32 @@ async function processImages() {
     console.log(`Processing ${imageFiles.length} images in ${color} folder...`);
     
     // Process each image
+    let skipped = 0;
     for (const imageFile of imageFiles) {
       const sourcePath = path.join(colorSourceDir, imageFile);
-      
+
       // Create original optimized version
       const outputFilename = path.parse(imageFile).name;
       const outputExt = '.webp'; // Convert all to WebP for better compression
-      
+
       try {
         // Create thumbnails
         for (const size of THUMBNAIL_SIZES) {
           const thumbnailPath = path.join(
-            colorOutputDir, 
+            colorOutputDir,
             `${outputFilename}_${size}${outputExt}`
           );
-          
+
+          // Skip if thumb already exists and is newer than the source.
+          if (fs.existsSync(thumbnailPath)) {
+            const srcStat = fs.statSync(sourcePath);
+            const outStat = fs.statSync(thumbnailPath);
+            if (outStat.mtimeMs >= srcStat.mtimeMs) {
+              skipped++;
+              continue;
+            }
+          }
+
           await sharp(sourcePath)
             .resize(size, size, { fit: 'inside' })
             .webp({ quality: 50 })
@@ -65,6 +76,9 @@ async function processImages() {
       } catch (error) {
         console.error(`Error processing ${sourcePath}:`, error);
       }
+    }
+    if (skipped > 0) {
+      console.log(`  (skipped ${skipped} up-to-date thumbnails)`);
     }
   }
   

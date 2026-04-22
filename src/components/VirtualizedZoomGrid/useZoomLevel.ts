@@ -45,18 +45,12 @@ export function useZoomLevel() {
     handleZoomGesture(-1, true);
   }, [handleZoomGesture]);
 
-  const resetZoom = useCallback(() => {
-    setZoomIndex(DEFAULT_ZOOM_INDEX);
-    accumulatedDelta.current = 0;
-  }, []);
-
   return {
     zoomIndex,
     columnCount: ZOOM_LEVELS[zoomIndex].columns,
     handleZoomGesture,
     zoomIn,
     zoomOut,
-    resetZoom,
     canZoomIn: zoomIndex > MIN_ZOOM_INDEX,
     canZoomOut: zoomIndex < MAX_ZOOM_INDEX,
   };
