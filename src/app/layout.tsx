@@ -1,14 +1,25 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter } from 'next/font/google';
+import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
-import { ThemeProvider } from '@/lib/ThemeContext';
 import { FavoritesProvider } from '@/lib/FavoritesContext';
 
-const inter = Inter({ subsets: ['latin'] });
+const sans = Inter({
+  subsets: ['latin'],
+  variable: '--font-sans',
+  weight: ['400'],
+  display: 'swap',
+});
+
+const mono = JetBrains_Mono({
+  subsets: ['latin'],
+  variable: '--font-mono',
+  weight: ['400', '500'],
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
-  title: 'OMB Gallery',
-  description: 'A zoomable gallery of OMB images',
+  title: 'OMB Archive',
+  description: 'The Ordinal Maxi Biz archive.',
   icons: {
     icon: [
       { url: '/favicon-16.png', sizes: '16x16', type: 'image/png' },
@@ -22,6 +33,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  themeColor: '#000000',
 };
 
 export default function RootLayout({
@@ -30,42 +42,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        {/* Inline script to apply theme before page renders */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              (function() {
-                try {
-                  // Check localStorage for theme
-                  const storedTheme = localStorage.getItem('theme');
-                  
-                  // Check system preference
-                  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-                  
-                  // Apply theme based on stored preference or system preference
-                  if (storedTheme === 'dark' || (!storedTheme && prefersDark)) {
-                    document.documentElement.classList.add('dark');
-                  } else {
-                    document.documentElement.classList.remove('dark');
-                  }
-                } catch (e) {
-                  // Fail silently if localStorage is not available
-                  console.error('Error applying theme:', e);
-                }
-              })();
-            `,
-          }}
-        />
-      </head>
-      <body className={`${inter.className} transition-colors duration-300`}>
-        <ThemeProvider>
-          <FavoritesProvider>
-            {children}
-          </FavoritesProvider>
-        </ThemeProvider>
+    <html lang="en" className={`${sans.variable} ${mono.variable}`}>
+      <body className="font-sans bg-ink-0 text-bone">
+        <FavoritesProvider>{children}</FavoritesProvider>
       </body>
     </html>
   );
-} 
+}

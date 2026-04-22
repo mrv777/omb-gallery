@@ -10,13 +10,13 @@ interface ImagePreloaderProps {
   initialVisibleCount?: number;
 }
 
-const TOTAL_SEGMENTS = 20;
+const BAR_SEGMENTS = 24;
 
 export default function ImagePreloader({
   images,
   onComplete,
   batchSize: _batchSize = 10,
-  initialVisibleCount = 100
+  initialVisibleCount = 100,
 }: ImagePreloaderProps) {
   const [progress, setProgress] = useState(0);
   const [loadedCount, setLoadedCount] = useState(0);
@@ -24,8 +24,9 @@ export default function ImagePreloader({
   const [timeElapsed, setTimeElapsed] = useState(0);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
 
-  const filledSegments = useMemo(() => {
-    return Math.floor((progress / 100) * TOTAL_SEGMENTS);
+  const bar = useMemo(() => {
+    const filled = Math.floor((progress / 100) * BAR_SEGMENTS);
+    return '█'.repeat(filled) + '░'.repeat(BAR_SEGMENTS - filled);
   }, [progress]);
 
   useEffect(() => {
@@ -92,49 +93,38 @@ export default function ImagePreloader({
     };
   }, [images, onComplete, preloadCount]);
 
-  const handleSkip = () => {
-    onComplete();
-  };
-
-  const showButton = timeElapsed > 3 || initialLoadComplete;
+  const showSkip = timeElapsed > 3 && !initialLoadComplete;
 
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[rgb(20,20,30)]">
-      <div className="text-center max-w-md w-full px-4">
-        <h2 className="text-xl font-medium mb-8 text-white">
-          Loading Gallery
-        </h2>
-
-        {/* Segmented progress bar */}
-        <div className="flex gap-1 justify-center mb-4">
-          {Array.from({ length: TOTAL_SEGMENTS }).map((_, i) => (
-            <div
-              key={i}
-              className={`w-3 h-3 transition-colors duration-150 ${
-                i < filledSegments
-                  ? 'bg-white'
-                  : 'bg-gray-800 border border-gray-700'
-              }`}
-            />
-          ))}
+    <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-ink-0 text-bone font-mono">
+      <div className="text-center px-4">
+        <div className="text-[11px] tracking-[0.24em] text-bone-dim uppercase mb-6">
+          omb archive / loading
         </div>
 
-        {/* Count */}
-        <p className="text-gray-400 text-sm font-mono">
-          {loadedCount} / {preloadCount}
-        </p>
+        <div className="text-base tracking-[0.12em] text-bone">
+          <span className="text-bone-dim">[</span>
+          {bar}
+          <span className="text-bone-dim">]</span>
+          <span className="ml-3 tabular-nums text-bone-dim">
+            {String(progress).padStart(3, ' ')}%
+          </span>
+        </div>
 
-        {/* Ghost button */}
-        {showButton && (
+        <div className="mt-4 text-[11px] tracking-[0.16em] text-bone-dim uppercase tabular-nums">
+          loaded {loadedCount}/{preloadCount}
+        </div>
+
+        {showSkip && (
           <button
-            onClick={handleSkip}
-            className="mt-8 px-6 py-2 border border-white text-white text-sm
-                       hover:bg-white hover:text-black transition-colors duration-200"
+            type="button"
+            onClick={onComplete}
+            className="mt-10 text-[11px] tracking-[0.2em] uppercase text-bone-dim hover:text-bone underline underline-offset-4"
           >
-            {initialLoadComplete ? "Continue" : "Skip"}
+            [ skip ]
           </button>
         )}
       </div>
     </div>
   );
-} 
+}

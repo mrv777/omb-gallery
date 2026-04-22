@@ -12,6 +12,11 @@ function getThumbnailUrl(originalThumbnail: string, cellSize: number): string {
   return originalThumbnail;
 }
 
+function inscriptionId(src: string): string {
+  const file = src.split('/').pop() ?? '';
+  return file.replace(/\.[^./]+$/, '');
+}
+
 interface VirtualRowProps {
   rowIndex: number;
   images: GalleryImage[];
@@ -21,97 +26,109 @@ interface VirtualRowProps {
   style: React.CSSProperties;
 }
 
-const VirtualRow = memo(function VirtualRow({
-  rowIndex,
-  images,
-  columnCount,
-  cellSize,
-  onImageClick,
-  style,
-}: VirtualRowProps) {
-  const startIndex = rowIndex * columnCount;
-  const endIndex = Math.min(startIndex + columnCount, images.length);
-  const rowImages = images.slice(startIndex, endIndex);
-  const mouseDownTime = useRef<number>(0);
-  const mouseDownIndex = useRef<number>(-1);
+const VirtualRow = memo(
+  function VirtualRow({
+    rowIndex,
+    images,
+    columnCount,
+    cellSize,
+    onImageClick,
+    style,
+  }: VirtualRowProps) {
+    const startIndex = rowIndex * columnCount;
+    const endIndex = Math.min(startIndex + columnCount, images.length);
+    const rowImages = images.slice(startIndex, endIndex);
+    const mouseDownTime = useRef<number>(0);
+    const mouseDownIndex = useRef<number>(-1);
 
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    const target = e.target as HTMLElement;
-    const cell = target.closest('[data-index]') as HTMLElement;
-    if (cell) {
-      mouseDownTime.current = Date.now();
-      mouseDownIndex.current = parseInt(cell.dataset.index || '-1', 10);
-    }
-  }, []);
-
-  const handleMouseUp = useCallback((e: React.MouseEvent) => {
-    const target = e.target as HTMLElement;
-    const cell = target.closest('[data-index]') as HTMLElement;
-    if (cell && mouseDownTime.current > 0) {
-      const clickDuration = Date.now() - mouseDownTime.current;
-      const index = parseInt(cell.dataset.index || '-1', 10);
-      if (clickDuration < 300 && index === mouseDownIndex.current && index >= 0) {
-        onImageClick(index);
+    const handleMouseDown = useCallback((e: React.MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const cell = target.closest('[data-index]') as HTMLElement;
+      if (cell) {
+        mouseDownTime.current = Date.now();
+        mouseDownIndex.current = parseInt(cell.dataset.index || '-1', 10);
       }
-    }
-    mouseDownTime.current = 0;
-    mouseDownIndex.current = -1;
-  }, [onImageClick]);
+    }, []);
 
-  const enableHover = columnCount <= 20;
+    const handleMouseUp = useCallback(
+      (e: React.MouseEvent) => {
+        const target = e.target as HTMLElement;
+        const cell = target.closest('[data-index]') as HTMLElement;
+        if (cell && mouseDownTime.current > 0) {
+          const clickDuration = Date.now() - mouseDownTime.current;
+          const index = parseInt(cell.dataset.index || '-1', 10);
+          if (clickDuration < 300 && index === mouseDownIndex.current && index >= 0) {
+            onImageClick(index);
+          }
+        }
+        mouseDownTime.current = 0;
+        mouseDownIndex.current = -1;
+      },
+      [onImageClick]
+    );
 
-  return (
-    <div
-      style={{
-        ...style,
-        display: 'flex',
-        justifyContent: 'center',
-        contain: enableHover ? 'layout style' : 'strict',
-        willChange: 'transform',
-        overflow: enableHover ? 'visible' : undefined,
-      }}
-      onMouseDown={handleMouseDown}
-      onMouseUp={handleMouseUp}
-    >
-      {rowImages.map((image, colIndex) => {
-        const globalIndex = startIndex + colIndex;
-        const thumbnailUrl = getThumbnailUrl(image.thumbnail, cellSize);
+    // Labels only read well at mid-close zoom; same threshold gates the
+    // hairline separator so it doesn't turn into visual noise at bird's-eye.
+    const enableHover = columnCount <= 20;
+    const cellShadow = enableHover ? 'inset 0 0 0 1px var(--ink-2)' : undefined;
 
-        return (
-          <div
-            key={globalIndex}
-            data-index={globalIndex}
-            className={enableHover ? 'grid-cell-hover' : undefined}
-            style={{
-              width: cellSize,
-              height: cellSize,
-              flexShrink: 0,
-              backgroundImage: `url(${thumbnailUrl})`,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-              cursor: 'pointer',
-            }}
-          />
-        );
-      })}
-      {rowImages.length < columnCount &&
-        Array(columnCount - rowImages.length)
-          .fill(null)
-          .map((_, i) => (
+    return (
+      <div
+        style={{
+          ...style,
+          display: 'flex',
+          justifyContent: 'center',
+          contain: enableHover ? 'layout style' : 'strict',
+          willChange: 'transform',
+          overflow: 'hidden',
+        }}
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
+      >
+        {rowImages.map((image, colIndex) => {
+          const globalIndex = startIndex + colIndex;
+          const thumbnailUrl = getThumbnailUrl(image.thumbnail, cellSize);
+          const label = enableHover ? `#${inscriptionId(image.src)}` : undefined;
+
+          return (
             <div
-              key={`empty-${i}`}
-              style={{ width: cellSize, height: cellSize, flexShrink: 0 }}
+              key={globalIndex}
+              data-index={globalIndex}
+              data-label={label}
+              className={enableHover ? 'grid-cell-hover' : undefined}
+              style={{
+                width: cellSize,
+                height: cellSize,
+                flexShrink: 0,
+                backgroundImage: `url(${thumbnailUrl})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                cursor: 'pointer',
+                boxShadow: cellShadow,
+              }}
             />
-          ))}
-    </div>
-  );
-}, (prevProps, nextProps) => {
-  return (
-    prevProps.rowIndex === nextProps.rowIndex &&
-    prevProps.columnCount === nextProps.columnCount &&
-    prevProps.cellSize === nextProps.cellSize &&
-    prevProps.images === nextProps.images
-  );
-});
+          );
+        })}
+        {rowImages.length < columnCount &&
+          Array(columnCount - rowImages.length)
+            .fill(null)
+            .map((_, i) => (
+              <div
+                key={`empty-${i}`}
+                style={{ width: cellSize, height: cellSize, flexShrink: 0 }}
+              />
+            ))}
+      </div>
+    );
+  },
+  (prevProps, nextProps) => {
+    return (
+      prevProps.rowIndex === nextProps.rowIndex &&
+      prevProps.columnCount === nextProps.columnCount &&
+      prevProps.cellSize === nextProps.cellSize &&
+      prevProps.images === nextProps.images
+    );
+  }
+);
 
 export default VirtualRow;
