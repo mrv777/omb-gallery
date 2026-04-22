@@ -69,35 +69,27 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     setSearchQuery(e.target.value);
   }, []);
 
-  // Filtered images
-  const filteredImages = useMemo(() => {
+  // Filtered images — split so isFavorite only influences the favorites-only
+  // branch. Toggling a heart with no filters active keeps filteredImages
+  // referentially equal, letting VirtualRow.memo skip re-renders.
+  const baseFiltered = useMemo(() => {
     let filtered =
       colorFilter === 'all'
         ? images
         : images.filter((img) => img.color === colorFilter);
 
     if (debouncedSearchQuery.trim() !== '') {
-      const searchLower = debouncedSearchQuery.toLowerCase();
-      filtered = filtered.filter((img) => {
-        const filename = img.src.split('/').pop() || '';
-        const description = img.caption || '';
-        const tags = img.tags || [];
-        const tagString = tags.join(' ').toLowerCase();
-
-        return (
-          filename.toLowerCase().includes(searchLower) ||
-          description.toLowerCase().includes(searchLower) ||
-          tagString.includes(searchLower)
-        );
-      });
-    }
-
-    if (showFavoritesOnly) {
-      filtered = filtered.filter((img) => isFavorite(img.src));
+      const q = debouncedSearchQuery.toLowerCase();
+      filtered = filtered.filter((img) => img.searchText.includes(q));
     }
 
     return filtered;
-  }, [images, colorFilter, debouncedSearchQuery, showFavoritesOnly, isFavorite]);
+  }, [images, colorFilter, debouncedSearchQuery]);
+
+  const filteredImages = useMemo(() => {
+    if (!showFavoritesOnly) return baseFiltered;
+    return baseFiltered.filter((img) => isFavorite(img.src));
+  }, [baseFiltered, showFavoritesOnly, isFavorite]);
 
   // Calculate grid dimensions - use floor to avoid sub-pixel gaps between cells
   const cellSize = containerWidth > 0 ? Math.floor(containerWidth / columnCount) : 100;

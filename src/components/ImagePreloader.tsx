@@ -15,12 +15,12 @@ const TOTAL_SEGMENTS = 20;
 export default function ImagePreloader({
   images,
   onComplete,
-  batchSize = 10,
+  batchSize: _batchSize = 10,
   initialVisibleCount = 100
 }: ImagePreloaderProps) {
   const [progress, setProgress] = useState(0);
   const [loadedCount, setLoadedCount] = useState(0);
-  const totalImages = images.length;
+  const preloadCount = Math.min(initialVisibleCount, images.length);
   const [timeElapsed, setTimeElapsed] = useState(0);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
 
@@ -48,66 +48,49 @@ export default function ImagePreloader({
     const preloadImage = (src: string) => {
       return new Promise<void>((resolve) => {
         const img = new Image();
-        img.src = src;
+        const finish = () => {
+          img.onload = null;
+          img.onerror = null;
+          if (!cancelled) {
+            loadedImages++;
+            setLoadedCount(loadedImages);
+            setProgress(Math.floor((loadedImages / preloadCount) * 100));
+          }
+          resolve();
+        };
         img.onload = async () => {
-          if (!cancelled) {
-            // Decode the image so it's ready to paint immediately on first scroll
-            try {
-              await img.decode();
-            } catch {
-              // Decode failed, but image is still loaded
-            }
-            loadedImages++;
-            setLoadedCount(loadedImages);
-            setProgress(Math.floor((loadedImages / totalImages) * 100));
-            resolve();
+          // Decode so the first-viewport cells paint without a decode stall
+          try {
+            await img.decode();
+          } catch {
+            // Decode failed, but the image bits are still cached
           }
+          finish();
         };
-        img.onerror = () => {
-          if (!cancelled) {
-            loadedImages++;
-            setLoadedCount(loadedImages);
-            setProgress(Math.floor((loadedImages / totalImages) * 100));
-            resolve();
-          }
-        };
+        img.onerror = finish;
+        img.src = src;
       });
     };
 
-    const preloadAllImages = async () => {
-      const initialVisibleImages = images.slice(0, Math.min(initialVisibleCount, images.length));
-      const remainingImages = images.slice(Math.min(initialVisibleCount, images.length));
+    const preloadInitialBatch = async () => {
+      const initial = images.slice(0, preloadCount);
 
-      const initialBatchPromises = initialVisibleImages.map(image => preloadImage(image.thumbnail));
-      await Promise.all(initialBatchPromises);
+      await Promise.all(initial.map((image) => preloadImage(image.thumbnail)));
 
       if (!cancelled) {
         setInitialLoadComplete(true);
-      }
-
-      if (cancelled) return;
-
-      for (let i = 0; i < remainingImages.length; i += batchSize) {
-        if (cancelled) break;
-
-        const batch = remainingImages.slice(i, i + batchSize);
-        const batchPromises = batch.map(image => preloadImage(image.thumbnail));
-        await Promise.all(batchPromises);
-      }
-
-      if (!cancelled) {
         clearInterval(timer);
         onComplete();
       }
     };
 
-    preloadAllImages();
+    preloadInitialBatch();
 
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [images, onComplete, totalImages, batchSize, initialVisibleCount]);
+  }, [images, onComplete, preloadCount]);
 
   const handleSkip = () => {
     onComplete();
@@ -138,7 +121,7 @@ export default function ImagePreloader({
 
         {/* Count */}
         <p className="text-gray-400 text-sm font-mono">
-          {loadedCount} / {totalImages}
+          {loadedCount} / {preloadCount}
         </p>
 
         {/* Ghost button */}
