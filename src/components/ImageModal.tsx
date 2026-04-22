@@ -1,6 +1,6 @@
 "use client";
 
-import React, { memo } from 'react';
+import React, { memo, useEffect } from 'react';
 import Image from 'next/image';
 import { GalleryImage } from '@/lib/types';
 import { useFavorites } from '@/lib/FavoritesContext';
@@ -34,6 +34,32 @@ const ImageModal = memo(function ImageModal({
   onNext,
 }: ImageModalProps) {
   const { isFavorite, toggleFavorite } = useFavorites();
+
+  // Warm the browser cache for the adjacent pieces so arrow-key nav is
+  // instant. Effect runs after paint, so it doesn't starve the current
+  // image's initial load. Wraps at the ends of the list.
+  useEffect(() => {
+    if (images.length < 2 || currentImage < 0) return;
+    const len = images.length;
+    const neighbors = [
+      images[(currentImage - 1 + len) % len],
+      images[(currentImage + 1) % len],
+    ];
+    const loaders: HTMLImageElement[] = [];
+    for (const neighbor of neighbors) {
+      if (!neighbor || neighbor === images[currentImage]) continue;
+      const img = new window.Image();
+      img.decoding = 'async';
+      img.src = neighbor.src;
+      loaders.push(img);
+    }
+    return () => {
+      for (const img of loaders) {
+        img.onload = null;
+        img.onerror = null;
+      }
+    };
+  }, [currentImage, images]);
 
   if (images.length === 0 || currentImage < 0) {
     return null;
