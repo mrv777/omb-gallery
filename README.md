@@ -39,14 +39,14 @@ A zoomable gallery for showcasing OMB images, built with Next.js 15, Next.js Ima
    npm install
    ```
 
-3. Copy images to the public folder:
+3. Generate optimized thumbnails from `public/images/`:
    ```bash
-   node scripts/copy-images.js
+   pnpm run optimize-images
    ```
 
 4. Run the development server:
    ```bash
-   npm run dev
+   pnpm dev
    ```
 
 5. Open [http://localhost:3000](http://localhost:3000) in your browser to see the gallery.

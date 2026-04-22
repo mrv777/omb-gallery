@@ -16,6 +16,7 @@ body {
   color: rgb(var(--foreground-rgb));
   background: rgb(var(--background-rgb));
   overflow: hidden;
+  overscroll-behavior: none;
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
@@ -26,22 +27,20 @@ body {
 }
 
 .filter-controls {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  z-index: 50;
-  background-color: rgba(255, 255, 255, 0.8);
-  border-radius: 8px;
-  padding: 8px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-  transition: opacity 0.3s ease, transform 0.3s ease;
-  opacity: 0.5;
-  transform: translateY(0);
+  background-color: rgba(255, 255, 255, 0.98);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  padding: 8px 12px;
 }
 
-.filter-controls:hover {
-  opacity: 1;
-  transform: translateY(-2px);
+@media (min-width: 640px) {
+  .filter-controls {
+    padding: 12px 16px;
+  }
+}
+
+.dark .filter-controls {
+  background-color: rgba(20, 20, 30, 0.98);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .grid-gallery-container {
@@ -80,28 +79,46 @@ body {
   opacity: 1;
 } 
 
-/* Custom grid columns */
-.grid-cols-15 {
-  grid-template-columns: repeat(15, minmax(0, 1fr));
+/* Virtualized grid styles */
+.virtualized-grid-container {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 100, 100, 0.5) transparent;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 500px;
 }
-.grid-cols-20 {
-  grid-template-columns: repeat(20, minmax(0, 1fr));
+
+.virtualized-grid-container::-webkit-scrollbar {
+  width: 8px;
 }
-.grid-cols-25 {
-  grid-template-columns: repeat(25, minmax(0, 1fr));
+
+.virtualized-grid-container::-webkit-scrollbar-track {
+  background: transparent;
 }
-.grid-cols-30 {
-  grid-template-columns: repeat(30, minmax(0, 1fr));
+
+.virtualized-grid-container::-webkit-scrollbar-thumb {
+  background-color: rgba(100, 100, 100, 0.5);
+  border-radius: 4px;
 }
-.grid-cols-35 {
-  grid-template-columns: repeat(35, minmax(0, 1fr));
+
+.virtualized-grid-container::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(100, 100, 100, 0.7);
 }
-.grid-cols-40 {
-  grid-template-columns: repeat(40, minmax(0, 1fr));
+
+/* Grid cell hover effect - only applied at low column counts */
+.grid-cell-hover {
+  transition: transform 0.15s ease-out, box-shadow 0.15s ease-out;
+  position: relative;
+  z-index: 1;
 }
-.grid-cols-45 {
-  grid-template-columns: repeat(45, minmax(0, 1fr));
+
+.grid-cell-hover:hover {
+  transform: scale(1.3);
+  z-index: 100;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
-.grid-cols-50 {
-  grid-template-columns: repeat(50, minmax(0, 1fr));
+
+/* Ensure the row containing hovered cell appears on top */
+div:has(> .grid-cell-hover:hover) {
+  z-index: 50 !important;
 }

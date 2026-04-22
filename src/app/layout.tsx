@@ -1,8 +1,8 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { ThemeProvider } from '@/lib/ThemeContext';
-import ThemeToggle from '@/components/ThemeToggle';
+import { FavoritesProvider } from '@/lib/FavoritesContext';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -15,6 +15,13 @@ export const metadata: Metadata = {
       { url: '/favicon-32.png', sizes: '32x32', type: 'image/png' },
     ],
   },
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default function RootLayout({
@@ -54,8 +61,9 @@ export default function RootLayout({
       </head>
       <body className={`${inter.className} transition-colors duration-300`}>
         <ThemeProvider>
-          <ThemeToggle />
-          {children}
+          <FavoritesProvider>
+            {children}
+          </FavoritesProvider>
         </ThemeProvider>
       </body>
     </html>

@@ -10,24 +10,23 @@ interface ImagePreloaderProps {
   initialVisibleCount?: number;
 }
 
-export default function ImagePreloader({ 
-  images, 
-  onComplete, 
-  batchSize = 10, // Default batch size
-  initialVisibleCount = 100 // Default number of initially visible images
+const TOTAL_SEGMENTS = 20;
+
+export default function ImagePreloader({
+  images,
+  onComplete,
+  batchSize: _batchSize = 10,
+  initialVisibleCount = 100
 }: ImagePreloaderProps) {
   const [progress, setProgress] = useState(0);
   const [loadedCount, setLoadedCount] = useState(0);
-  const totalImages = images.length;
+  const preloadCount = Math.min(initialVisibleCount, images.length);
   const [timeElapsed, setTimeElapsed] = useState(0);
-  const [loadingSpeed, setLoadingSpeed] = useState(0); // images per second
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
 
-  // Calculate estimated time remaining
-  const estimatedTimeRemaining = useMemo(() => {
-    if (loadingSpeed <= 0 || loadedCount >= totalImages) return 0;
-    return Math.ceil((totalImages - loadedCount) / loadingSpeed);
-  }, [loadingSpeed, loadedCount, totalImages]);
+  const filledSegments = useMemo(() => {
+    return Math.floor((progress / 100) * TOTAL_SEGMENTS);
+  }, [progress]);
 
   useEffect(() => {
     if (images.length === 0) {
@@ -37,162 +36,102 @@ export default function ImagePreloader({
 
     let loadedImages = 0;
     let cancelled = false;
-    let lastLoadedCount = 0;
-    let lastUpdateTime = Date.now();
-    
-    // Track elapsed time
+
     const startTime = Date.now();
     const timer = setInterval(() => {
       if (!cancelled) {
-        const currentTime = Date.now();
-        const elapsedSec = Math.floor((currentTime - startTime) / 1000);
+        const elapsedSec = Math.floor((Date.now() - startTime) / 1000);
         setTimeElapsed(elapsedSec);
-        
-        // Calculate loading speed every 2 seconds
-        if (elapsedSec % 2 === 0 && elapsedSec > 0) {
-          const imagesLoadedSinceLastUpdate = loadedImages - lastLoadedCount;
-          const timeSinceLastUpdate = (currentTime - lastUpdateTime) / 1000;
-          
-          if (timeSinceLastUpdate > 0) {
-            const currentSpeed = imagesLoadedSinceLastUpdate / timeSinceLastUpdate;
-            setLoadingSpeed(prev => prev === 0 ? currentSpeed : (prev * 0.7 + currentSpeed * 0.3));
-          }
-          
-          lastLoadedCount = loadedImages;
-          lastUpdateTime = currentTime;
-        }
       }
     }, 1000);
 
     const preloadImage = (src: string) => {
       return new Promise<void>((resolve) => {
         const img = new Image();
+        const finish = () => {
+          img.onload = null;
+          img.onerror = null;
+          if (!cancelled) {
+            loadedImages++;
+            setLoadedCount(loadedImages);
+            setProgress(Math.floor((loadedImages / preloadCount) * 100));
+          }
+          resolve();
+        };
+        img.onload = async () => {
+          // Decode so the first-viewport cells paint without a decode stall
+          try {
+            await img.decode();
+          } catch {
+            // Decode failed, but the image bits are still cached
+          }
+          finish();
+        };
+        img.onerror = finish;
         img.src = src;
-        img.onload = () => {
-          if (!cancelled) {
-            loadedImages++;
-            setLoadedCount(loadedImages);
-            setProgress(Math.floor((loadedImages / totalImages) * 100));
-            resolve();
-          }
-        };
-        img.onerror = () => {
-          if (!cancelled) {
-            loadedImages++;
-            setLoadedCount(loadedImages);
-            setProgress(Math.floor((loadedImages / totalImages) * 100));
-            resolve();
-          }
-        };
       });
     };
 
-    const preloadAllImages = async () => {
-      // Prioritize loading initially visible images first
-      const initialVisibleImages = images.slice(0, Math.min(initialVisibleCount, images.length));
-      const remainingImages = images.slice(Math.min(initialVisibleCount, images.length));
-      
-      // First load the initially visible images
-      const initialBatchPromises = initialVisibleImages.map(image => preloadImage(image.thumbnail));
-      await Promise.all(initialBatchPromises);
-      
-      // Mark initial load as complete
+    const preloadInitialBatch = async () => {
+      const initial = images.slice(0, preloadCount);
+
+      await Promise.all(initial.map((image) => preloadImage(image.thumbnail)));
+
       if (!cancelled) {
         setInitialLoadComplete(true);
-      }
-      
-      // If user has already skipped or all images are loaded, don't continue
-      if (cancelled) return;
-      
-      // Then load the remaining images in batches
-      for (let i = 0; i < remainingImages.length; i += batchSize) {
-        if (cancelled) break;
-        
-        const batch = remainingImages.slice(i, i + batchSize);
-        const batchPromises = batch.map(image => preloadImage(image.thumbnail));
-        
-        // Wait for the current batch to complete before moving to the next
-        await Promise.all(batchPromises);
-      }
-      
-      if (!cancelled) {
-        // All images are preloaded, notify the parent component
         clearInterval(timer);
         onComplete();
       }
     };
 
-    preloadAllImages();
+    preloadInitialBatch();
 
-    // Cleanup function
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [images, onComplete, totalImages, batchSize, initialVisibleCount]);
+  }, [images, onComplete, preloadCount]);
 
   const handleSkip = () => {
     onComplete();
   };
 
-  // Determine progress bar color based on progress
-  const progressBarColor = useMemo(() => {
-    if (progress < 30) return 'bg-red-500';
-    if (progress < 70) return 'bg-yellow-500';
-    return 'bg-green-500';
-  }, [progress]);
+  const showButton = timeElapsed > 3 || initialLoadComplete;
 
   return (
-    <div className="flex flex-col items-center justify-center h-screen">
+    <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[rgb(20,20,30)]">
       <div className="text-center max-w-md w-full px-4">
-        <h2 className="text-xl font-semibold mb-4 dark:text-white">
-          {initialLoadComplete 
-            ? "Optimizing Gallery Experience..." 
-            : "Loading Essential Images..."}
+        <h2 className="text-xl font-medium mb-8 text-white">
+          Loading Gallery
         </h2>
-        
-        {/* Progress bar */}
-        <div className="w-full h-6 bg-gray-200 rounded-full overflow-hidden dark:bg-gray-700 shadow-inner">
-          <div 
-            className={`h-full ${progressBarColor} transition-all duration-300 ease-out relative`}
-            style={{ width: `${progress}%` }}
-          >
-            {progress > 10 && (
-              <span className="absolute inset-0 flex items-center justify-center text-xs font-medium text-white drop-shadow-md">
-                {progress}%
-              </span>
-            )}
-          </div>
+
+        {/* Segmented progress bar */}
+        <div className="flex gap-1 justify-center mb-4">
+          {Array.from({ length: TOTAL_SEGMENTS }).map((_, i) => (
+            <div
+              key={i}
+              className={`w-3 h-3 transition-colors duration-150 ${
+                i < filledSegments
+                  ? 'bg-white'
+                  : 'bg-gray-800 border border-gray-700'
+              }`}
+            />
+          ))}
         </div>
-        
-        {/* Stats */}
-        <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
-          <div className="bg-white dark:bg-gray-800 p-2 rounded-md shadow">
-            <p className="text-gray-600 dark:text-gray-300 text-xs">
-              {loadedCount} of {totalImages} images
-            </p>
-          </div>
-          <div className="bg-white dark:bg-gray-800 p-2 rounded-md shadow">
-            <p className="text-gray-600 dark:text-gray-300 text-xs">
-              {timeElapsed}s elapsed
-            </p>
-          </div>
-        </div>
-        
-        {/* Estimated time */}
-        {loadingSpeed > 0 && !initialLoadComplete && (
-          <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-            Estimated time remaining: ~{estimatedTimeRemaining} seconds
-          </p>
-        )}
-        
-        {/* Skip button - only show after a few seconds have passed */}
-        {(timeElapsed > 3 || initialLoadComplete) && (
-          <button 
+
+        {/* Count */}
+        <p className="text-gray-400 text-sm font-mono">
+          {loadedCount} / {preloadCount}
+        </p>
+
+        {/* Ghost button */}
+        {showButton && (
+          <button
             onClick={handleSkip}
-            className="mt-6 px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded-md text-sm transition-colors duration-200 dark:text-white"
+            className="mt-8 px-6 py-2 border border-white text-white text-sm
+                       hover:bg-white hover:text-black transition-colors duration-200"
           >
-            {initialLoadComplete ? "Continue to Gallery" : "Skip Preloading"}
+            {initialLoadComplete ? "Continue" : "Skip"}
           </button>
         )}
       </div>

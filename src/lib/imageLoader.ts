@@ -18,6 +18,8 @@ export function loadImages(): GalleryImage[] {
     imageObjects.forEach((imageObj) => {
       // Remove file extension for thumbnail naming
       const filename = imageObj.filename.replace(/\.[^/.]+$/, "");
+      const description = imageObj.description ?? "";
+      const tags = imageObj.tags ?? [];
 
       images.push({
         src: `/images/${color}/${imageObj.filename}`,
@@ -25,8 +27,9 @@ export function loadImages(): GalleryImage[] {
         thumbnailWidth: THUMBNAIL_SIZE,
         thumbnailHeight: THUMBNAIL_SIZE,
         color: color,
-        caption: imageObj.description,
-        tags: imageObj.tags,
+        caption: description,
+        tags,
+        searchText: `${filename} ${description} ${tags.join(" ")}`.toLowerCase(),
       });
     });
   });
