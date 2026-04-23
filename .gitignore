@@ -25,6 +25,9 @@ yarn-error.log*
 # local env files
 .env*.local
 
+# local test scratch (dev sqlite, curl output captures, etc.)
+/tmp/
+
 # vercel
 .vercel
 

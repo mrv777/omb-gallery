@@ -5,6 +5,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import debounce from 'lodash.debounce';
 import { GalleryImage, ColorFilter } from '@/lib/types';
 import { useFavorites } from '@/lib/FavoritesContext';
+import { encodeIds } from '@/lib/slideshowCodec';
 import ImageModal from '../ImageModal';
 import FilterControls from '../FilterControls';
 import ZoomGestureHandler from './ZoomGestureHandler';
@@ -92,6 +93,22 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     if (!showFavoritesOnly) return baseFiltered;
     return baseFiltered.filter((img) => isFavorite(img.src));
   }, [baseFiltered, showFavoritesOnly, isFavorite]);
+
+  const playHref = useMemo<string | null>(() => {
+    if (filteredImages.length === 0) return null;
+    const ids: string[] = [];
+    for (const img of filteredImages) {
+      const file = img.src.split('/').pop() ?? '';
+      const stem = file.replace(/\.[^./]+$/, '');
+      if (/^\d{1,7}$/.test(stem)) ids.push(stem);
+    }
+    if (ids.length === 0) return null;
+    try {
+      return `/slideshow?ids=${encodeIds(ids)}`;
+    } catch {
+      return null;
+    }
+  }, [filteredImages]);
 
   // Calculate grid dimensions - use floor to avoid sub-pixel gaps between cells
   const cellSize = containerWidth > 0 ? Math.floor(containerWidth / columnCount) : 100;
@@ -242,7 +259,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     return () => scrollElement.removeEventListener('scroll', handleScroll);
   }, [handleScroll]);
 
-  const headerHeight = 60;
+  const headerHeight = 48;
 
   return (
     <div className="gallery-container h-screen flex flex-col relative">
@@ -266,6 +283,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
           showFavoritesOnly={showFavoritesOnly}
           onToggleFavoritesOnly={handleToggleFavoritesOnly}
           searchInputRef={searchInputRef}
+          playHref={playHref}
         />
       </div>
 

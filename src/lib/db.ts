@@ -93,6 +93,18 @@ function initSchema(db: DB): void {
       daily_call_date   TEXT
     );
     INSERT OR IGNORE INTO poll_state (stream) VALUES ('activity'), ('holders');
+
+    CREATE TABLE IF NOT EXISTS slideshows (
+      slug        TEXT PRIMARY KEY,
+      ids         TEXT NOT NULL,
+      title       TEXT,
+      image_count INTEGER NOT NULL,
+      creator_ip  TEXT NOT NULL,
+      created_at  INTEGER NOT NULL,
+      view_count  INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_slideshows_created_ip_at ON slideshows (creator_ip, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_slideshows_created_at    ON slideshows (created_at DESC);
   `);
 }
 
