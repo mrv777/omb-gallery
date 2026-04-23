@@ -10,6 +10,11 @@ import { loadImages } from '@/lib/imageLoader';
 const CACHE_VERSION = 1;
 const PRELOAD_CACHE_KEY = 'gallery_preloaded_v' + CACHE_VERSION;
 
+interface NetworkInformation {
+  effectiveType?: '2g' | 'slow-2g' | '3g' | '4g' | string;
+}
+type NavigatorWithConnection = Navigator & { connection?: NetworkInformation };
+
 // Load images synchronously at module level
 const galleryImages = loadImages();
 
@@ -37,8 +42,9 @@ export default function Home() {
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
     // Check connection speed if the API is available
-    if ('connection' in navigator && (navigator as any).connection) {
-      const connection = (navigator as any).connection;
+    const nav = navigator as NavigatorWithConnection;
+    if (nav.connection) {
+      const connection = nav.connection;
 
       // Adjust batch size based on connection type - optimized for HTTP/2
       if (connection.effectiveType === '4g') {
