@@ -38,6 +38,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
   // Zoom state
   const {
     columnCount,
+    maxColumnCount,
     handleZoomGesture,
     zoomIn,
     zoomOut,
@@ -47,6 +48,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
 
   // Container ref and dimensions
   const parentRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const { width: containerWidth } = useGridDimensions(parentRef);
 
   // Debounced search
@@ -171,6 +173,23 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
         return;
       }
 
+      // Don't hijack keys while the user is typing in an input.
+      const target = e.target as HTMLElement | null;
+      const typing =
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable);
+
+      if (e.key === '/' && !typing) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+
+      if (typing) return;
+
       // Zoom shortcuts (when modal is closed)
       switch (e.key) {
         case '=':
@@ -228,7 +247,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
   return (
     <div className="gallery-container h-screen flex flex-col relative">
       <div
-        className={`header-wrapper fixed top-0 left-0 right-0 z-50 bg-white dark:bg-gray-900 transition-transform duration-300 ease-in-out ${
+        className={`header-wrapper fixed top-0 left-0 right-0 z-50 bg-ink-1 border-b border-ink-2 transition-transform duration-300 ease-in-out ${
           headerVisible ? 'translate-y-0' : '-translate-y-full'
         }`}
         style={{ height: headerHeight }}
@@ -239,12 +258,14 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
           searchQuery={searchQuery}
           onSearchChange={handleSearchChange}
           columnCount={columnCount}
+          maxColumnCount={maxColumnCount}
           onZoomIn={zoomIn}
           onZoomOut={zoomOut}
           canZoomIn={canZoomIn}
           canZoomOut={canZoomOut}
           showFavoritesOnly={showFavoritesOnly}
           onToggleFavoritesOnly={handleToggleFavoritesOnly}
+          searchInputRef={searchInputRef}
         />
       </div>
 
@@ -288,7 +309,6 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
 
       {isModalOpen && (
         <ImageModal
-          isOpen={isModalOpen}
           onClose={handleClose}
           currentImage={currentImage}
           images={filteredImages}

@@ -565,7 +565,9 @@
     {
       "filename": "965236.jpg",
       "description": "One eye saying Brrrrrains",
-      "tags": ["zombie"]
+      "tags": [
+        "zombie"
+      ]
     },
     {
       "filename": "965237.jpg",
@@ -610,7 +612,9 @@
     {
       "filename": "965245.jpg",
       "description": "Batman hood with Bitcoin symbol saying CAPT NO FUD",
-      "tags": ["superhero"]
+      "tags": [
+        "superhero"
+      ]
     },
     {
       "filename": "965246.jpg",
@@ -655,7 +659,9 @@
     {
       "filename": "965254.jpg",
       "description": "Dark cat figure saying APEX B TRADING",
-      "tags": ["animal"]
+      "tags": [
+        "animal"
+      ]
     },
     {
       "filename": "965255.jpg",
@@ -695,7 +701,9 @@
     {
       "filename": "965264.jpg",
       "description": "Dark hair with Bitcoin and sword/heart tattoos saying CASH ME OUT",
-      "tags": ["female"]
+      "tags": [
+        "female"
+      ]
     },
     {
       "filename": "965265.jpg",
@@ -785,7 +793,10 @@
     {
       "filename": "965285.jpg",
       "description": "Santa hat with beard smoking",
-      "tags": ["christmas", "holiday"]
+      "tags": [
+        "christmas",
+        "holiday"
+      ]
     },
     {
       "filename": "965287.jpg",
@@ -945,12 +956,16 @@
     {
       "filename": "965724.jpg",
       "description": "Spiky hair with OMB chin tatto, spiked collar, scar/stitches, and smoking a pipe",
-      "tags": ["animal"]
+      "tags": [
+        "animal"
+      ]
     },
     {
       "filename": "965725.jpg",
       "description": "Bitcoin symbol eye patch style. One/1 eye showing",
-      "tags": ["female"]
+      "tags": [
+        "female"
+      ]
     },
     {
       "filename": "965726.jpg",
@@ -960,7 +975,9 @@
     {
       "filename": "965727.jpg",
       "description": "Rabbit/bunny with Bitcoin nose and buck teeth",
-      "tags": ["animal"]
+      "tags": [
+        "animal"
+      ]
     },
     {
       "filename": "965728.jpg",
@@ -980,7 +997,9 @@
     {
       "filename": "965731.jpg",
       "description": "Long straight hair with Bitcoin mask",
-      "tags": ["female"]
+      "tags": [
+        "female"
+      ]
     },
     {
       "filename": "965732.jpg",
@@ -1054,27 +1073,27 @@
   "green": [
     {
       "filename": "10443743.jpg",
-      "description": "",
+      "description": "Messy black hair blowing bubbles",
       "tags": []
     },
     {
       "filename": "10443744.jpg",
-      "description": "",
+      "description": "Covered in messy scribbled black hair obscuring most of the face and facing to the left",
       "tags": []
     },
     {
       "filename": "10443750.jpg",
-      "description": "",
+      "description": "Wearing a hoodie with Bitcoin symbol on hood",
       "tags": []
     },
     {
       "filename": "10443754.jpg",
-      "description": "",
+      "description": "Black spiked hair smoking a joint with Bitcoin symbol on neck",
       "tags": []
     },
     {
       "filename": "10443759.jpg",
-      "description": "",
+      "description": "Head shaped like a pill capsule labeled BTC Rx",
       "tags": []
     },
     {
@@ -1089,12 +1108,12 @@
     },
     {
       "filename": "10443769.jpg",
-      "description": "",
+      "description": "Smiley face nailed to forehead and bleeding from it",
       "tags": []
     },
     {
       "filename": "10443777.jpg",
-      "description": "",
+      "description": "Wearing a bike helmet with a camera mounted on top and Bitcoin symbol on cheek",
       "tags": []
     },
     {
@@ -1104,22 +1123,22 @@
     },
     {
       "filename": "10443786.jpg",
-      "description": "",
+      "description": "Wearing a hat with Bitcoin symbol, smoking 3 joints",
       "tags": []
     },
     {
       "filename": "10443787.jpg",
-      "description": "",
+      "description": "Wearing a hood with facial hari and smoking with Bitcoin symbol on neck and nose",
       "tags": []
     },
     {
       "filename": "10443791.jpg",
-      "description": "",
+      "description": "Wearing a miners helmet with a bandana covering mouth, bandit-like",
       "tags": []
     },
     {
       "filename": "10443798.jpg",
-      "description": "",
+      "description": "Holding a gun and bleeding with bullet holes",
       "tags": []
     },
     {
@@ -1129,22 +1148,22 @@
     },
     {
       "filename": "10443805.jpg",
-      "description": "",
+      "description": "Slicked-back hair with a wide toothy grin",
       "tags": []
     },
     {
       "filename": "10443808.jpg",
-      "description": "",
+      "description": "Holding a large skeleton key with Bitcoin keyhole for nose",
       "tags": []
     },
     {
       "filename": "10443809.jpg",
-      "description": "",
+      "description": "Head wrapped in barbed wire with Bitcoin symbol on mouth",
       "tags": []
     },
     {
       "filename": "10443812.jpg",
-      "description": "",
+      "description": "Wearing a gas mask with a black mohawk and baseball bat with barbed wire",
       "tags": []
     },
     {
@@ -1154,12 +1173,12 @@
     },
     {
       "filename": "10443814.jpg",
-      "description": "",
+      "description": "Bleeding with a spike through the side of its hea",
       "tags": []
     },
     {
       "filename": "10443815.jpg",
-      "description": "",
+      "description": "Wearing a hood with a beard, smoking a joint",
       "tags": []
     },
     {
@@ -1179,22 +1198,22 @@
     },
     {
       "filename": "10443819.jpg",
-      "description": "",
+      "description": "Holding a phone to ear with reading glasses on forehead, smoking",
       "tags": []
     },
     {
       "filename": "10443820.jpg",
-      "description": "",
+      "description": "Bald with bandana over mouth, holding a flaming torch with Bitcoin symbol",
       "tags": []
     },
     {
       "filename": "10443821.jpg",
-      "description": "",
+      "description": "Messy hair talking on an old corded telephone while smoking",
       "tags": []
     },
     {
       "filename": "10443822.jpg",
-      "description": "",
+      "description": "Long hair with phone covering mouth showing Bitcoin symbol",
       "tags": []
     },
     {
@@ -1204,32 +1223,32 @@
     },
     {
       "filename": "10443824.jpg",
-      "description": "",
+      "description": "Short spiky dark hair maybe a reference to Goku from Dragon Ball Z",
       "tags": []
     },
     {
       "filename": "10443825.jpg",
-      "description": "",
+      "description": "Mining helmet with Bitcoin symbol, saying FUCK YOUR KYC on neck",
       "tags": []
     },
     {
       "filename": "10443826.jpg",
-      "description": "",
+      "description": "Peace signs covering the head and spiked necklace/collar",
       "tags": []
     },
     {
       "filename": "10443827.jpg",
-      "description": "",
+      "description": "Two knives stabbed through the head",
       "tags": []
     },
     {
       "filename": "10443828.jpg",
-      "description": "",
+      "description": "Mushroom cloud over head with @#?! curse word censoring on mouth",
       "tags": []
     },
     {
       "filename": "10443829.jpg",
-      "description": "",
+      "description": "Head stacked with cameras and speakers",
       "tags": []
     },
     {
@@ -1239,42 +1258,42 @@
     },
     {
       "filename": "10443831.jpg",
-      "description": "",
+      "description": "Resembles Benjamin Franklin on a $100 bill",
       "tags": []
     },
     {
       "filename": "10443832.jpg",
-      "description": "",
+      "description": "Two-heads on forehead with BTCBBY tag over mouth",
       "tags": []
     },
     {
       "filename": "10443833.jpg",
-      "description": "",
+      "description": "Wearing a hood and sunglasses with Bitcoin symbol on forehead, hands in prayer, cityscape in front",
       "tags": []
     },
     {
       "filename": "10443834.jpg",
-      "description": "",
+      "description": "Curly hair with a black glasses and mask over mouth with Bitcoin symbol",
       "tags": []
     },
     {
       "filename": "10443835.jpg",
-      "description": "",
+      "description": "Long hair wearing an industrial dual-canister gas mask",
       "tags": []
     },
     {
       "filename": "10443836.jpg",
-      "description": "",
+      "description": "Head overgrown with leaves like a plant or shrub",
       "tags": []
     },
     {
       "filename": "10443837.jpg",
-      "description": "",
+      "description": "Horned demon skull with bared teeth",
       "tags": []
     },
     {
       "filename": "10443838.jpg",
-      "description": "",
+      "description": "Goggles on forehead with tongue out and BABY written on face",
       "tags": []
     },
     {
@@ -1284,12 +1303,12 @@
     },
     {
       "filename": "10443840.jpg",
-      "description": "",
+      "description": "Head shaped like a phone showing 4:20 with earbuds",
       "tags": []
     },
     {
       "filename": "10443841.jpg",
-      "description": "",
+      "description": "Head covered in spikes / nails",
       "tags": []
     },
     {
@@ -1299,22 +1318,22 @@
     },
     {
       "filename": "10443843.jpg",
-      "description": "",
+      "description": "Wearing a dual canister mask with goggles and a hoodie",
       "tags": []
     },
     {
       "filename": "10443844.jpg",
-      "description": "",
+      "description": "Dark scribbled with Bitcoin symbol on chin",
       "tags": []
     },
     {
       "filename": "10443845.jpg",
-      "description": "",
+      "description": "Wearing a hood with black hair, smoking, Bitcoin symbols on nose",
       "tags": []
     },
     {
       "filename": "10443991.jpg",
-      "description": "",
+      "description": "Bear mask with Bitcoin symbol on the collar",
       "tags": []
     },
     {
@@ -1329,22 +1348,22 @@
     },
     {
       "filename": "10444012.jpg",
-      "description": "",
+      "description": "Dark shadow like face wearing a mining helmet with headlamp and has a pickaxe",
       "tags": []
     },
     {
       "filename": "10444017.jpg",
-      "description": "",
+      "description": "Spiky hair, wearing glasses,smoking a joint, teeth showing",
       "tags": []
     },
     {
       "filename": "10444062.jpg",
-      "description": "",
+      "description": "Dark miner helmet with Bitcoin symbol, shaded face, and pickaxe",
       "tags": []
     },
     {
       "filename": "10444065.jpg",
-      "description": "",
+      "description": "Black ski mask with eye and mouth cut outs and a Bitcoin symbol for a nose",
       "tags": []
     },
     {
@@ -1359,17 +1378,17 @@
     },
     {
       "filename": "10444102.jpg",
-      "description": "",
+      "description": "Crown of spikes and goggles with stitched neck and mouth",
       "tags": []
     },
     {
       "filename": "10444120.jpg",
-      "description": "",
+      "description": "Messy hair holding a scythe like a Grim Reaper with zigzag teeth",
       "tags": []
     },
     {
       "filename": "10444121.jpg",
-      "description": "",
+      "description": "Skull face with long dreadlocks and a miner helmet saying BTC between nose and mouth and has a pickaxe",
       "tags": []
     },
     {
@@ -1379,27 +1398,27 @@
     },
     {
       "filename": "10444123.jpg",
-      "description": "",
+      "description": "Short spiky black hair smoking with Bitcoin symbol on nose and smoking",
       "tags": []
     },
     {
       "filename": "10444124.jpg",
-      "description": "",
+      "description": "Maybe an ape saying PACK MENTALITY",
       "tags": []
     },
     {
       "filename": "10444125.jpg",
-      "description": "",
+      "description": "Hooded figure holding a rifle and smoking",
       "tags": []
     },
     {
       "filename": "10444126.jpg",
-      "description": "",
+      "description": "Bearded holding a bar of soap saying OMB",
       "tags": []
     },
     {
       "filename": "10444127.jpg",
-      "description": "",
+      "description": "Black visor helmet with antenna, label reading ORDINAL MAXI",
       "tags": []
     },
     {
@@ -1409,12 +1428,12 @@
     },
     {
       "filename": "10444129.jpg",
-      "description": "",
+      "description": "Skull with fanged teeth wearing a hood with Bitcoin symbol on forehead",
       "tags": []
     },
     {
       "filename": "10444130.jpg",
-      "description": "",
+      "description": "Black cat / fox-like face with whiskers and Bitcoin symbol on forehead",
       "tags": []
     },
     {
@@ -1429,7 +1448,7 @@
     },
     {
       "filename": "10444133.jpg",
-      "description": "",
+      "description": "Long hair with a pencil stabbed into the head bleeding",
       "tags": []
     },
     {
@@ -1439,7 +1458,7 @@
     },
     {
       "filename": "10444135.jpg",
-      "description": "",
+      "description": "Wearing a scarf around the neck with a Bitcoin symbol on cheek",
       "tags": []
     },
     {
@@ -1449,17 +1468,17 @@
     },
     {
       "filename": "10444137.jpg",
-      "description": "",
+      "description": "Hooded with dark messy hair and devil horns",
       "tags": []
     },
     {
       "filename": "10444138.jpg",
-      "description": "",
+      "description": "Hooded wearing goggles and holding a baseball bat with nails",
       "tags": []
     },
     {
       "filename": "10444139.jpg",
-      "description": "",
+      "description": "Skull with a spiked punk collar",
       "tags": []
     },
     {
@@ -1469,27 +1488,27 @@
     },
     {
       "filename": "10444141.jpg",
-      "description": "",
+      "description": "Long dark hair under a hood with Bitcoin symbols in corners and fangs, maybe a wearwolf",
       "tags": []
     },
     {
       "filename": "10444142.jpg",
-      "description": "",
+      "description": "Facial hair with bandaid on nose and bitcoin symbol",
       "tags": []
     },
     {
       "filename": "10444143.jpg",
-      "description": "",
+      "description": "Wearing a ski mask / balaclava",
       "tags": []
     },
     {
       "filename": "10444144.jpg",
-      "description": "",
+      "description": "Hooded with BITCOIN written across the face",
       "tags": []
     },
     {
       "filename": "10444145.jpg",
-      "description": "",
+      "description": "Hood with Bitcoin symbol on top, smudged face",
       "tags": []
     },
     {
@@ -1504,7 +1523,7 @@
     },
     {
       "filename": "10444148.jpg",
-      "description": "",
+      "description": "Miner helmet and pickaxe, with $21M written on mask",
       "tags": []
     },
     {
@@ -1514,17 +1533,17 @@
     },
     {
       "filename": "10444150.jpg",
-      "description": "",
+      "description": "Wearing a mining helmet with headlamp and Bitcoin symbol on hat and dirty face",
       "tags": []
     },
     {
       "filename": "10444151.jpg",
-      "description": "",
+      "description": "Dark/black shadow like face partially melting",
       "tags": []
     },
     {
       "filename": "10444152.jpg",
-      "description": "",
+      "description": "Wearing a mining helmet with Bitcoin symbol, holding a pickaxe, and mouth covered",
       "tags": []
     },
     {
@@ -1549,17 +1568,17 @@
     },
     {
       "filename": "10444157.jpg",
-      "description": "",
+      "description": "Dark ninja mask with Bitcoin symbol on forehead",
       "tags": []
     },
     {
       "filename": "10610544.webp",
-      "description": "",
+      "description": "Twitter bird logo covering the head saying GM",
       "tags": []
     },
     {
       "filename": "10610545.webp",
-      "description": "",
+      "description": "Small characters sprouting from the top of the head",
       "tags": []
     },
     {

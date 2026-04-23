@@ -48,6 +48,7 @@ export function useZoomLevel() {
   return {
     zoomIndex,
     columnCount: ZOOM_LEVELS[zoomIndex].columns,
+    maxColumnCount: ZOOM_LEVELS[MAX_ZOOM_INDEX].columns,
     handleZoomGesture,
     zoomIn,
     zoomOut,

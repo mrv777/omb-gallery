@@ -9,13 +9,25 @@ interface FilterControlsProps {
   searchQuery: string;
   onSearchChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   columnCount: number;
+  maxColumnCount: number;
   onZoomIn: () => void;
   onZoomOut: () => void;
   canZoomIn: boolean;
   canZoomOut: boolean;
   showFavoritesOnly: boolean;
   onToggleFavoritesOnly: () => void;
+  searchInputRef: React.RefObject<HTMLInputElement>;
 }
+
+type SwatchDef = { value: ColorFilter; label: string; cls: string };
+
+const SWATCHES: SwatchDef[] = [
+  { value: 'red', label: 'red', cls: 'bg-accent-red' },
+  { value: 'blue', label: 'blue', cls: 'bg-accent-blue' },
+  { value: 'green', label: 'green', cls: 'bg-accent-green' },
+  { value: 'orange', label: 'orange', cls: 'bg-accent-orange' },
+  { value: 'black', label: 'black', cls: 'bg-accent-black' },
+];
 
 const FilterControls = memo(function FilterControls({
   colorFilter,
@@ -23,126 +35,114 @@ const FilterControls = memo(function FilterControls({
   searchQuery,
   onSearchChange,
   columnCount,
+  maxColumnCount,
   onZoomIn,
   onZoomOut,
   canZoomIn,
   canZoomOut,
   showFavoritesOnly,
   onToggleFavoritesOnly,
+  searchInputRef,
 }: FilterControlsProps) {
   return (
-    <div className="filter-controls flex items-center gap-2 sm:gap-4">
-      {/* Left: Color filters */}
-      <div className="color-filters flex-shrink-0">
-        <div className="flex space-x-1 sm:space-x-2">
-          <button
-            className={`w-5 h-5 sm:w-6 sm:h-6 ${
-              colorFilter === 'all' ? 'ring-2 ring-gray-500 dark:ring-gray-300' : ''
-            }`}
-            onClick={() => onColorFilterChange('all')}
-            style={{ background: 'linear-gradient(to right, red, blue, green, orange, black)' }}
-            aria-label="Show all colors"
-          />
-          <button
-            className={`w-5 h-5 sm:w-6 sm:h-6 bg-red-600 ${
-              colorFilter === 'red' ? 'ring-2 ring-gray-500 dark:ring-gray-300' : ''
-            }`}
-            onClick={() => onColorFilterChange('red')}
-            aria-label="Filter by red"
-          />
-          <button
-            className={`w-5 h-5 sm:w-6 sm:h-6 bg-blue-600 ${
-              colorFilter === 'blue' ? 'ring-2 ring-gray-500 dark:ring-gray-300' : ''
-            }`}
-            onClick={() => onColorFilterChange('blue')}
-            aria-label="Filter by blue"
-          />
-          <button
-            className={`w-5 h-5 sm:w-6 sm:h-6 bg-green-600 ${
-              colorFilter === 'green' ? 'ring-2 ring-gray-500 dark:ring-gray-300' : ''
-            }`}
-            onClick={() => onColorFilterChange('green')}
-            aria-label="Filter by green"
-          />
-          <button
-            className={`w-5 h-5 sm:w-6 sm:h-6 bg-orange-500 ${
-              colorFilter === 'orange' ? 'ring-2 ring-gray-500 dark:ring-gray-300' : ''
-            }`}
-            onClick={() => onColorFilterChange('orange')}
-            aria-label="Filter by orange"
-          />
-          <button
-            className={`w-5 h-5 sm:w-6 sm:h-6 bg-black ${
-              colorFilter === 'black' ? 'ring-2 ring-gray-500 dark:ring-gray-300' : ''
-            }`}
-            onClick={() => onColorFilterChange('black')}
-            aria-label="Filter by black"
-          />
-          <button
-            className={`w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-800 ${
-              showFavoritesOnly ? 'ring-2 ring-gray-500 dark:ring-gray-300' : ''
-            }`}
-            onClick={onToggleFavoritesOnly}
-            aria-label="Show favorites only"
-          >
-            <svg
-              className={`w-3 h-3 sm:w-4 sm:h-4 ${
-                showFavoritesOnly ? 'text-red-500' : 'text-gray-400 dark:text-gray-500'
-              }`}
-              fill={showFavoritesOnly ? 'currentColor' : 'none'}
-              stroke="currentColor"
-              strokeWidth={2}
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
-              />
-            </svg>
-          </button>
-        </div>
+    <div className="flex h-full items-center gap-2 sm:gap-4 px-2 sm:px-4 font-mono text-xs tracking-[0.08em] uppercase">
+      {/* Title / wordmark — desktop only */}
+      <div className="hidden md:block text-bone shrink-0 pr-1">
+        OMB <span className="text-bone-dim">/ archive</span>
       </div>
 
-      {/* Center: Search box */}
-      <div className="search-box flex-1 flex justify-center min-w-0">
+      {/* Color filters */}
+      <div className="flex items-center shrink-0">
+        <button
+          type="button"
+          onClick={() => onColorFilterChange('all')}
+          className={`h-10 px-2.5 flex items-center text-[11px] tracking-[0.12em] transition-colors ${
+            colorFilter === 'all'
+              ? 'text-bone'
+              : 'text-bone-dim hover:text-bone'
+          }`}
+          aria-label="Show all colors"
+        >
+          <span
+            className={`border px-1.5 py-0.5 ${
+              colorFilter === 'all' ? 'border-bone' : 'border-transparent'
+            }`}
+          >
+            ALL
+          </span>
+        </button>
+        {SWATCHES.map(({ value, label, cls }) => {
+          const active = colorFilter === value;
+          return (
+            <button
+              key={value}
+              type="button"
+              onClick={() => onColorFilterChange(value)}
+              className="h-10 w-9 flex items-center justify-center group"
+              aria-label={`Filter by ${label}`}
+            >
+              <span
+                className={`block w-3.5 h-3.5 ${cls} transition-[outline] ${
+                  active
+                    ? 'outline outline-1 outline-offset-[3px] outline-bone'
+                    : 'opacity-70 group-hover:opacity-100'
+                }`}
+              />
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={onToggleFavoritesOnly}
+          className={`h-10 w-10 flex items-center justify-center text-lg leading-none transition-colors ${
+            showFavoritesOnly ? 'text-accent-red' : 'text-bone-dim hover:text-bone'
+          }`}
+          aria-label={showFavoritesOnly ? 'Show all pieces' : 'Show favorites only'}
+        >
+          {showFavoritesOnly ? '♥' : '♡'}
+        </button>
+      </div>
+
+      {/* Search — grows to fill */}
+      <div className="flex-1 min-w-0">
         <input
-          type="text"
-          placeholder="Search..."
+          ref={searchInputRef}
+          type="search"
           value={searchQuery}
           onChange={onSearchChange}
-          className="w-full max-w-md px-2 sm:px-4 py-1.5 sm:py-2 border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:border-gray-500 dark:focus:border-gray-400 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-base sm:text-sm"
+          placeholder="/  search inscription # or keyword"
+          className="w-full bg-transparent border-0 border-b border-ink-2 focus:border-bone outline-none h-10 px-0 text-sm font-mono tracking-[0.06em] text-bone placeholder:text-bone-dim placeholder:normal-case placeholder:tracking-[0.04em] transition-colors"
+          spellCheck={false}
+          autoComplete="off"
         />
       </div>
 
-      {/* Right: Zoom controls */}
-      <div className="zoom-controls flex-shrink-0 flex items-center gap-0.5 sm:gap-1">
+      {/* Zoom status (compact, functional) */}
+      <div className="flex items-center shrink-0">
         <button
-          onClick={onZoomIn}
-          disabled={!canZoomIn}
-          className={`w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-base sm:text-lg font-bold transition-colors ${
-            canZoomIn
-              ? 'hover:border-gray-500 hover:text-gray-900 dark:hover:border-gray-400 dark:hover:text-white'
-              : 'opacity-40 cursor-not-allowed'
-          }`}
-          aria-label="Zoom in (fewer columns)"
-        >
-          +
-        </button>
-        <span className="text-gray-600 dark:text-gray-400 text-xs sm:text-sm font-medium min-w-[28px] sm:min-w-[35px] text-center">
-          {columnCount}
-        </span>
-        <button
+          type="button"
           onClick={onZoomOut}
           disabled={!canZoomOut}
-          className={`w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-base sm:text-lg font-bold transition-colors ${
-            canZoomOut
-              ? 'hover:border-gray-500 hover:text-gray-900 dark:hover:border-gray-400 dark:hover:text-white'
-              : 'opacity-40 cursor-not-allowed'
+          className={`h-10 w-8 flex items-center justify-center text-base leading-none transition-colors ${
+            canZoomOut ? 'text-bone-dim hover:text-bone' : 'text-bone-dim opacity-30 cursor-not-allowed'
           }`}
           aria-label="Zoom out (more columns)"
         >
           −
+        </button>
+        <span className="text-bone tabular-nums w-12 text-center text-xs">
+          {String(columnCount).padStart(2, '0')}/{maxColumnCount}
+        </span>
+        <button
+          type="button"
+          onClick={onZoomIn}
+          disabled={!canZoomIn}
+          className={`h-10 w-8 flex items-center justify-center text-base leading-none transition-colors ${
+            canZoomIn ? 'text-bone-dim hover:text-bone' : 'text-bone-dim opacity-30 cursor-not-allowed'
+          }`}
+          aria-label="Zoom in (fewer columns)"
+        >
+          +
         </button>
       </div>
     </div>
