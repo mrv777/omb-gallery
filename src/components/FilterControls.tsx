@@ -16,7 +16,7 @@ interface FilterControlsProps {
   canZoomOut: boolean;
   showFavoritesOnly: boolean;
   onToggleFavoritesOnly: () => void;
-  searchInputRef: React.RefObject<HTMLInputElement>;
+  searchInputRef: React.RefObject<HTMLInputElement | null>;
 }
 
 type SwatchDef = { value: ColorFilter; label: string; cls: string };
