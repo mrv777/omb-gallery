@@ -30,4 +30,10 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts 
+next-env.d.ts
+
+# operational / internal docs — contain VPS IP, SSH commands, deploy details
+# that should not leak into a public repo
+CLAUDE.md
+DEPLOYMENT.md
+PHASE2_HANDOFF.md 

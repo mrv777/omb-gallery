@@ -4,6 +4,8 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: 'standalone',
   reactCompiler: true,
+  // better-sqlite3 is a native module — leave it as a runtime require, do not bundle through webpack.
+  serverExternalPackages: ['better-sqlite3'],
   images: {
     unoptimized: true,
     imageSizes: [100, 200, 336],

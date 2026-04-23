@@ -1,6 +1,7 @@
 "use client";
 
 import React, { memo } from 'react';
+import Link from 'next/link';
 import { ColorFilter } from '@/lib/types';
 
 interface FilterControlsProps {
@@ -46,9 +47,24 @@ const FilterControls = memo(function FilterControls({
 }: FilterControlsProps) {
   return (
     <div className="flex h-full items-center gap-2 sm:gap-4 px-2 sm:px-4 font-mono text-xs tracking-[0.08em] uppercase">
-      {/* Title / wordmark — desktop only */}
-      <div className="hidden md:block text-bone shrink-0 pr-1">
-        OMB <span className="text-bone-dim">/ archive</span>
+      {/* Title / wordmark + nav — desktop only */}
+      <div className="hidden md:flex items-center gap-3 shrink-0 pr-1">
+        <span className="text-bone">
+          OMB <span className="text-bone-dim">/ archive</span>
+        </span>
+        <span className="text-bone-dim">·</span>
+        <Link
+          href="/activity"
+          className="text-bone-dim hover:text-bone transition-colors"
+        >
+          activity
+        </Link>
+        <Link
+          href="/explorer"
+          className="text-bone-dim hover:text-bone transition-colors"
+        >
+          explorer
+        </Link>
       </div>
 
       {/* Color filters */}
