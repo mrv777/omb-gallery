@@ -1,7 +1,9 @@
 "use client";
 
 import React, { memo } from 'react';
+import Link from 'next/link';
 import { ColorFilter } from '@/lib/types';
+import HelpButton from './HelpButton';
 
 interface FilterControlsProps {
   colorFilter: ColorFilter;
@@ -17,6 +19,7 @@ interface FilterControlsProps {
   showFavoritesOnly: boolean;
   onToggleFavoritesOnly: () => void;
   searchInputRef: React.RefObject<HTMLInputElement | null>;
+  playHref: string | null;
 }
 
 type SwatchDef = { value: ColorFilter; label: string; cls: string };
@@ -43,13 +46,30 @@ const FilterControls = memo(function FilterControls({
   showFavoritesOnly,
   onToggleFavoritesOnly,
   searchInputRef,
+  playHref,
 }: FilterControlsProps) {
   return (
-    <div className="flex h-full items-center gap-2 sm:gap-4 px-2 sm:px-4 font-mono text-xs tracking-[0.08em] uppercase">
-      {/* Title / wordmark — desktop only */}
-      <div className="hidden md:block text-bone shrink-0 pr-1">
-        OMB <span className="text-bone-dim">/ archive</span>
-      </div>
+    <div className="flex h-full items-center gap-4 sm:gap-6 px-4 sm:px-6 font-mono text-xs tracking-[0.08em] uppercase">
+      {/* Wordmark — desktop only */}
+      <div className="hidden md:block text-bone shrink-0">OMB</div>
+      {/* Nav — desktop only */}
+      <nav className="hidden md:flex items-center gap-3 sm:gap-5 shrink-0">
+        <span className="text-bone">
+          <span className="border border-bone px-1.5 py-0.5">gallery</span>
+        </span>
+        <Link
+          href="/activity"
+          className="text-bone-dim hover:text-bone transition-colors"
+        >
+          <span className="border border-transparent px-1.5 py-0.5">activity</span>
+        </Link>
+        <Link
+          href="/explorer"
+          className="text-bone-dim hover:text-bone transition-colors"
+        >
+          <span className="border border-transparent px-1.5 py-0.5">explorer</span>
+        </Link>
+      </nav>
 
       {/* Color filters */}
       <div className="flex items-center shrink-0">
@@ -101,6 +121,28 @@ const FilterControls = memo(function FilterControls({
         >
           {showFavoritesOnly ? '♥' : '♡'}
         </button>
+        {playHref ? (
+          <Link
+            href={playHref}
+            className="h-10 px-2 flex items-center text-bone-dim hover:text-bone transition-colors"
+            aria-label="Play slideshow of current filter"
+          >
+            <span className="border border-transparent px-1.5 py-0.5 text-[11px] tracking-[0.12em]">
+              ▶ PLAY
+            </span>
+          </Link>
+        ) : (
+          <span
+            className="h-10 px-2 flex items-center text-bone-dim opacity-30 cursor-not-allowed"
+            aria-label="Play slideshow (no images selected)"
+            aria-disabled="true"
+            title="No images in the current filter"
+          >
+            <span className="border border-transparent px-1.5 py-0.5 text-[11px] tracking-[0.12em]">
+              ▶ PLAY
+            </span>
+          </span>
+        )}
       </div>
 
       {/* Search — grows to fill */}
@@ -144,6 +186,7 @@ const FilterControls = memo(function FilterControls({
         >
           +
         </button>
+        <HelpButton />
       </div>
     </div>
   );

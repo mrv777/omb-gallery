@@ -5,6 +5,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import debounce from 'lodash.debounce';
 import { GalleryImage, ColorFilter } from '@/lib/types';
 import { useFavorites } from '@/lib/FavoritesContext';
+import { encodeIds } from '@/lib/slideshowCodec';
 import ImageModal from '../ImageModal';
 import FilterControls from '../FilterControls';
 import ZoomGestureHandler from './ZoomGestureHandler';
@@ -93,6 +94,27 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     return baseFiltered.filter((img) => isFavorite(img.src));
   }, [baseFiltered, showFavoritesOnly, isFavorite]);
 
+  const playHref = useMemo<string | null>(() => {
+    if (filteredImages.length === 0) return null;
+    // Cap the encoded playlist to keep the URL under browser/server limits.
+    // Matches MAX_IDS in the slideshow create API; broader filters just play
+    // the first slice in filter order.
+    const MAX_PLAY_IDS = 1500;
+    const ids: string[] = [];
+    for (const img of filteredImages) {
+      if (ids.length >= MAX_PLAY_IDS) break;
+      const file = img.src.split('/').pop() ?? '';
+      const stem = file.replace(/\.[^./]+$/, '');
+      if (/^\d{1,7}$/.test(stem)) ids.push(stem);
+    }
+    if (ids.length === 0) return null;
+    try {
+      return `/slideshow?ids=${encodeIds(ids)}`;
+    } catch {
+      return null;
+    }
+  }, [filteredImages]);
+
   // Calculate grid dimensions - use floor to avoid sub-pixel gaps between cells
   const cellSize = containerWidth > 0 ? Math.floor(containerWidth / columnCount) : 100;
   const rowCount = Math.ceil(filteredImages.length / columnCount);
@@ -147,10 +169,15 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     setCurrentImage((prev) => (prev + 1) % filteredImages.length);
   }, [filteredImages.length]);
 
-  // Reset current image if filtered images change and current image is out of bounds
+  // Reset current image if filtered images change and current image is out of bounds.
+  // Clamp to the last valid index so unfavoriting the last open piece slides to its
+  // neighbor rather than jumping back to zero.
   useEffect(() => {
-    if (currentImage >= filteredImages.length) {
-      setCurrentImage(filteredImages.length > 0 ? 0 : -1);
+    if (currentImage < 0) return;
+    if (filteredImages.length === 0) {
+      setCurrentImage(-1);
+    } else if (currentImage >= filteredImages.length) {
+      setCurrentImage(filteredImages.length - 1);
     }
   }, [filteredImages.length, currentImage]);
 
@@ -242,7 +269,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     return () => scrollElement.removeEventListener('scroll', handleScroll);
   }, [handleScroll]);
 
-  const headerHeight = 60;
+  const headerHeight = 48;
 
   return (
     <div className="gallery-container h-screen flex flex-col relative">
@@ -266,6 +293,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
           showFavoritesOnly={showFavoritesOnly}
           onToggleFavoritesOnly={handleToggleFavoritesOnly}
           searchInputRef={searchInputRef}
+          playHref={playHref}
         />
       </div>
 

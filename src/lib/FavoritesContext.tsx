@@ -6,6 +6,7 @@ type FavoritesContextType = {
   favorites: Set<string>;
   toggleFavorite: (src: string) => void;
   isFavorite: (src: string) => boolean;
+  addManyFavorites: (srcs: string[]) => void;
 };
 
 const FavoritesContext = createContext<FavoritesContextType | undefined>(undefined);
@@ -60,11 +61,26 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
     return favorites.has(src);
   }, [favorites]);
 
+  const addManyFavorites = useCallback((srcs: string[]) => {
+    setFavorites(prev => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const src of srcs) {
+        if (!next.has(src)) {
+          next.add(src);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+
   const contextValue = useMemo(() => ({
     favorites,
     toggleFavorite,
     isFavorite,
-  }), [favorites, toggleFavorite, isFavorite]);
+    addManyFavorites,
+  }), [favorites, toggleFavorite, isFavorite, addManyFavorites]);
 
   return (
     <FavoritesContext.Provider value={contextValue}>

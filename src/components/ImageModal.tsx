@@ -39,7 +39,7 @@ const ImageModal = memo(function ImageModal({
   // instant. Effect runs after paint, so it doesn't starve the current
   // image's initial load. Wraps at the ends of the list.
   useEffect(() => {
-    if (images.length < 2 || currentImage < 0) return;
+    if (images.length < 2 || currentImage < 0 || currentImage >= images.length) return;
     const len = images.length;
     const neighbors = [
       images[(currentImage - 1 + len) % len],
@@ -61,7 +61,7 @@ const ImageModal = memo(function ImageModal({
     };
   }, [currentImage, images]);
 
-  if (images.length === 0 || currentImage < 0) {
+  if (images.length === 0 || currentImage < 0 || currentImage >= images.length) {
     return null;
   }
 
