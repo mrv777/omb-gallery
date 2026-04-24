@@ -120,7 +120,8 @@ export default function ShareDialog({ ids, defaultTitle, onClose }: Props) {
       });
       if (res.status === 429) {
         const retryAfter = res.headers.get('retry-after');
-        const secs = retryAfter ? Number(retryAfter) : 60;
+        const parsed = retryAfter ? Number(retryAfter) : NaN;
+        const secs = Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
         setState({
           kind: 'error',
           message: `Too many shares. Try again in ${Math.max(1, Math.ceil(secs))}s.`,

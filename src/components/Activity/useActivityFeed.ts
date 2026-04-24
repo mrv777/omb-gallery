@@ -30,6 +30,8 @@ export function useActivityFeed() {
 
   const loadMore = useCallback(async () => {
     if (loadingRef.current) return;
+    // Don't paginate past the end; refreshHead handles new items at the top.
+    if (cursorRef.current == null && seenIdsRef.current.size > 0) return;
     loadingRef.current = true;
     try {
       const url = new URL('/api/activity', window.location.origin);

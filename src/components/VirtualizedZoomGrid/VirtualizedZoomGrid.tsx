@@ -96,8 +96,13 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
 
   const playHref = useMemo<string | null>(() => {
     if (filteredImages.length === 0) return null;
+    // Cap the encoded playlist to keep the URL under browser/server limits.
+    // Matches MAX_IDS in the slideshow create API; broader filters just play
+    // the first slice in filter order.
+    const MAX_PLAY_IDS = 1500;
     const ids: string[] = [];
     for (const img of filteredImages) {
+      if (ids.length >= MAX_PLAY_IDS) break;
       const file = img.src.split('/').pop() ?? '';
       const stem = file.replace(/\.[^./]+$/, '');
       if (/^\d{1,7}$/.test(stem)) ids.push(stem);

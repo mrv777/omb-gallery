@@ -162,7 +162,10 @@ async function runActivity(opts: {
       break;
     }
 
-    if (page.items.length === 0 && page.rawCount === 0) {
+    if (page.items.length === 0) {
+      // Treat as drained: if rawCount > 0 but nothing normalized, we can't advance
+      // the cursor (cursor is derived from last item's new_satpoint), so looping
+      // would just burn API calls on the same page.
       drained = true;
       break;
     }
