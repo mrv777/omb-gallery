@@ -80,6 +80,48 @@ body {
   opacity: 1;
 }
 
+/* Favorite toggle overlay — visible on hover (or always, when favorited / on touch) */
+.grid-cell-fav {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--bone);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 150ms ease-out, color 150ms ease-out, background-color 150ms ease-out;
+  z-index: 2;
+}
+
+.grid-cell-hover:hover .grid-cell-fav {
+  opacity: 1;
+}
+
+.grid-cell-fav[data-fav='true'] {
+  opacity: 1;
+  color: var(--accent-red);
+}
+
+.grid-cell-fav:hover {
+  background: rgba(0, 0, 0, 0.8);
+}
+
+/* Touch devices can't hover, so keep the heart visible. */
+@media (hover: none) {
+  .grid-cell-fav {
+    opacity: 1;
+  }
+}
+
 /* Remove native number-input spinners in search field */
 input[type='search']::-webkit-search-decoration,
 input[type='search']::-webkit-search-cancel-button {

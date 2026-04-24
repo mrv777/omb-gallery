@@ -2,6 +2,7 @@
 
 import React, { memo, useCallback, useRef } from 'react';
 import { GalleryImage } from '@/lib/types';
+import { useFavorites } from '@/lib/FavoritesContext';
 
 // Get the appropriate thumbnail URL based on cell size
 function getThumbnailUrl(originalThumbnail: string, cellSize: number): string {
@@ -40,8 +41,11 @@ const VirtualRow = memo(
     const rowImages = images.slice(startIndex, endIndex);
     const mouseDownTime = useRef<number>(0);
     const mouseDownIndex = useRef<number>(-1);
+    const { isFavorite, toggleFavorite } = useFavorites();
 
     const handleMouseDown = useCallback((e: React.MouseEvent) => {
+      // Ignore if the click originated inside the favorite button.
+      if ((e.target as HTMLElement).closest('[data-fav-btn]')) return;
       const target = e.target as HTMLElement;
       const cell = target.closest('[data-index]') as HTMLElement;
       if (cell) {
@@ -52,19 +56,34 @@ const VirtualRow = memo(
 
     const handleMouseUp = useCallback(
       (e: React.MouseEvent) => {
+        if ((e.target as HTMLElement).closest('[data-fav-btn]')) return;
         const target = e.target as HTMLElement;
         const cell = target.closest('[data-index]') as HTMLElement;
         if (cell && mouseDownTime.current > 0) {
           const clickDuration = Date.now() - mouseDownTime.current;
           const index = parseInt(cell.dataset.index || '-1', 10);
           if (clickDuration < 300 && index === mouseDownIndex.current && index >= 0) {
-            onImageClick(index);
+            const img = images[index];
+            // Shift-click toggles favorite instead of opening the modal.
+            if (e.shiftKey && img) {
+              toggleFavorite(img.src);
+            } else {
+              onImageClick(index);
+            }
           }
         }
         mouseDownTime.current = 0;
         mouseDownIndex.current = -1;
       },
-      [onImageClick]
+      [onImageClick, images, toggleFavorite]
+    );
+
+    const handleFavClick = useCallback(
+      (e: React.MouseEvent<HTMLButtonElement>, src: string) => {
+        e.stopPropagation();
+        toggleFavorite(src);
+      },
+      [toggleFavorite]
     );
 
     // Labels only read well at mid-close zoom; same threshold gates the
@@ -90,6 +109,7 @@ const VirtualRow = memo(
           const thumbnailUrl = getThumbnailUrl(image.thumbnail, cellSize);
           const label = enableHover ? `#${inscriptionId(image.src)}` : undefined;
 
+          const favorited = isFavorite(image.src);
           return (
             <div
               key={globalIndex}
@@ -106,7 +126,23 @@ const VirtualRow = memo(
                 cursor: 'pointer',
                 boxShadow: cellShadow,
               }}
-            />
+            >
+              {enableHover && (
+                <button
+                  type="button"
+                  data-fav-btn=""
+                  data-fav={favorited ? 'true' : undefined}
+                  className="grid-cell-fav"
+                  onClick={(e) => handleFavClick(e, image.src)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onMouseUp={(e) => e.stopPropagation()}
+                  aria-label={favorited ? 'Remove from favorites' : 'Add to favorites'}
+                  aria-pressed={favorited}
+                >
+                  {favorited ? '♥' : '♡'}
+                </button>
+              )}
+            </div>
           );
         })}
         {rowImages.length < columnCount &&

@@ -11,7 +11,7 @@ const SECTIONS: Section[] = [
     items: [
       { label: 'Color swatches', body: 'Filter by red / blue / green / orange / black. "ALL" clears the filter.' },
       { label: 'Search', body: 'Type an inscription number or caption keyword.' },
-      { label: 'Heart (♡ / ♥)', body: 'Tap any piece to favorite it. Toggle the header heart to show favorites only.' },
+      { label: 'Heart (♡ / ♥)', body: 'Hover a tile to reveal its heart and click to favorite. Shift-click a tile as a keyboard shortcut. Toggle the header heart to show only your favorites.' },
       { label: '▶ PLAY', body: 'Plays the current filter as a slideshow. Disabled when no images match.' },
       { label: '− / + / zoom', body: 'Changes how many columns render. Pinch/scroll-zoom also works.' },
       { label: 'Click a piece', body: 'Opens the full-size modal. Use ← / → to move, Esc to close.' },
@@ -126,11 +126,9 @@ export default function HelpButton() {
         type="button"
         onClick={() => setOpen(true)}
         aria-label="Help"
-        className="h-10 w-10 flex items-center justify-center text-bone-dim hover:text-bone transition-colors"
+        className="h-10 w-10 flex items-center justify-center text-bone-dim hover:text-bone transition-colors font-mono text-base leading-none"
       >
-        <span className="w-6 h-6 rounded-full border border-current flex items-center justify-center text-[12px] leading-none font-mono">
-          ?
-        </span>
+        ?
       </button>
 
       {mounted && modal ? createPortal(modal, document.body) : null}

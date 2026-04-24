@@ -164,10 +164,15 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     setCurrentImage((prev) => (prev + 1) % filteredImages.length);
   }, [filteredImages.length]);
 
-  // Reset current image if filtered images change and current image is out of bounds
+  // Reset current image if filtered images change and current image is out of bounds.
+  // Clamp to the last valid index so unfavoriting the last open piece slides to its
+  // neighbor rather than jumping back to zero.
   useEffect(() => {
-    if (currentImage >= filteredImages.length) {
-      setCurrentImage(filteredImages.length > 0 ? 0 : -1);
+    if (currentImage < 0) return;
+    if (filteredImages.length === 0) {
+      setCurrentImage(-1);
+    } else if (currentImage >= filteredImages.length) {
+      setCurrentImage(filteredImages.length - 1);
     }
   }, [filteredImages.length, currentImage]);
 
