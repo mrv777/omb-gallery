@@ -60,7 +60,7 @@ export function encodeIds(ids: string[]): string {
   const nums: number[] = [];
   for (const s of ids) {
     const n = Number(s);
-    if (!Number.isFinite(n) || n < 0 || n > 9_999_999) {
+    if (!Number.isFinite(n) || n < 0 || n > 99_999_999) {
       throw new Error(`invalid id: ${s}`);
     }
     nums.push(n);

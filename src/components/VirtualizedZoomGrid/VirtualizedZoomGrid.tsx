@@ -105,7 +105,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
       if (ids.length >= MAX_PLAY_IDS) break;
       const file = img.src.split('/').pop() ?? '';
       const stem = file.replace(/\.[^./]+$/, '');
-      if (/^\d{1,7}$/.test(stem)) ids.push(stem);
+      if (/^\d{1,8}$/.test(stem)) ids.push(stem);
     }
     if (ids.length === 0) return null;
     try {

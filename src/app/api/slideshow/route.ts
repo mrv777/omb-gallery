@@ -13,7 +13,7 @@ const PER_MIN = 5;
 const PER_DAY = 50;
 const GLOBAL_WINDOW_MS = 3_600_000;
 const GLOBAL_LIMIT = 1000;
-const ID_RE = /^\d{1,7}$/;
+const ID_RE = /^\d{1,8}$/;
 
 type Body = { ids?: unknown; title?: unknown; turnstileToken?: unknown };
 
