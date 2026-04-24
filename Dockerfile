@@ -21,6 +21,8 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 
 # ---- builder ----
 FROM base AS builder
+ARG NEXT_PUBLIC_TURNSTILE_SITE_KEY
+ENV NEXT_PUBLIC_TURNSTILE_SITE_KEY=$NEXT_PUBLIC_TURNSTILE_SITE_KEY
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN --mount=type=cache,id=next,target=/app/.next/cache \
