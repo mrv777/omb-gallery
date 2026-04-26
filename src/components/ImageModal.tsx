@@ -82,11 +82,11 @@ const ImageModal = memo(function ImageModal({
       >
         <div className="text-bone">
           <a
-            href={`https://bestinslot.xyz/ordinals/inscription/${id}`}
+            href={`https://ordinals.com/inscription/${id}`}
             target="_blank"
             rel="noopener noreferrer"
             className="hover:underline underline-offset-4 decoration-bone-dim"
-            title="View on bestinslot.xyz"
+            title="View on ordinals.com"
           >
             #{id}
           </a>

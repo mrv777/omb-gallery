@@ -4,6 +4,7 @@ import { memo } from 'react';
 import type { ApiEvent } from './types';
 import { lookupInscription } from '@/lib/inscriptionLookup';
 import {
+  addressLink,
   formatBtc,
   formatRelTime,
   marketplaceLabel,
@@ -39,59 +40,82 @@ const ActivityCard = memo(function ActivityCard({ event }: Props) {
   const priceStr = event.event_type === 'sold' ? formatBtc(event.sale_price_sats) : '';
   const market = event.event_type === 'sold' ? marketplaceLabel(event.marketplace) : '';
 
+  const showOwners =
+    event.event_type === 'transferred' && (event.old_owner || event.new_owner);
+
   return (
-    <a
-      href={link}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="group block border border-ink-2 hover:border-bone-dim transition-colors bg-ink-1"
-    >
-      <div className={`relative aspect-square ${tileBg} overflow-hidden`}>
-        {hit ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            src={hit.thumbnail}
-            alt={`Inscription ${event.inscription_number}`}
-            loading="lazy"
-            decoding="async"
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <span className="font-mono text-bone-dim text-xs tracking-[0.12em]">
-              #{event.inscription_number}
-            </span>
-          </div>
-        )}
-      </div>
-      <div className="p-3 font-mono text-[11px] tracking-[0.08em] uppercase">
-        <div className="flex items-center justify-between text-bone">
-          <span className="tabular-nums">#{event.inscription_number}</span>
-          <span className="text-bone-dim normal-case tracking-normal">
-            {formatRelTime(event.block_timestamp)}
-          </span>
-        </div>
-        <div className={`mt-1 ${eventColor}`}>
-          {eventLabel}
-          {priceStr && (
-            <span className="text-bone normal-case tracking-normal"> · {priceStr}</span>
+    <div className="group block border border-ink-2 hover:border-bone-dim transition-colors bg-ink-1">
+      <a href={link} target="_blank" rel="noopener noreferrer" className="block">
+        <div className={`relative aspect-square ${tileBg} overflow-hidden`}>
+          {hit ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={hit.thumbnail}
+              alt={`Inscription ${event.inscription_number}`}
+              loading="lazy"
+              decoding="async"
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center">
+              <span className="font-mono text-bone-dim text-xs tracking-[0.12em]">
+                #{event.inscription_number}
+              </span>
+            </div>
           )}
         </div>
-        {event.event_type === 'sold' && market && (
-          <div className="mt-0.5 text-bone-dim normal-case tracking-normal text-[10px]">
-            via {market}
+        <div className="p-3 pb-1 font-mono text-[11px] tracking-[0.08em] uppercase">
+          <div className="flex items-center justify-between text-bone">
+            <span className="tabular-nums">#{event.inscription_number}</span>
+            <span className="text-bone-dim normal-case tracking-normal">
+              {formatRelTime(event.block_timestamp)}
+            </span>
           </div>
-        )}
-        {event.event_type === 'transferred' && (event.old_owner || event.new_owner) && (
-          <div
-            className="mt-1 text-bone-dim normal-case tracking-normal text-[10px] truncate"
-            title={`${event.old_owner ?? '—'} → ${event.new_owner ?? '—'}`}
-          >
-            {truncateAddr(event.old_owner)} → {truncateAddr(event.new_owner)}
+          <div className={`mt-1 ${eventColor}`}>
+            {eventLabel}
+            {priceStr && (
+              <span className="text-bone normal-case tracking-normal"> · {priceStr}</span>
+            )}
           </div>
-        )}
-      </div>
-    </a>
+          {event.event_type === 'sold' && market && (
+            <div className="mt-0.5 text-bone-dim normal-case tracking-normal text-[10px]">
+              via {market}
+            </div>
+          )}
+        </div>
+      </a>
+      {showOwners && (
+        <div className="px-3 pb-3 font-mono text-[10px] tracking-normal text-bone-dim normal-case truncate">
+          {event.old_owner ? (
+            <a
+              href={addressLink(event.old_owner)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-accent-orange"
+              title={event.old_owner}
+            >
+              {truncateAddr(event.old_owner)}
+            </a>
+          ) : (
+            <span>—</span>
+          )}
+          <span> → </span>
+          {event.new_owner ? (
+            <a
+              href={addressLink(event.new_owner)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-accent-orange"
+              title={event.new_owner}
+            >
+              {truncateAddr(event.new_owner)}
+            </a>
+          ) : (
+            <span>—</span>
+          )}
+        </div>
+      )}
+    </div>
   );
 });
 

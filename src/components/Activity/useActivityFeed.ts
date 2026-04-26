@@ -6,6 +6,8 @@ import type { ApiActivityResponse, ApiEvent } from './types';
 const PAGE_SIZE = 60;
 const REFRESH_MS = 60_000;
 
+export type FeedFilter = 'all' | 'sales' | 'transfers';
+
 export type FeedState = {
   events: ApiEvent[];
   totals: { events: number; holders: number } | null;
@@ -15,7 +17,7 @@ export type FeedState = {
   reachedEnd: boolean;
 };
 
-export function useActivityFeed() {
+export function useActivityFeed(filter: FeedFilter = 'all') {
   const [state, setState] = useState<FeedState>({
     events: [],
     totals: null,
@@ -27,6 +29,18 @@ export function useActivityFeed() {
   const cursorRef = useRef<number | null>(null);
   const loadingRef = useRef<boolean>(false);
   const seenIdsRef = useRef<Set<number>>(new Set());
+  const filterRef = useRef<FeedFilter>(filter);
+
+  const buildUrl = useCallback(
+    (cursor: number | null) => {
+      const url = new URL('/api/activity', window.location.origin);
+      url.searchParams.set('limit', String(PAGE_SIZE));
+      if (cursor != null) url.searchParams.set('cursor', String(cursor));
+      if (filterRef.current !== 'all') url.searchParams.set('type', filterRef.current);
+      return url.toString();
+    },
+    []
+  );
 
   const loadMore = useCallback(async () => {
     if (loadingRef.current) return;
@@ -34,10 +48,7 @@ export function useActivityFeed() {
     if (cursorRef.current == null && seenIdsRef.current.size > 0) return;
     loadingRef.current = true;
     try {
-      const url = new URL('/api/activity', window.location.origin);
-      url.searchParams.set('limit', String(PAGE_SIZE));
-      if (cursorRef.current != null) url.searchParams.set('cursor', String(cursorRef.current));
-      const res = await fetch(url.toString());
+      const res = await fetch(buildUrl(cursorRef.current));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: ApiActivityResponse = await res.json();
       const fresh = data.events.filter((e) => !seenIdsRef.current.has(e.id));
@@ -46,7 +57,9 @@ export function useActivityFeed() {
       setState((prev) => ({
         ...prev,
         events: [...prev.events, ...fresh],
-        totals: data.totals,
+        // The API only returns totals on first-page requests; preserve the last
+        // value we saw so paginated responses don't blank the header.
+        totals: data.totals ?? prev.totals,
         poll: data.poll,
         loading: false,
         error: null,
@@ -61,14 +74,12 @@ export function useActivityFeed() {
     } finally {
       loadingRef.current = false;
     }
-  }, []);
+  }, [buildUrl]);
 
   const refreshHead = useCallback(async () => {
     // Pull the first page; prepend any events whose id is greater than what we have.
     try {
-      const url = new URL('/api/activity', window.location.origin);
-      url.searchParams.set('limit', String(PAGE_SIZE));
-      const res = await fetch(url.toString());
+      const res = await fetch(buildUrl(null));
       if (!res.ok) return;
       const data: ApiActivityResponse = await res.json();
       const newOnes = data.events.filter((e) => !seenIdsRef.current.has(e.id));
@@ -86,12 +97,23 @@ export function useActivityFeed() {
     } catch {
       // refresh failures are silent
     }
-  }, []);
+  }, [buildUrl]);
 
-  // Initial load
+  // Reset on filter change so a new fetch starts from the top.
   useEffect(() => {
+    filterRef.current = filter;
+    cursorRef.current = null;
+    seenIdsRef.current = new Set();
+    setState({
+      events: [],
+      totals: null,
+      poll: null,
+      loading: true,
+      error: null,
+      reachedEnd: false,
+    });
     loadMore();
-  }, [loadMore]);
+  }, [filter, loadMore]);
 
   // Periodic head-refresh while tab is visible
   useEffect(() => {

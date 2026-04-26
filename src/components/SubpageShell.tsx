@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import HelpButton from './HelpButton';
 
 type Props = {
-  active: 'activity' | 'explorer';
+  active?: 'activity' | 'explorer';
   children: ReactNode;
 };
 
@@ -44,14 +44,14 @@ export default function SubpageShell({ active, children }: Props) {
       </header>
       <main className="pt-6">{children}</main>
       <footer className="px-4 sm:px-6 py-8 font-mono text-[10px] tracking-[0.08em] uppercase text-bone-dim border-t border-ink-2 mt-8">
-        data via{' '}
+        on-chain data via self-hosted ord · sale data via{' '}
         <a
-          href="https://bestinslot.xyz"
+          href="https://www.satflow.com"
           target="_blank"
           rel="noopener noreferrer"
           className="hover:text-bone transition-colors"
         >
-          best in slot
+          satflow
         </a>
       </footer>
     </div>

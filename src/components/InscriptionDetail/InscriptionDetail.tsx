@@ -1,0 +1,257 @@
+import Link from 'next/link';
+import type { EventRow, InscriptionRow } from '@/lib/db';
+import { lookupInscription } from '@/lib/inscriptionLookup';
+import {
+  addressLink,
+  formatBtc,
+  formatRelTime,
+  ordinalsLink,
+  truncateAddr,
+} from '@/lib/format';
+import EventTimelineRow from './EventTimelineRow';
+
+const COLOR_TILE_BG: Record<string, string> = {
+  red: 'bg-accent-red/20',
+  blue: 'bg-accent-blue/20',
+  green: 'bg-accent-green/20',
+  orange: 'bg-accent-orange/20',
+  black: 'bg-accent-black/10',
+};
+
+type Props = {
+  inscription: InscriptionRow;
+  events: EventRow[];
+  /** Unix timestamp of the most recent movement (or mint, if never moved). */
+  heldSince: number | null;
+  /** Other inscription numbers owned by the current owner. */
+  ownerOthers: number[];
+  /** True when there are more holdings than ownerOthers includes. */
+  ownerOthersHasMore: boolean;
+};
+
+export default function InscriptionDetail({
+  inscription,
+  events,
+  heldSince,
+  ownerOthers,
+  ownerOthersHasMore,
+}: Props) {
+  const hit = lookupInscription(inscription.inscription_number);
+  const tileBg = hit?.color ? COLOR_TILE_BG[hit.color] ?? 'bg-ink-2' : 'bg-ink-2';
+  const ordLink = ordinalsLink(inscription.inscription_id, inscription.inscription_number);
+  const currentTxid = inscription.current_output ? inscription.current_output.split(':')[0] : null;
+  const totalEvents = events.length;
+  const transferCount = inscription.transfer_count ?? 0;
+  const saleCount = inscription.sale_count ?? 0;
+
+  return (
+    <section className="px-4 sm:px-6 pb-16 max-w-6xl mx-auto">
+      <Link
+        href="/activity"
+        className="inline-block font-mono text-[11px] tracking-[0.08em] uppercase text-bone-dim hover:text-bone mb-6"
+      >
+        ← back to activity
+      </Link>
+
+      {/* Hero: image + meta */}
+      <div className="grid grid-cols-1 md:grid-cols-[18rem_1fr] gap-6 mb-10">
+        <div className={`relative ${tileBg} border border-ink-2 aspect-square w-full md:w-72`}>
+          {hit ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={hit.full}
+              alt={`Inscription ${inscription.inscription_number}`}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center font-mono text-bone-dim">
+              #{inscription.inscription_number}
+            </div>
+          )}
+        </div>
+
+        <div className="font-mono">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2">
+            <h1 className="text-2xl sm:text-3xl text-bone tabular-nums">
+              #{inscription.inscription_number.toLocaleString()}
+            </h1>
+            {hit?.color && (
+              <span className="text-[10px] tracking-[0.12em] uppercase text-bone-dim border border-bone-dim/40 px-1.5 py-0.5">
+                {hit.color}
+              </span>
+            )}
+          </div>
+
+          {hit?.description && (
+            <p className="text-xs text-bone-dim mb-4 normal-case tracking-normal italic">
+              {hit.description}
+            </p>
+          )}
+
+          <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3 text-[11px] tracking-[0.08em] uppercase text-bone-dim mb-5">
+            <Stat label="transfers" value={transferCount.toLocaleString()} />
+            <Stat label="sales" value={saleCount.toLocaleString()} />
+            <Stat
+              label="volume"
+              value={formatBtc(inscription.total_volume_sats) || '—'}
+            />
+            <Stat
+              label="highest"
+              value={formatBtc(inscription.highest_sale_sats) || '—'}
+            />
+          </dl>
+
+          <div className="text-[11px] tracking-[0.08em] uppercase text-bone-dim space-y-1.5 mb-5">
+            <div className="flex flex-wrap items-baseline gap-x-2">
+              <span>owner</span>
+              {inscription.current_owner ? (
+                <a
+                  href={addressLink(inscription.current_owner)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-bone hover:text-accent-orange normal-case tracking-normal"
+                  title={inscription.current_owner}
+                >
+                  {truncateAddr(inscription.current_owner, 10, 8)}
+                </a>
+              ) : (
+                <span className="text-bone-dim">—</span>
+              )}
+              {heldSince != null && inscription.current_owner && (
+                <span className="text-bone-dim normal-case tracking-normal" title={new Date(heldSince * 1000).toISOString()}>
+                  · held {formatRelTime(heldSince)}
+                </span>
+              )}
+            </div>
+            {inscription.current_output && (
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <span>output</span>
+                <span
+                  className="text-bone normal-case tracking-normal break-all"
+                  title={inscription.current_output}
+                >
+                  {inscription.current_output.slice(0, 16)}…:
+                  {inscription.current_output.split(':')[1]}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-2 text-[10px] tracking-[0.12em] uppercase">
+            <a
+              href={ordLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
+            >
+              ordinals.com ↗
+            </a>
+            {currentTxid && (
+              <a
+                href={`https://mempool.space/tx/${currentTxid}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
+              >
+                mempool ↗
+              </a>
+            )}
+            {hit && (
+              <a
+                href={hit.full}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
+              >
+                full image ↗
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Activity timeline */}
+      <div>
+        <div className="font-mono text-[11px] tracking-[0.08em] uppercase text-bone-dim mb-3">
+          activity{' '}
+          <span className="text-bone tabular-nums">{totalEvents.toLocaleString()}</span>{' '}
+          {totalEvents === 1 ? 'event' : 'events'}
+        </div>
+
+        {events.length === 0 ? (
+          <div className="font-mono text-xs tracking-[0.08em] uppercase text-bone-dim py-12 text-center border border-ink-2">
+            no recorded activity yet · indexer warming up
+          </div>
+        ) : (
+          <div className="border border-ink-2 bg-ink-0">
+            {events.map((ev) => (
+              <EventTimelineRow key={ev.id} event={ev} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {ownerOthers.length > 0 && inscription.current_owner && (
+        <div className="mt-10">
+          <div className="font-mono text-[11px] tracking-[0.08em] uppercase text-bone-dim mb-3">
+            also held by{' '}
+            <a
+              href={addressLink(inscription.current_owner)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-bone hover:text-accent-orange normal-case tracking-normal"
+              title={inscription.current_owner}
+            >
+              {truncateAddr(inscription.current_owner, 8, 6)}
+            </a>
+          </div>
+          <div className="flex flex-wrap gap-2 items-center">
+            {ownerOthers.map((n) => {
+              const otherHit = lookupInscription(n);
+              const otherTileBg =
+                otherHit?.color ? COLOR_TILE_BG[otherHit.color] ?? 'bg-ink-2' : 'bg-ink-2';
+              return (
+                <Link
+                  key={n}
+                  href={`/inscription/${n}`}
+                  prefetch={false}
+                  className={`block w-16 h-16 ${otherTileBg} overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors`}
+                  title={`#${n}`}
+                >
+                  {otherHit ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={otherHit.thumbnail}
+                      alt={`#${n}`}
+                      loading="lazy"
+                      decoding="async"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center font-mono text-[9px] text-bone-dim">
+                      #{n}
+                    </div>
+                  )}
+                </Link>
+              );
+            })}
+            {ownerOthersHasMore && (
+              <span className="font-mono text-[10px] tracking-[0.08em] uppercase text-bone-dim self-center px-2">
+                + more
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-bone-dim">{label}</dt>
+      <dd className="text-bone normal-case tracking-normal tabular-nums mt-0.5">{value}</dd>
+    </div>
+  );
+}

@@ -5,6 +5,7 @@ import Database, { type Database as DB } from 'better-sqlite3';
 import imageData from '../data/images.json';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
+const SCHEMA_VERSION = 4;
 
 type ImageEntry = { filename: string; description: string; tags: string[] };
 type ImagesByColor = Record<string, ImageEntry[]>;
@@ -24,21 +25,42 @@ export function getDb(): DB {
   db.pragma('synchronous = NORMAL');
   db.pragma('busy_timeout = 5000');
   db.pragma('foreign_keys = ON');
+  db.pragma('cache_size = -65536');
+  db.pragma('mmap_size = 268435456');
 
-  initSchema(db);
+  migrate(db);
   seedInscriptions(db);
 
   dbInstance = db;
   return db;
 }
 
-function initSchema(db: DB): void {
+function migrate(db: DB): void {
+  const current = (db.pragma('user_version', { simple: true }) as number) ?? 0;
+  if (current >= SCHEMA_VERSION) return;
+
+  // Atomic so a SIGTERM mid-migration leaves the DB recoverable on restart.
+  const tx = db.transaction(() => {
+    if (current === 0) {
+      initSchemaLatest(db);
+    } else {
+      if (current < 2) upgradeV1ToV2(db);
+      if (current < 3) upgradeV2ToV3(db);
+      if (current < 4) upgradeV3ToV4(db);
+    }
+    db.pragma(`user_version = ${SCHEMA_VERSION}`);
+  });
+  tx();
+}
+
+function initSchemaLatest(db: DB): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS inscriptions (
       inscription_number  INTEGER PRIMARY KEY,
       inscription_id      TEXT,
       color               TEXT,
       current_owner       TEXT,
+      current_output      TEXT,
       inscribe_at         INTEGER,
       first_event_at      INTEGER,
       last_event_at       INTEGER,
@@ -53,6 +75,8 @@ function initSchema(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_insc_sale_count ON inscriptions (sale_count DESC);
     CREATE INDEX IF NOT EXISTS idx_insc_volume     ON inscriptions (total_volume_sats DESC);
     CREATE INDEX IF NOT EXISTS idx_insc_high_sale  ON inscriptions (highest_sale_sats DESC);
+    CREATE INDEX IF NOT EXISTS idx_insc_owner      ON inscriptions (current_owner);
+    CREATE INDEX IF NOT EXISTS idx_insc_id         ON inscriptions (inscription_id);
 
     CREATE TABLE IF NOT EXISTS events (
       id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,7 +85,7 @@ function initSchema(db: DB): void {
       event_type          TEXT    NOT NULL CHECK (event_type IN ('inscribed','transferred','sold')),
       block_height        INTEGER,
       block_timestamp     INTEGER NOT NULL,
-      new_satpoint        TEXT    NOT NULL UNIQUE,
+      new_satpoint        TEXT,
       old_owner           TEXT,
       new_owner           TEXT,
       marketplace         TEXT,
@@ -69,30 +93,24 @@ function initSchema(db: DB): void {
       txid                TEXT    NOT NULL,
       raw_json            TEXT,
       created_at          INTEGER NOT NULL DEFAULT (unixepoch()),
-      FOREIGN KEY (inscription_number) REFERENCES inscriptions (inscription_number) ON DELETE CASCADE
+      FOREIGN KEY (inscription_number) REFERENCES inscriptions (inscription_number) ON DELETE CASCADE,
+      UNIQUE (inscription_id, txid)
     );
     CREATE INDEX IF NOT EXISTS idx_events_block_ts        ON events (block_timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_events_inscription_num ON events (inscription_number, block_timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_events_id_desc         ON events (id DESC);
-
-    CREATE TABLE IF NOT EXISTS holders (
-      wallet_addr       TEXT PRIMARY KEY,
-      inscription_count INTEGER NOT NULL,
-      updated_at        INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_holders_count ON holders (inscription_count DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_type_id         ON events (event_type, id DESC);
 
     CREATE TABLE IF NOT EXISTS poll_state (
-      stream            TEXT PRIMARY KEY CHECK (stream IN ('activity','holders')),
+      stream            TEXT PRIMARY KEY CHECK (stream IN ('ord','satflow')),
       last_cursor       TEXT,
       last_run_at       INTEGER,
       last_status       TEXT,
       last_event_count  INTEGER,
       is_backfilling    INTEGER NOT NULL DEFAULT 0,
-      daily_call_count  INTEGER NOT NULL DEFAULT 0,
-      daily_call_date   TEXT
+      last_known_height INTEGER
     );
-    INSERT OR IGNORE INTO poll_state (stream) VALUES ('activity'), ('holders');
+    INSERT OR IGNORE INTO poll_state (stream) VALUES ('ord'), ('satflow');
 
     CREATE TABLE IF NOT EXISTS slideshows (
       slug        TEXT PRIMARY KEY,
@@ -106,6 +124,80 @@ function initSchema(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_slideshows_created_ip_at ON slideshows (creator_ip, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_slideshows_created_at    ON slideshows (created_at DESC);
   `);
+}
+
+function upgradeV1ToV2(db: DB): void {
+  // v1 had: holders table, BiS-shaped poll_state (activity/holders streams + daily_call_*),
+  // events.UNIQUE(new_satpoint), no current_output column.
+  // Strategy: rebuild events with the new UNIQUE constraint, add current_output column,
+  // drop holders, recreate poll_state.
+  db.exec(`
+    DROP TABLE IF EXISTS holders;
+
+    -- inscriptions: add current_output (column-add is non-destructive)
+    ALTER TABLE inscriptions ADD COLUMN current_output TEXT;
+    CREATE INDEX IF NOT EXISTS idx_insc_owner ON inscriptions (current_owner);
+    CREATE INDEX IF NOT EXISTS idx_insc_id    ON inscriptions (inscription_id);
+
+    -- events: rebuild with new unique constraint and nullable new_satpoint
+    CREATE TABLE events_v2 (
+      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      inscription_id      TEXT    NOT NULL,
+      inscription_number  INTEGER NOT NULL,
+      event_type          TEXT    NOT NULL CHECK (event_type IN ('inscribed','transferred','sold')),
+      block_height        INTEGER,
+      block_timestamp     INTEGER NOT NULL,
+      new_satpoint        TEXT,
+      old_owner           TEXT,
+      new_owner           TEXT,
+      marketplace         TEXT,
+      sale_price_sats     INTEGER,
+      txid                TEXT    NOT NULL,
+      raw_json            TEXT,
+      created_at          INTEGER NOT NULL DEFAULT (unixepoch()),
+      FOREIGN KEY (inscription_number) REFERENCES inscriptions (inscription_number) ON DELETE CASCADE,
+      UNIQUE (inscription_id, txid)
+    );
+    INSERT OR IGNORE INTO events_v2
+      SELECT id, inscription_id, inscription_number, event_type, block_height, block_timestamp,
+             new_satpoint, old_owner, new_owner, marketplace, sale_price_sats, txid, raw_json, created_at
+      FROM events;
+    DROP TABLE events;
+    ALTER TABLE events_v2 RENAME TO events;
+    CREATE INDEX IF NOT EXISTS idx_events_block_ts        ON events (block_timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_inscription_num ON events (inscription_number, block_timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_id_desc         ON events (id DESC);
+
+    -- poll_state: drop old table, recreate with new stream values
+    DROP TABLE IF EXISTS poll_state;
+    CREATE TABLE poll_state (
+      stream            TEXT PRIMARY KEY CHECK (stream IN ('ord','satflow')),
+      last_cursor       TEXT,
+      last_run_at       INTEGER,
+      last_status       TEXT,
+      last_event_count  INTEGER,
+      is_backfilling    INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT OR IGNORE INTO poll_state (stream) VALUES ('ord'), ('satflow');
+  `);
+}
+
+function upgradeV2ToV3(db: DB): void {
+  // Track the highest block height we've successfully ingested per stream so
+  // runOrdTick can detect when ord regresses (e.g. is reindexing) and refuse
+  // to write phantom transfers from stale satpoints.
+  // Idempotent: skip if column already exists (defensive against partial runs).
+  const cols = db.pragma('table_info(poll_state)') as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === 'last_known_height')) {
+    db.exec(`ALTER TABLE poll_state ADD COLUMN last_known_height INTEGER`);
+  }
+}
+
+function upgradeV3ToV4(db: DB): void {
+  // Compound index for /api/activity?type=sales|transfers — without it, the
+  // query planner walks idx_events_id_desc and post-filters, which scans
+  // further as the events table grows.
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_events_type_id ON events (event_type, id DESC)`);
 }
 
 function seedInscriptions(db: DB): void {
@@ -139,32 +231,40 @@ function seedInscriptions(db: DB): void {
 type Stmts = {
   // events / inscriptions writes
   insertEvent: ReturnType<DB['prepare']>;
+  upgradeEventToSold: ReturnType<DB['prepare']>;
   upsertInscriptionFromEvent: ReturnType<DB['prepare']>;
   bumpInscriptionAggregates: ReturnType<DB['prepare']>;
+  unbumpTransferOnUpgrade: ReturnType<DB['prepare']>;
+  setInscriptionState: ReturnType<DB['prepare']>;
+  setInscriptionId: ReturnType<DB['prepare']>;
+  // ord-specific reads
+  listInscriptionsForPoll: ReturnType<DB['prepare']>;
+  listInscriptionsMissingId: ReturnType<DB['prepare']>;
+  // satflow event lookup
+  findEventByInscriptionAndTxid: ReturnType<DB['prepare']>;
   // poll_state
   getPollState: ReturnType<DB['prepare']>;
   acquireLock: ReturnType<DB['prepare']>;
   setPollResult: ReturnType<DB['prepare']>;
   setBackfilling: ReturnType<DB['prepare']>;
-  bumpDailyCallCount: ReturnType<DB['prepare']>;
-  resetDailyCallCount: ReturnType<DB['prepare']>;
+  setKnownHeight: ReturnType<DB['prepare']>;
   // reads
   getRecentEvents: ReturnType<DB['prepare']>;
   getRecentEventsAfter: ReturnType<DB['prepare']>;
+  getRecentEventsByType: ReturnType<DB['prepare']>;
+  getRecentEventsByTypeAfter: ReturnType<DB['prepare']>;
   countEvents: ReturnType<DB['prepare']>;
   countHolders: ReturnType<DB['prepare']>;
   getInscription: ReturnType<DB['prepare']>;
   getInscriptionEvents: ReturnType<DB['prepare']>;
+  getAllInscriptionEvents: ReturnType<DB['prepare']>;
+  otherInscriptionsByOwner: ReturnType<DB['prepare']>;
   // leaderboards
   topByTransfers: ReturnType<DB['prepare']>;
   topByLongestUnmoved: ReturnType<DB['prepare']>;
   topByVolume: ReturnType<DB['prepare']>;
   topByHighestSale: ReturnType<DB['prepare']>;
   topHolders: ReturnType<DB['prepare']>;
-  // holders refresh
-  deleteAllHolders: ReturnType<DB['prepare']>;
-  insertHolder: ReturnType<DB['prepare']>;
-  setCurrentOwnerFromLatestEvent: ReturnType<DB['prepare']>;
 };
 
 let stmts: Stmts | null = null;
@@ -183,8 +283,21 @@ export function getStmts(): Stmts {
       )
     `),
 
-    // Make sure an inscriptions row exists. If discovered via BiS only, color is NULL.
-    // Fills inscription_id once (immutable thereafter) and inscribe_at/first_event_at if newer info.
+    // Used by Satflow when a 'transferred' row already exists for the same (inscription_id, txid):
+    // upgrade it to a 'sold' row with marketplace + price.
+    upgradeEventToSold: db.prepare(`
+      UPDATE events
+      SET event_type      = 'sold',
+          marketplace     = @marketplace,
+          sale_price_sats = @sale_price_sats,
+          old_owner       = COALESCE(@old_owner, old_owner),
+          new_owner       = COALESCE(@new_owner, new_owner),
+          raw_json        = COALESCE(@raw_json, raw_json)
+      WHERE inscription_id = @inscription_id
+        AND txid           = @txid
+        AND event_type     = 'transferred'
+    `),
+
     upsertInscriptionFromEvent: db.prepare(`
       INSERT INTO inscriptions (inscription_number, inscription_id, inscribe_at, first_event_at, last_event_at)
       VALUES (@inscription_number, @inscription_id, @inscribe_at, @block_timestamp, @block_timestamp)
@@ -195,7 +308,6 @@ export function getStmts(): Stmts {
         last_event_at  = MAX(COALESCE(inscriptions.last_event_at, 0), excluded.last_event_at)
     `),
 
-    // Apply a single event's contribution to the aggregates (called only when the events row was actually inserted).
     bumpInscriptionAggregates: db.prepare(`
       UPDATE inscriptions SET
         transfer_count    = transfer_count    + CASE WHEN @event_type = 'transferred' THEN 1 ELSE 0 END,
@@ -206,9 +318,53 @@ export function getStmts(): Stmts {
                               WHEN @event_type IN ('transferred','sold')
                                 THEN MAX(COALESCE(last_movement_at, 0), @block_timestamp)
                               ELSE last_movement_at
-                            END,
-        current_owner     = COALESCE(@new_owner, current_owner)
+                            END
       WHERE inscription_number = @inscription_number
+    `),
+
+    // When upgrading a transferred row to a sold row, the transfer was already counted —
+    // decrement transfer_count, increment sale_count, and add the sale value.
+    unbumpTransferOnUpgrade: db.prepare(`
+      UPDATE inscriptions SET
+        transfer_count    = MAX(transfer_count - 1, 0),
+        sale_count        = sale_count + 1,
+        total_volume_sats = total_volume_sats + COALESCE(@sale_price_sats, 0),
+        highest_sale_sats = MAX(highest_sale_sats, COALESCE(@sale_price_sats, 0))
+      WHERE inscription_number = @inscription_number
+    `),
+
+    setInscriptionState: db.prepare(`
+      UPDATE inscriptions
+      SET current_output = @current_output,
+          current_owner  = @current_owner,
+          inscription_id = COALESCE(inscriptions.inscription_id, @inscription_id)
+      WHERE inscription_number = @inscription_number
+    `),
+
+    setInscriptionId: db.prepare(`
+      UPDATE inscriptions
+      SET inscription_id = COALESCE(inscriptions.inscription_id, @inscription_id)
+      WHERE inscription_number = @inscription_number
+    `),
+
+    listInscriptionsForPoll: db.prepare(`
+      SELECT inscription_number, inscription_id, current_output, current_owner
+      FROM inscriptions
+      ORDER BY inscription_number
+    `),
+
+    listInscriptionsMissingId: db.prepare(`
+      SELECT inscription_number
+      FROM inscriptions
+      WHERE inscription_id IS NULL
+      ORDER BY inscription_number
+      LIMIT @limit
+    `),
+
+    findEventByInscriptionAndTxid: db.prepare(`
+      SELECT id, event_type, inscription_number
+      FROM events
+      WHERE inscription_id = @inscription_id AND txid = @txid
     `),
 
     getPollState: db.prepare(`SELECT * FROM poll_state WHERE stream = ?`),
@@ -234,17 +390,8 @@ export function getStmts(): Stmts {
       UPDATE poll_state SET is_backfilling = @flag WHERE stream = @stream
     `),
 
-    bumpDailyCallCount: db.prepare(`
-      UPDATE poll_state
-      SET daily_call_count = daily_call_count + @n,
-          daily_call_date  = @date
-      WHERE stream = @stream
-    `),
-
-    resetDailyCallCount: db.prepare(`
-      UPDATE poll_state
-      SET daily_call_count = 0, daily_call_date = @date
-      WHERE stream = @stream
+    setKnownHeight: db.prepare(`
+      UPDATE poll_state SET last_known_height = @height WHERE stream = @stream
     `),
 
     getRecentEvents: db.prepare(`
@@ -260,8 +407,28 @@ export function getStmts(): Stmts {
       LIMIT @limit
     `),
 
+    getRecentEventsByType: db.prepare(`
+      SELECT * FROM events
+      WHERE event_type = @event_type
+      ORDER BY id DESC
+      LIMIT @limit
+    `),
+
+    getRecentEventsByTypeAfter: db.prepare(`
+      SELECT * FROM events
+      WHERE id < @cursor AND event_type = @event_type
+      ORDER BY id DESC
+      LIMIT @limit
+    `),
+
     countEvents: db.prepare(`SELECT COUNT(*) AS n FROM events`),
-    countHolders: db.prepare(`SELECT COUNT(*) AS n FROM holders`),
+
+    // Holders are derived from inscriptions.current_owner — count distinct non-null owners.
+    countHolders: db.prepare(`
+      SELECT COUNT(DISTINCT current_owner) AS n
+      FROM inscriptions
+      WHERE current_owner IS NOT NULL
+    `),
 
     getInscription: db.prepare(`SELECT * FROM inscriptions WHERE inscription_number = ?`),
 
@@ -272,6 +439,24 @@ export function getStmts(): Stmts {
       LIMIT 50
     `),
 
+    // Used by the detail page (server-rendered), where we want the full timeline.
+    // Indexed scan via idx_events_inscription_num — fast even for thousands of rows.
+    getAllInscriptionEvents: db.prepare(`
+      SELECT * FROM events
+      WHERE inscription_number = ?
+      ORDER BY block_timestamp DESC, id DESC
+    `),
+
+    // For the "other holdings by this wallet" strip on the inscription detail page.
+    otherInscriptionsByOwner: db.prepare(`
+      SELECT inscription_number
+      FROM inscriptions
+      WHERE current_owner = @owner
+        AND inscription_number != @exclude
+      ORDER BY inscription_number
+      LIMIT @limit
+    `),
+
     topByTransfers: db.prepare(`
       SELECT * FROM inscriptions
       WHERE (transfer_count + sale_count) > 0
@@ -279,9 +464,6 @@ export function getStmts(): Stmts {
       LIMIT @limit
     `),
 
-    // "Longest unmoved" — show inscriptions that have moved at least once,
-    // ranked by oldest last_movement_at. Inscriptions with NULL last_movement_at
-    // are "never moved since mint" — handled by a separate endpoint/section.
     topByLongestUnmoved: db.prepare(`
       SELECT * FROM inscriptions
       WHERE last_movement_at IS NOT NULL
@@ -304,32 +486,14 @@ export function getStmts(): Stmts {
     `),
 
     topHolders: db.prepare(`
-      SELECT * FROM holders
-      ORDER BY inscription_count DESC, wallet_addr ASC
+      SELECT current_owner AS wallet_addr,
+             COUNT(*)      AS inscription_count,
+             unixepoch()   AS updated_at
+      FROM inscriptions
+      WHERE current_owner IS NOT NULL
+      GROUP BY current_owner
+      ORDER BY inscription_count DESC, current_owner ASC
       LIMIT @limit
-    `),
-
-    deleteAllHolders: db.prepare(`DELETE FROM holders`),
-
-    insertHolder: db.prepare(`
-      INSERT INTO holders (wallet_addr, inscription_count, updated_at)
-      VALUES (@wallet_addr, @inscription_count, unixepoch())
-      ON CONFLICT(wallet_addr) DO UPDATE SET
-        inscription_count = excluded.inscription_count,
-        updated_at = excluded.updated_at
-    `),
-
-    // Used as a fallback for current_owner when holders endpoint doesn't expose
-    // wallet→inscription_id mappings: derive owner from latest event.
-    setCurrentOwnerFromLatestEvent: db.prepare(`
-      UPDATE inscriptions SET current_owner = (
-        SELECT new_owner FROM events
-        WHERE events.inscription_number = inscriptions.inscription_number
-          AND new_owner IS NOT NULL
-        ORDER BY block_timestamp DESC, id DESC
-        LIMIT 1
-      )
-      WHERE current_owner IS NULL
     `),
   };
   return stmts;
@@ -337,7 +501,7 @@ export function getStmts(): Stmts {
 
 export function walCheckpoint(): void {
   try {
-    getDb().pragma('wal_checkpoint(TRUNCATE)');
+    getDb().pragma('wal_checkpoint(PASSIVE)');
   } catch {
     // checkpoint failure is non-fatal
   }
@@ -350,7 +514,7 @@ export type EventRow = {
   event_type: 'inscribed' | 'transferred' | 'sold';
   block_height: number | null;
   block_timestamp: number;
-  new_satpoint: string;
+  new_satpoint: string | null;
   old_owner: string | null;
   new_owner: string | null;
   marketplace: string | null;
@@ -364,6 +528,7 @@ export type InscriptionRow = {
   inscription_id: string | null;
   color: string | null;
   current_owner: string | null;
+  current_output: string | null;
   inscribe_at: number | null;
   first_event_at: number | null;
   last_event_at: number | null;
@@ -381,12 +546,11 @@ export type HolderRow = {
 };
 
 export type PollStateRow = {
-  stream: 'activity' | 'holders';
+  stream: 'ord' | 'satflow';
   last_cursor: string | null;
   last_run_at: number | null;
   last_status: string | null;
   last_event_count: number | null;
   is_backfilling: number;
-  daily_call_count: number;
-  daily_call_date: string | null;
+  last_known_height: number | null;
 };

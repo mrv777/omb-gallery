@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useLeaderboard } from './useLeaderboard';
 import { LEADERBOARDS, type LeaderboardKey } from './types';
 import { lookupInscription } from '@/lib/inscriptionLookup';
-import { formatBtc, formatRelTime, ordinalsLink, truncateAddr } from '@/lib/format';
+import { addressLink, formatBtc, formatRelTime, truncateAddr } from '@/lib/format';
 import type { ApiHolder, ApiInscription } from '@/components/Activity/types';
 
 type Props = {
@@ -72,14 +72,13 @@ function InscriptionRow({
   type: LeaderboardKey;
 }) {
   const hit = lookupInscription(row.inscription_number);
-  const link = hit ? hit.full : ordinalsLink(row.inscription_id, row.inscription_number);
+  const link = `/inscription/${row.inscription_number}`;
   const metric = renderInscriptionMetric(row, type);
   return (
     <li>
-      <a
+      <Link
         href={link}
-        target="_blank"
-        rel="noopener noreferrer"
+        prefetch={false}
         className="grid grid-cols-[1.5rem_2.5rem_1fr_auto] items-center gap-3 px-4 py-2 hover:bg-ink-2 transition-colors"
       >
         <span className="font-mono text-[11px] text-bone-dim tabular-nums">{rank}</span>
@@ -98,7 +97,7 @@ function InscriptionRow({
           #{row.inscription_number}
         </span>
         <span className="font-mono text-xs text-bone tabular-nums whitespace-nowrap">{metric}</span>
-      </a>
+      </Link>
     </li>
   );
 }
@@ -107,9 +106,15 @@ function HolderRow({ row, rank }: { row: ApiHolder; rank: number }) {
   return (
     <li className="grid grid-cols-[1.5rem_1fr_auto] items-center gap-3 px-4 py-2">
       <span className="font-mono text-[11px] text-bone-dim tabular-nums">{rank}</span>
-      <span className="font-mono text-xs text-bone truncate" title={row.wallet_addr}>
+      <a
+        href={addressLink(row.wallet_addr)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-mono text-xs text-bone truncate hover:text-accent-orange"
+        title={row.wallet_addr}
+      >
         {truncateAddr(row.wallet_addr, 8, 6)}
-      </span>
+      </a>
       <span className="font-mono text-xs text-bone tabular-nums whitespace-nowrap">
         {row.inscription_count.toLocaleString()}
       </span>
