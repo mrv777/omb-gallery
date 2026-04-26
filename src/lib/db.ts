@@ -42,7 +42,19 @@ function migrate(db: DB): void {
   // Atomic so a SIGTERM mid-migration leaves the DB recoverable on restart.
   const tx = db.transaction(() => {
     if (current === 0) {
-      initSchemaLatest(db);
+      // The v1 schema (pre-this-branch) never set user_version, so an existing
+      // legacy DB also reports 0. Distinguish by probing for `holders`, which
+      // only exists in v1 and is dropped by upgradeV1ToV2.
+      const isLegacyV1 = !!db
+        .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='holders'`)
+        .get();
+      if (isLegacyV1) {
+        upgradeV1ToV2(db);
+        upgradeV2ToV3(db);
+        upgradeV3ToV4(db);
+      } else {
+        initSchemaLatest(db);
+      }
     } else {
       if (current < 2) upgradeV1ToV2(db);
       if (current < 3) upgradeV2ToV3(db);

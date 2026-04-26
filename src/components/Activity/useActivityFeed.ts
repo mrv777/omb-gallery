@@ -30,6 +30,9 @@ export function useActivityFeed(filter: FeedFilter = 'all') {
   const loadingRef = useRef<boolean>(false);
   const seenIdsRef = useRef<Set<number>>(new Set());
   const filterRef = useRef<FeedFilter>(filter);
+  // Bumped on filter reset so an in-flight fetch's response can be discarded
+  // when the filter has changed underneath it.
+  const reqGenRef = useRef(0);
 
   const buildUrl = useCallback(
     (cursor: number | null) => {
@@ -47,10 +50,13 @@ export function useActivityFeed(filter: FeedFilter = 'all') {
     // Don't paginate past the end; refreshHead handles new items at the top.
     if (cursorRef.current == null && seenIdsRef.current.size > 0) return;
     loadingRef.current = true;
+    const myGen = reqGenRef.current;
     try {
       const res = await fetch(buildUrl(cursorRef.current));
+      if (myGen !== reqGenRef.current) return;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: ApiActivityResponse = await res.json();
+      if (myGen !== reqGenRef.current) return;
       const fresh = data.events.filter((e) => !seenIdsRef.current.has(e.id));
       for (const e of fresh) seenIdsRef.current.add(e.id);
       cursorRef.current = data.next_cursor;
@@ -66,13 +72,17 @@ export function useActivityFeed(filter: FeedFilter = 'all') {
         reachedEnd: data.next_cursor == null,
       }));
     } catch (err) {
+      if (myGen !== reqGenRef.current) return;
       setState((prev) => ({
         ...prev,
         loading: false,
         error: err instanceof Error ? err.message : String(err),
       }));
     } finally {
-      loadingRef.current = false;
+      // Only release the lock if this fetch is still the active generation —
+      // otherwise the next-generation loadMore that's already running would
+      // have its in-flight flag stomped by a stale fetch resolving late.
+      if (myGen === reqGenRef.current) loadingRef.current = false;
     }
   }, [buildUrl]);
 
@@ -104,6 +114,10 @@ export function useActivityFeed(filter: FeedFilter = 'all') {
     filterRef.current = filter;
     cursorRef.current = null;
     seenIdsRef.current = new Set();
+    // Invalidate any in-flight request and clear the lock so the new loadMore
+    // can proceed immediately even if the previous fetch is still pending.
+    reqGenRef.current++;
+    loadingRef.current = false;
     setState({
       events: [],
       totals: null,

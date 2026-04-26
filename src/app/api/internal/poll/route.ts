@@ -399,8 +399,16 @@ async function runSatflowTick(opts: { force?: 'incremental' | 'backfill' }): Pro
   const maxPages = backfilling ? SATFLOW_BACKFILL_MAX_PAGES_PER_TICK : SATFLOW_INCREMENTAL_MAX_PAGES;
 
   const startedAt = Date.now();
-  let cursor = backfilling ? state.last_cursor : null;
-  let since: number | null = backfilling ? null : parseSinceFromCursor(state.last_cursor);
+  // A `ts:<n>` last_cursor is our own sentinel from a prior tick where Satflow
+  // didn't expose nextCursor — translate it back to `since` regardless of mode
+  // so we never round-trip the sentinel to Satflow as ?cursor=.
+  let cursor: string | null = null;
+  let since: number | null = null;
+  if (state.last_cursor?.startsWith('ts:')) {
+    since = parseSinceFromCursor(state.last_cursor);
+  } else if (backfilling) {
+    cursor = state.last_cursor;
+  }
   let upgraded = 0;
   let inserted = 0;
   let pagesUsed = 0;
