@@ -5,7 +5,7 @@ import Database, { type Database as DB } from 'better-sqlite3';
 import imageData from '../data/images.json';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 type ImageEntry = { filename: string; description: string; tags: string[] };
 type ImagesByColor = Record<string, ImageEntry[]>;
@@ -54,6 +54,7 @@ function migrate(db: DB): void {
         upgradeV3ToV4(db);
         upgradeV4ToV5(db);
         upgradeV5ToV6(db);
+        upgradeV6ToV7(db);
       } else {
         initSchemaLatest(db);
       }
@@ -63,6 +64,7 @@ function migrate(db: DB): void {
       if (current < 4) upgradeV3ToV4(db);
       if (current < 5) upgradeV4ToV5(db);
       if (current < 6) upgradeV5ToV6(db);
+      if (current < 7) upgradeV6ToV7(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -119,13 +121,14 @@ function initSchemaLatest(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_events_type_id         ON events (event_type, id DESC);
 
     CREATE TABLE IF NOT EXISTS poll_state (
-      stream            TEXT PRIMARY KEY CHECK (stream IN ('ord','satflow','satflow_listings')),
-      last_cursor       TEXT,
-      last_run_at       INTEGER,
-      last_status       TEXT,
-      last_event_count  INTEGER,
-      is_backfilling    INTEGER NOT NULL DEFAULT 0,
-      last_known_height INTEGER
+      stream                    TEXT PRIMARY KEY CHECK (stream IN ('ord','satflow','satflow_listings')),
+      last_cursor               TEXT,
+      last_run_at               INTEGER,
+      last_status               TEXT,
+      last_event_count          INTEGER,
+      is_backfilling            INTEGER NOT NULL DEFAULT 0,
+      last_known_height         INTEGER,
+      backfill_unresolved_seen  INTEGER NOT NULL DEFAULT 0
     );
     INSERT OR IGNORE INTO poll_state (stream) VALUES ('ord'), ('satflow'), ('satflow_listings');
 
@@ -284,6 +287,18 @@ function upgradeV5ToV6(db: DB): void {
   `);
 }
 
+function upgradeV6ToV7(db: DB): void {
+  // Add a sticky cross-tick counter for unresolved sales seen during a backfill
+  // walk. Without this, an unresolved sale on an early page is missed forever:
+  // the cursor advances past it, later ticks see unresolved=0, and the
+  // is_backfilling flag clears before ord bootstrap could rescue it.
+  // Idempotent: skip if column already exists.
+  const cols = db.pragma('table_info(poll_state)') as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === 'backfill_unresolved_seen')) {
+    db.exec(`ALTER TABLE poll_state ADD COLUMN backfill_unresolved_seen INTEGER NOT NULL DEFAULT 0`);
+  }
+}
+
 function upgradeV4ToV5(db: DB): void {
   // Round-robin poll order: without this, runOrdTick always polls in
   // inscription_number ASC and breaks at the wallclock budget, so the back
@@ -336,6 +351,7 @@ type Stmts = {
   setInscriptionState: ReturnType<DB['prepare']>;
   setInscriptionId: ReturnType<DB['prepare']>;
   setInscriptionInscribeAt: ReturnType<DB['prepare']>;
+  setInscriptionOwnerIfNewer: ReturnType<DB['prepare']>;
   // ord-specific reads
   listInscriptionsForPoll: ReturnType<DB['prepare']>;
   listInscriptionsMissingId: ReturnType<DB['prepare']>;
@@ -348,6 +364,7 @@ type Stmts = {
   acquireLock: ReturnType<DB['prepare']>;
   setPollResult: ReturnType<DB['prepare']>;
   setBackfilling: ReturnType<DB['prepare']>;
+  setBackfillUnresolvedSeen: ReturnType<DB['prepare']>;
   setKnownHeight: ReturnType<DB['prepare']>;
   // reads
   getRecentEvents: ReturnType<DB['prepare']>;
@@ -474,6 +491,19 @@ export function getStmts(): Stmts {
       WHERE inscription_number = @inscription_number
     `),
 
+    // Update current_owner from a Satflow standalone-insert sale, but only if
+    // the sale is at least as recent as anything we already know about. Run
+    // BEFORE bumpInscriptionAggregates (which advances last_movement_at).
+    // This keeps backfill (asc-sorted, oldest-first) from clobbering a more
+    // recent owner already set by ord or a later satflow row.
+    setInscriptionOwnerIfNewer: db.prepare(`
+      UPDATE inscriptions
+      SET current_owner = @new_owner
+      WHERE inscription_number = @inscription_number
+        AND @new_owner IS NOT NULL
+        AND (last_movement_at IS NULL OR @block_timestamp >= last_movement_at)
+    `),
+
     listInscriptionsForPoll: db.prepare(`
       SELECT inscription_number, inscription_id, current_output, current_owner
       FROM inscriptions
@@ -532,6 +562,10 @@ export function getStmts(): Stmts {
 
     setBackfilling: db.prepare(`
       UPDATE poll_state SET is_backfilling = @flag WHERE stream = @stream
+    `),
+
+    setBackfillUnresolvedSeen: db.prepare(`
+      UPDATE poll_state SET backfill_unresolved_seen = @count WHERE stream = @stream
     `),
 
     setKnownHeight: db.prepare(`
@@ -751,11 +785,12 @@ export type HolderRow = {
 };
 
 export type PollStateRow = {
-  stream: 'ord' | 'satflow';
+  stream: 'ord' | 'satflow' | 'satflow_listings';
   last_cursor: string | null;
   last_run_at: number | null;
   last_status: string | null;
   last_event_count: number | null;
   is_backfilling: number;
   last_known_height: number | null;
+  backfill_unresolved_seen: number;
 };

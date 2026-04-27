@@ -15,7 +15,7 @@ const BAR_SEGMENTS = 24;
 export default function ImagePreloader({
   images,
   onComplete,
-  batchSize: _batchSize = 10,
+  batchSize = 10,
   initialVisibleCount = 100,
 }: ImagePreloaderProps) {
   const [progress, setProgress] = useState(0);
@@ -75,8 +75,15 @@ export default function ImagePreloader({
 
     const preloadInitialBatch = async () => {
       const initial = images.slice(0, preloadCount);
-
-      await Promise.all(initial.map((image) => preloadImage(image.thumbnail)));
+      // Connection-aware chunking: caller picks batchSize based on
+      // navigator.connection.effectiveType. Without this, 100+ requests fire
+      // concurrently on slow links and the actual viewport thumbnails wait
+      // behind off-screen ones.
+      const size = Math.max(1, batchSize);
+      for (let i = 0; i < initial.length && !cancelled; i += size) {
+        const slice = initial.slice(i, i + size);
+        await Promise.all(slice.map((image) => preloadImage(image.thumbnail)));
+      }
 
       if (!cancelled) {
         setInitialLoadComplete(true);
@@ -91,7 +98,7 @@ export default function ImagePreloader({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [images, onComplete, preloadCount]);
+  }, [images, onComplete, preloadCount, batchSize]);
 
   const showSkip = timeElapsed > 3 && !initialLoadComplete;
 

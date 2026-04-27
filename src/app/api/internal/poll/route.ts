@@ -167,8 +167,13 @@ function initBackfill(): TickResult {
   const db = getDb();
   // Reset to page 1 — backfill walks `sortDirection=asc` so page 1 is the
   // oldest sale in the collection. New sales appended at the latest page
-  // don't shift the older pages we're walking through.
-  db.prepare(`UPDATE poll_state SET last_cursor = 'page:1', is_backfilling = 1 WHERE stream = 'satflow'`).run();
+  // don't shift the older pages we're walking through. Also zero the
+  // cross-tick unresolved counter so the new walk starts clean.
+  db.prepare(
+    `UPDATE poll_state
+     SET last_cursor = 'page:1', is_backfilling = 1, backfill_unresolved_seen = 0
+     WHERE stream = 'satflow'`
+  ).run();
   return { mode: 'init-backfill', done: true };
 }
 
@@ -609,6 +614,12 @@ async function runSatflowTick(opts: { force?: 'incremental' | 'backfill' }): Pro
   const backfilling =
     opts.force === 'backfill' || (opts.force !== 'incremental' && state.is_backfilling === 1);
   const maxPages = backfilling ? SATFLOW_BACKFILL_MAX_PAGES_PER_TICK : SATFLOW_INCREMENTAL_MAX_PAGES;
+  // Cross-tick sticky counter: any unresolved sale seen during this backfill
+  // walk (across multiple ticks) keeps us from declaring "done" until we
+  // restart at page 1 and confirm everything resolves. Without this, an
+  // unresolved sale on an early page is permanently skipped after the cursor
+  // advances past it.
+  const priorUnresolvedSeen = backfilling ? state.backfill_unresolved_seen ?? 0 : 0;
 
   // Pagination model:
   //   incremental: walk page 1 → N with sortDirection=desc (newest first),
@@ -685,20 +696,26 @@ async function runSatflowTick(opts: { force?: 'incremental' | 'backfill' }): Pro
     nextPage++;
   }
 
-  // Persist cursor:
-  //   incremental: no cursor (always starts page 1).
-  //   backfill drained AND fully resolved: park at last page; flag will clear below.
-  //   backfill drained but unresolved>0: ord hasn't bootstrapped those inscriptions
-  //     yet, so reset to page 1 so a later pass (after ord catches up) picks them up.
-  //   backfill mid-walk: park at the next page to fetch.
-  const allResolved = unresolved === 0;
+  // Persist cursor + cross-tick unresolved counter:
+  //   incremental: no cursor; counter not used.
+  //   backfill mid-walk: park at next page; persist running unresolved total.
+  //   backfill drained, ANY unresolved across this walk: reset to page 1 and
+  //     zero the counter so the next pass (after ord catches up) re-walks the
+  //     whole history. The flag stays set.
+  //   backfill drained, all clean: park at last page; flag clears below.
+  const totalUnresolvedSeen = backfilling ? priorUnresolvedSeen + unresolved : 0;
+  const fullyClean = totalUnresolvedSeen === 0;
   let nextCursor: string | null;
+  let nextUnresolvedSeen = totalUnresolvedSeen;
   if (!backfilling) {
     nextCursor = null;
-  } else if (drained && !allResolved) {
+  } else if (drained && !fullyClean) {
     nextCursor = 'page:1';
+    nextUnresolvedSeen = 0;
+  } else if (drained) {
+    nextCursor = `page:${lastPageReached}`;
   } else {
-    nextCursor = `page:${drained ? lastPageReached : nextPage}`;
+    nextCursor = `page:${nextPage}`;
   }
 
   stmts.setPollResult.run({
@@ -708,10 +725,14 @@ async function runSatflowTick(opts: { force?: 'incremental' | 'backfill' }): Pro
     cursor: nextCursor,
   });
 
-  // Only clear the backfilling flag once we've drained AND every sale resolved.
-  // Otherwise we keep is_backfilling=1 so the next cron tick resumes (from page 1)
-  // and re-tries the unresolved tail.
-  if (backfilling && drained && allResolved && !errMsg) {
+  if (backfilling) {
+    stmts.setBackfillUnresolvedSeen.run({ stream: 'satflow', count: nextUnresolvedSeen });
+  }
+
+  // Only clear the backfilling flag once we've drained AND every sale across
+  // the whole walk resolved (not just this tick). Otherwise keep is_backfilling=1
+  // so the next cron tick re-walks from page 1 and retries the unresolved tail.
+  if (backfilling && drained && fullyClean && !errMsg) {
     stmts.setBackfilling.run({ stream: 'satflow', flag: 0 });
   }
 
@@ -721,9 +742,10 @@ async function runSatflowTick(opts: { force?: 'incremental' | 'backfill' }): Pro
     inserted,
     upgraded,
     unresolved,
+    unresolvedSeenTotal: backfilling ? nextUnresolvedSeen : 0,
     lastPage: lastPageReached,
     total: totalReported,
-    done: drained,
+    done: drained && fullyClean,
     ...(errMsg ? { error: errMsg } : {}),
   };
 }
@@ -811,6 +833,15 @@ function applySalesTransaction(
         inscription_number,
         inscription_id: sale.inscription_id,
         inscribe_at: null,
+        block_timestamp: sale.block_timestamp,
+      });
+      // Update current_owner from satflow's buyer ONLY if this sale is at
+      // least as recent as anything we know about — otherwise an older
+      // backfill row would stomp a more-recent state from ord. Must run
+      // before bumpInscriptionAggregates (which advances last_movement_at).
+      stmts.setInscriptionOwnerIfNewer.run({
+        inscription_number,
+        new_owner: sale.buyer,
         block_timestamp: sale.block_timestamp,
       });
       const r = stmts.insertEvent.run({

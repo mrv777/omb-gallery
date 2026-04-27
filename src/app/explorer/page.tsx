@@ -5,7 +5,7 @@ import Leaderboard from '@/components/Explorer/Leaderboard';
 export const metadata: Metadata = {
   title: 'Explorer · OMB Archive',
   description:
-    'Leaderboards for the Ordinal Maxi Biz collection: most-transferred, longest-held, top sale volume, top holders.',
+    'Leaderboards for the Ordinal Maxi Biz collection: most-transferred, longest-unmoved, top sale volume, top holders.',
 };
 
 export default function ExplorerPage() {

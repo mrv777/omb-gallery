@@ -31,6 +31,107 @@ afterEach(() => {
   }
 });
 
+describe('poll_state v7 — backfill_unresolved_seen', () => {
+  it('initializes the column at zero on fresh DB', () => {
+    const db = dbModule.getDb();
+    const ver = db.pragma('user_version', { simple: true });
+    expect(ver).toBeGreaterThanOrEqual(7);
+    const row = db
+      .prepare(`SELECT backfill_unresolved_seen AS n FROM poll_state WHERE stream = 'satflow'`)
+      .get() as { n: number };
+    expect(row.n).toBe(0);
+  });
+
+  it('persists across reads via setBackfillUnresolvedSeen', () => {
+    const stmts = dbModule.getStmts();
+    stmts.setBackfillUnresolvedSeen.run({ stream: 'satflow', count: 7 });
+    const row1 = stmts.getPollState.get('satflow') as { backfill_unresolved_seen: number };
+    expect(row1.backfill_unresolved_seen).toBe(7);
+    stmts.setBackfillUnresolvedSeen.run({ stream: 'satflow', count: 0 });
+    const row2 = stmts.getPollState.get('satflow') as { backfill_unresolved_seen: number };
+    expect(row2.backfill_unresolved_seen).toBe(0);
+  });
+});
+
+describe('setInscriptionOwnerIfNewer — recency guard', () => {
+  it('sets owner when last_movement_at is NULL (cold start)', () => {
+    const db = dbModule.getDb();
+    const stmts = dbModule.getStmts();
+    const row = db.prepare(`SELECT inscription_number FROM inscriptions LIMIT 1`).get() as {
+      inscription_number: number;
+    };
+    stmts.setInscriptionOwnerIfNewer.run({
+      inscription_number: row.inscription_number,
+      new_owner: 'bc1pbuyer',
+      block_timestamp: 1700000100,
+    });
+    const after = db
+      .prepare(`SELECT current_owner FROM inscriptions WHERE inscription_number = ?`)
+      .get(row.inscription_number) as { current_owner: string | null };
+    expect(after.current_owner).toBe('bc1pbuyer');
+  });
+
+  it('does NOT overwrite when sale is older than last_movement_at', () => {
+    const db = dbModule.getDb();
+    const stmts = dbModule.getStmts();
+    const row = db.prepare(`SELECT inscription_number FROM inscriptions LIMIT 1`).get() as {
+      inscription_number: number;
+    };
+    db.prepare(
+      `UPDATE inscriptions SET current_owner = 'bc1precent', last_movement_at = 1700000200 WHERE inscription_number = ?`
+    ).run(row.inscription_number);
+    stmts.setInscriptionOwnerIfNewer.run({
+      inscription_number: row.inscription_number,
+      new_owner: 'bc1pancient',
+      block_timestamp: 1700000100, // older than last_movement_at
+    });
+    const after = db
+      .prepare(`SELECT current_owner FROM inscriptions WHERE inscription_number = ?`)
+      .get(row.inscription_number) as { current_owner: string };
+    expect(after.current_owner).toBe('bc1precent');
+  });
+
+  it('overwrites when sale is at or after last_movement_at', () => {
+    const db = dbModule.getDb();
+    const stmts = dbModule.getStmts();
+    const row = db.prepare(`SELECT inscription_number FROM inscriptions LIMIT 1`).get() as {
+      inscription_number: number;
+    };
+    db.prepare(
+      `UPDATE inscriptions SET current_owner = 'bc1pold', last_movement_at = 1700000200 WHERE inscription_number = ?`
+    ).run(row.inscription_number);
+    stmts.setInscriptionOwnerIfNewer.run({
+      inscription_number: row.inscription_number,
+      new_owner: 'bc1pnewest',
+      block_timestamp: 1700000300,
+    });
+    const after = db
+      .prepare(`SELECT current_owner FROM inscriptions WHERE inscription_number = ?`)
+      .get(row.inscription_number) as { current_owner: string };
+    expect(after.current_owner).toBe('bc1pnewest');
+  });
+
+  it('skips when new_owner is null (defensive)', () => {
+    const db = dbModule.getDb();
+    const stmts = dbModule.getStmts();
+    const row = db.prepare(`SELECT inscription_number FROM inscriptions LIMIT 1`).get() as {
+      inscription_number: number;
+    };
+    db.prepare(
+      `UPDATE inscriptions SET current_owner = 'bc1pkeep' WHERE inscription_number = ?`
+    ).run(row.inscription_number);
+    stmts.setInscriptionOwnerIfNewer.run({
+      inscription_number: row.inscription_number,
+      new_owner: null,
+      block_timestamp: 1700000999,
+    });
+    const after = db
+      .prepare(`SELECT current_owner FROM inscriptions WHERE inscription_number = ?`)
+      .get(row.inscription_number) as { current_owner: string };
+    expect(after.current_owner).toBe('bc1pkeep');
+  });
+});
+
 describe('active_listings schema + statements', () => {
   it('creates the active_listings table at v6 or higher', () => {
     const db = dbModule.getDb();

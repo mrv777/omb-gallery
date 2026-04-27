@@ -18,8 +18,8 @@ export const LEADERBOARDS: Record<LeaderboardKey, LeaderboardMeta> = {
   },
   'longest-unmoved': {
     key: 'longest-unmoved',
-    title: 'Longest Held',
-    blurb: 'Inscriptions whose last movement was longest ago.',
+    title: 'Longest Unmoved',
+    blurb: 'Inscriptions that have moved at least once and whose last movement was longest ago. Never-distributed pieces are excluded.',
     metricLabel: 'last moved',
   },
   'top-volume': {

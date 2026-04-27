@@ -88,10 +88,16 @@ export function useActivityFeed(filter: FeedFilter = 'all') {
 
   const refreshHead = useCallback(async () => {
     // Pull the first page; prepend any events whose id is greater than what we have.
+    // Capture the request generation so a stale response from a previous filter
+    // is discarded if the user changed filters mid-flight — otherwise old-filter
+    // events would prepend into a freshly-reset feed and pollute seenIdsRef.
+    const myGen = reqGenRef.current;
     try {
       const res = await fetch(buildUrl(null));
+      if (myGen !== reqGenRef.current) return;
       if (!res.ok) return;
       const data: ApiActivityResponse = await res.json();
+      if (myGen !== reqGenRef.current) return;
       const newOnes = data.events.filter((e) => !seenIdsRef.current.has(e.id));
       if (newOnes.length === 0) {
         setState((prev) => ({ ...prev, totals: data.totals, poll: data.poll }));
