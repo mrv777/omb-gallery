@@ -58,3 +58,8 @@ export function mempoolTxLink(txid: string | null | undefined): string {
   if (!txid || txid === 'unknown') return '';
   return `https://mempool.space/tx/${txid}`;
 }
+
+export function addressLink(addr: string | null | undefined): string {
+  if (!addr) return '';
+  return `https://ord.io/${addr}`;
+}

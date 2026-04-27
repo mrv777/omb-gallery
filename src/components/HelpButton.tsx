@@ -34,7 +34,7 @@ const SECTIONS: Section[] = [
     items: [
       { label: 'Activity', body: 'Live on-chain feed for OMB inscriptions. Refreshes every 60s while the tab is visible.' },
       { label: 'Explorer', body: 'Leaderboards: most-transferred, longest-unmoved, top volume, highest sale, plus top holders.' },
-      { label: 'Data source', body: 'Polled from Best in Slot every 5 minutes (incremental), full history backfilled separately.' },
+      { label: 'Data source', body: 'Transfer state from a self-hosted ord node (polled every 5 minutes); sale prices and marketplaces enriched from Satflow.' },
     ],
   },
 ];

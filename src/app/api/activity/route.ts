@@ -13,18 +13,35 @@ export async function GET(req: NextRequest) {
   const cursorStr = url.searchParams.get('cursor');
   const cursor = cursorStr && /^\d+$/.test(cursorStr) ? parseInt(cursorStr, 10) : null;
 
+  const typeParam = url.searchParams.get('type');
+  const eventType =
+    typeParam === 'sales' ? 'sold' : typeParam === 'transfers' ? 'transferred' : null;
+
   const stmts = getStmts();
-  const events = (cursor != null
-    ? stmts.getRecentEventsAfter.all({ cursor, limit })
-    : stmts.getRecentEvents.all({ limit })) as EventRow[];
+  const events = (
+    eventType
+      ? cursor != null
+        ? stmts.getRecentEventsByTypeAfter.all({ cursor, limit, event_type: eventType })
+        : stmts.getRecentEventsByType.all({ limit, event_type: eventType })
+      : cursor != null
+        ? stmts.getRecentEventsAfter.all({ cursor, limit })
+        : stmts.getRecentEvents.all({ limit })
+  ) as EventRow[];
 
   const next_cursor = events.length === limit ? events[events.length - 1].id : null;
 
-  const totals = {
-    events: (stmts.countEvents.get([]) as { n: number }).n,
-    holders: (stmts.countHolders.get([]) as { n: number }).n,
-  };
-  const poll = stmts.getPollState.get('activity') as PollStateRow | undefined;
+  // Totals only change when the poller writes — recomputing them on every
+  // paginated request is wasted work. Compute them only on first-page (cursor
+  // == null) requests, which covers initial mount, filter change, and the
+  // 60s head-refresh in useActivityFeed.
+  const totals =
+    cursor == null
+      ? {
+          events: (stmts.countEvents.get([]) as { n: number }).n,
+          holders: (stmts.countHolders.get([]) as { n: number }).n,
+        }
+      : null;
+  const poll = stmts.getPollState.get('ord') as PollStateRow | undefined;
 
   return NextResponse.json({
     events,

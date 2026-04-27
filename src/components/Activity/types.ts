@@ -5,7 +5,7 @@ export type ApiEvent = {
   event_type: 'inscribed' | 'transferred' | 'sold';
   block_height: number | null;
   block_timestamp: number;
-  new_satpoint: string;
+  new_satpoint: string | null;
   old_owner: string | null;
   new_owner: string | null;
   marketplace: string | null;
@@ -17,7 +17,7 @@ export type ApiEvent = {
 export type ApiActivityResponse = {
   events: ApiEvent[];
   next_cursor: number | null;
-  totals: { events: number; holders: number };
+  totals: { events: number; holders: number } | null;
   poll: {
     last_run_at: number | null;
     last_status: string | null;

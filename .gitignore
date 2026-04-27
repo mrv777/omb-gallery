@@ -39,4 +39,16 @@ next-env.d.ts
 # that should not leak into a public repo
 CLAUDE.md
 DEPLOYMENT.md
-PHASE2_HANDOFF.md 
+PHASE2_HANDOFF.md
+AGENTS.md
+SATFLOW-REWRITE.md
+
+# server bootstrap + runbooks for the OMB box (bitcoind, ord, Coolify).
+# contains generated RPC creds, INTERNAL_POLL_SECRET, host IPs, etc.
+/infra/
+
+# untracked utility scripts (one-shot tooling, not part of the build)
+/scripts/update-descriptions.js
+
+# Claude Code local state (scheduled task locks, agent worktrees, etc.)
+/.claude/

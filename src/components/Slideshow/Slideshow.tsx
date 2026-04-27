@@ -358,7 +358,7 @@ export default function Slideshow({
         </span>
         <span className="text-bone-dim">·</span>
         <a
-          href={`https://bestinslot.xyz/ordinals/inscription/${idNum}`}
+          href={`https://ordinals.com/inscription/${idNum}`}
           target="_blank"
           rel="noopener noreferrer"
           className="text-bone hover:underline underline-offset-4 decoration-bone-dim"
