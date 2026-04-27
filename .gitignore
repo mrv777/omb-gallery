@@ -49,6 +49,11 @@ SATFLOW-REWRITE.md
 
 # untracked utility scripts (one-shot tooling, not part of the build)
 /scripts/update-descriptions.js
+/scripts/test-satflow.mjs
+/scripts/test-satflow-e2e.mjs
+
+# captured API responses used as ad-hoc fixtures (no secrets, but bulky)
+/tests/fixtures/
 
 # Claude Code local state (scheduled task locks, agent worktrees, etc.)
 /.claude/

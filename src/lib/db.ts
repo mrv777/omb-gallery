@@ -273,6 +273,7 @@ type Stmts = {
   markInscriptionPolled: ReturnType<DB['prepare']>;
   // satflow event lookup
   findEventByInscriptionAndTxid: ReturnType<DB['prepare']>;
+  listInscriptionIdToNumber: ReturnType<DB['prepare']>;
   // poll_state
   getPollState: ReturnType<DB['prepare']>;
   acquireLock: ReturnType<DB['prepare']>;
@@ -417,6 +418,15 @@ export function getStmts(): Stmts {
       SELECT id, event_type, inscription_number
       FROM events
       WHERE inscription_id = @inscription_id AND txid = @txid
+    `),
+
+    // Used by the satflow tick to resolve `inscription_id` (returned by
+    // Satflow) to our `inscription_number` (the integer keyed everywhere
+    // else in the schema). Built into a Map at the start of each tick.
+    listInscriptionIdToNumber: db.prepare(`
+      SELECT inscription_id, inscription_number
+      FROM inscriptions
+      WHERE inscription_id IS NOT NULL
     `),
 
     getPollState: db.prepare(`SELECT * FROM poll_state WHERE stream = ?`),

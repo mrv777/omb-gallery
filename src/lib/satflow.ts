@@ -4,13 +4,24 @@ const SATFLOW_BASE = (process.env.SATFLOW_BASE_URL ?? 'https://api.satflow.com')
 const REQUEST_TIMEOUT_MS = 20_000;
 const MAX_RETRIES = 5;
 
+/**
+ * A normalized Satflow sale, ready for the poller to consume. Note that
+ * `inscription_number` is intentionally NOT part of this shape: Satflow's
+ * response carries only `inscriptionId`, so the poller resolves the number
+ * via our own DB (rows seeded from images.json + bootstrapped via ord). That
+ * keeps this client free of DB coupling.
+ */
 export type NormalizedSale = {
+  /** Satflow's own sale id (e.g. `"69ef6857b99f8f4eaa484605"`). Useful for logs. */
+  satflow_id: string;
   inscription_id: string;
-  inscription_number: number;
+  /** On-chain tx that completed the sale (Satflow's `fillTx`). Always present. */
   txid: string;
   sale_price_sats: number;
+  /** Unix seconds, parsed from `fillCompletedAt` (preferred) or `timestamp`. */
   block_timestamp: number;
-  block_height: number | null;
+  /** Satflow doesn't ship block height — always null. */
+  block_height: null;
   marketplace: 'satflow';
   seller: string | null;
   buyer: string | null;
@@ -18,25 +29,31 @@ export type NormalizedSale = {
 };
 
 export type FetchSalesArgs = {
-  collectionId: string;
-  /** Pull sales newer than this unix timestamp. Used for incremental polls. */
-  since?: number | null;
-  /** Opaque cursor from previous response (preferred over `since` when present). */
-  cursor?: string | null;
-  count?: number;
+  collectionSlug: string;
+  page?: number;
+  pageSize?: number;
+  /** 'desc' (newest-first, default) or 'asc' (oldest-first, used for backfill). */
+  sortDirection?: 'asc' | 'desc';
   apiKey?: string | null;
 };
 
 export type FetchSalesResult = {
   items: NormalizedSale[];
-  rawCount: number;
-  /** Next cursor if the API exposes one; null when drained. */
-  nextCursor: string | null;
   /**
-   * Oldest block_timestamp in this page, used as a fallback "since" cursor when
-   * the API doesn't expose opaque cursors.
+   * Number of items returned by the API on this page (before normalization
+   * filtered any out). Used by the poller to decide whether more pages exist.
    */
-  oldestTimestamp: number | null;
+  rawCount: number;
+  page: number;
+  pageSize: number;
+  /** Total sales in the collection across all pages, per the API. */
+  total: number;
+  /**
+   * True if `rawCount === pageSize` — i.e. there's likely another page. We
+   * can't compute this from `total` reliably because total drifts as new
+   * sales arrive between page fetches.
+   */
+  hasMore: boolean;
 };
 
 export class SatflowError extends Error {
@@ -54,117 +71,137 @@ export class SatflowError extends Error {
 // ---------------- public API ----------------
 
 export async function fetchSalesPage(args: FetchSalesArgs): Promise<FetchSalesResult> {
-  const url = new URL(`${SATFLOW_BASE}/rest/activity/sales`);
-  url.searchParams.set('collectionId', args.collectionId);
-  url.searchParams.set('count', String(args.count ?? 100));
-  // Sort newest-first. Cursor pagination walks backwards through history.
-  url.searchParams.set('sort', 'desc');
-  if (args.cursor) url.searchParams.set('cursor', args.cursor);
-  if (args.since != null) url.searchParams.set('since', String(args.since));
+  const page = args.page ?? 1;
+  const pageSize = args.pageSize ?? 100;
+  const sortDirection = args.sortDirection ?? 'desc';
+
+  const url = new URL(`${SATFLOW_BASE}/v1/activity/sales`);
+  url.searchParams.set('collectionSlug', args.collectionSlug);
+  url.searchParams.set('page', String(page));
+  url.searchParams.set('pageSize', String(pageSize));
+  url.searchParams.set('sortBy', 'fillCompletedAt');
+  url.searchParams.set('sortDirection', sortDirection);
 
   const json = await getWithRetry(url.toString(), args.apiKey);
-  const raw = extractList(json);
+  const raw = extractSales(json);
+  const total = extractTotal(json);
   const items: NormalizedSale[] = [];
-  let oldestTimestamp: number | null = null;
   for (const it of raw) {
     const norm = normalizeSale(it);
-    if (!norm) continue;
-    items.push(norm);
-    if (oldestTimestamp == null || norm.block_timestamp < oldestTimestamp) {
-      oldestTimestamp = norm.block_timestamp;
-    }
+    if (norm) items.push(norm);
   }
-  const nextCursor = pickCursor(json);
-  return { items, rawCount: raw.length, nextCursor, oldestTimestamp };
+  return {
+    items,
+    rawCount: raw.length,
+    page,
+    pageSize,
+    total,
+    hasMore: raw.length >= pageSize,
+  };
 }
 
 // ---------------- normalization ----------------
 
-function extractList(json: unknown): Record<string, unknown>[] {
-  if (Array.isArray(json)) {
-    return json.filter((x) => x && typeof x === 'object') as Record<string, unknown>[];
-  }
-  if (json && typeof json === 'object') {
-    const obj = json as Record<string, unknown>;
-    const candidate =
-      obj.data ?? obj.items ?? obj.results ?? obj.sales ?? obj.activity;
-    if (Array.isArray(candidate)) {
-      return candidate.filter((x) => x && typeof x === 'object') as Record<string, unknown>[];
-    }
-  }
-  return [];
+function extractSales(json: unknown): Record<string, unknown>[] {
+  if (!json || typeof json !== 'object') return [];
+  const obj = json as Record<string, unknown>;
+  const data = obj.data;
+  if (!data || typeof data !== 'object') return [];
+  const sales = (data as Record<string, unknown>).sales;
+  if (!Array.isArray(sales)) return [];
+  return sales.filter((x) => x && typeof x === 'object') as Record<string, unknown>[];
 }
 
-function pickCursor(json: unknown): string | null {
-  if (!json || typeof json !== 'object') return null;
+function extractTotal(json: unknown): number {
+  if (!json || typeof json !== 'object') return 0;
   const obj = json as Record<string, unknown>;
-  const candidate =
-    obj.next_cursor ?? obj.nextCursor ?? obj.cursor ?? obj.next ?? obj.next_page;
-  if (typeof candidate === 'string' && candidate.length > 0) return candidate;
-  // Some APIs nest cursor under a `pagination` object.
-  const pagination = obj.pagination;
-  if (pagination && typeof pagination === 'object') {
-    const p = pagination as Record<string, unknown>;
-    const nested = p.next_cursor ?? p.nextCursor ?? p.cursor;
-    if (typeof nested === 'string' && nested.length > 0) return nested;
-  }
+  const data = obj.data;
+  if (!data || typeof data !== 'object') return 0;
+  const total = (data as Record<string, unknown>).total;
+  if (typeof total === 'number' && Number.isFinite(total)) return Math.trunc(total);
+  return 0;
+}
+
+/**
+ * Pull the order body — Satflow puts it under `ask` (orderType=ask) or
+ * `bid` (orderType=bid), never both. Returns null if neither is present
+ * (defensive — shouldn't happen for `type: "sale"` rows).
+ */
+function pickOrder(item: Record<string, unknown>): {
+  body: Record<string, unknown>;
+  kind: 'ask' | 'bid';
+} | null {
+  const ask = item.ask;
+  if (ask && typeof ask === 'object') return { body: ask as Record<string, unknown>, kind: 'ask' };
+  const bid = item.bid;
+  if (bid && typeof bid === 'object') return { body: bid as Record<string, unknown>, kind: 'bid' };
   return null;
 }
 
 function normalizeSale(item: Record<string, unknown>): NormalizedSale | null {
-  // Note: 'id' is intentionally omitted — many APIs use 'id' for the row's own
-  // primary key (sale id), not the inscription id. Only add it if a future
-  // Satflow response is known to use 'id' specifically for the inscription.
-  const inscription_id = pickString(item, [
-    'inscription_id',
-    'inscriptionId',
-    'item_id',
-    'itemId',
-  ]);
-  const inscription_number = pickInt(item, [
-    'inscription_number',
-    'inscriptionNumber',
-    'number',
-    'inscription_no',
-  ]);
-  if (!inscription_id || inscription_number == null) return null;
+  const order = pickOrder(item);
+  if (!order) return null;
 
-  const txid = pickString(item, ['txid', 'tx_id', 'transaction_id', 'tx_hash']);
+  const inscription_id = pickString(order.body, ['inscriptionId', 'inscription_id']);
+  if (!inscription_id) return null;
+
+  const txid = pickString(item, ['fillTx']);
   if (!txid) return null;
+  // Sanity-check shape: 64 hex chars. ord events are stored normalized to
+  // lowercase, so do the same here so dedup via UNIQUE(inscription_id, txid)
+  // matches across sources.
+  if (!/^[0-9a-f]{64}$/i.test(txid)) return null;
 
-  const sale_price_sats = pickInt(item, [
-    'sale_price_sats',
-    'price_sats',
-    'price_in_sats',
-    'amount_sats',
-    'price',
-    'amount',
-    'sats',
-  ]);
-  if (sale_price_sats == null) return null;
+  // `price` lives both top-level and on the order body; prefer top-level since
+  // it reflects the executed price (order.body.price could be the original ask
+  // for partial-fill cases). Per Satflow docs, integer satoshis.
+  const sale_price_sats = pickInt(item, ['price']) ?? pickInt(order.body, ['price']);
+  if (sale_price_sats == null || sale_price_sats <= 0) return null;
 
-  const block_timestamp = pickInt(item, [
-    'block_timestamp',
-    'timestamp',
-    'ts',
-    'block_time',
-    'sold_at',
-    'created_at',
-  ]);
+  // Prefer fillCompletedAt (when the sale settled on chain). Fall back to
+  // timestamp (when the order was filled in Satflow's view) if missing.
+  const block_timestamp =
+    parseIsoToUnix(pickString(item, ['fillCompletedAt'])) ??
+    parseIsoToUnix(pickString(item, ['timestamp', 'updatedAt']));
   if (block_timestamp == null) return null;
 
+  // Seller is the maker on an ask, the bid-acceptor on a bid; both surface
+  // their ord (taproot) address as `sellerOrdAddress` on the order body.
+  const seller = pickString(order.body, ['sellerOrdAddress', 'sellerReceiveAddress']);
+
+  // Buyer differs by order kind:
+  //   - ask order: the taker is the buyer; their address is on the top-level fill fields.
+  //   - bid order: the bidder is the buyer; their receive address is on the bid body.
+  const buyer =
+    order.kind === 'ask'
+      ? pickString(item, ['fillOrdAddress', 'fillAddress'])
+      : pickString(order.body, ['bidderTokenReceiveAddress', 'bidderAddress']);
+
+  const satflow_id = pickString(item, ['id']) ?? '';
+
   return {
+    satflow_id,
     inscription_id,
-    inscription_number,
-    txid,
+    txid: txid.toLowerCase(),
     sale_price_sats,
     block_timestamp,
-    block_height: pickInt(item, ['block_height', 'height']),
+    block_height: null,
     marketplace: 'satflow',
-    seller: pickString(item, ['seller', 'seller_address', 'from']),
-    buyer: pickString(item, ['buyer', 'buyer_address', 'to']),
+    seller,
+    buyer,
     raw_json: JSON.stringify(item),
   };
+}
+
+function parseIsoToUnix(iso: string | null): number | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return null;
+  // Guard against the `1970-01-01T00:00:00.000Z` placeholders Satflow
+  // sometimes ships in unrelated fields — don't let one of those leak in
+  // as a "block_timestamp".
+  if (ms <= 0) return null;
+  return Math.floor(ms / 1000);
 }
 
 // ---------------- HTTP + retry ----------------
@@ -191,12 +228,7 @@ async function getOnce(url: string, apiKey?: string | null): Promise<unknown> {
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const headers: Record<string, string> = { Accept: 'application/json' };
-    if (apiKey) {
-      // Satflow's auth scheme is TBD at deploy time. Send the key under both
-      // common header names so we don't need a code change to swap.
-      headers['x-api-key'] = apiKey;
-      headers['Authorization'] = `Bearer ${apiKey}`;
-    }
+    if (apiKey) headers['x-api-key'] = apiKey;
     const res = await fetch(url, { headers, signal: controller.signal });
 
     if (res.status === 429) {

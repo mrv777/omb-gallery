@@ -19,7 +19,9 @@ import {
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const SATFLOW_COLLECTION_ID = process.env.SATFLOW_OMB_COLLECTION_ID ?? 'omb';
+// The Satflow "collection slug" identifying OMB. The env var is named
+// `..._COLLECTION_ID` for historical reasons; its value is a slug like "omb".
+const SATFLOW_COLLECTION_SLUG = process.env.SATFLOW_OMB_COLLECTION_ID ?? 'omb';
 
 const ORD_BATCH_SIZE = 500;
 const ORD_BOOTSTRAP_MAX_PER_TICK = 300;
@@ -109,7 +111,10 @@ async function handle(req: NextRequest): Promise<NextResponse> {
 
 function initBackfill(): TickResult {
   const db = getDb();
-  db.prepare(`UPDATE poll_state SET last_cursor = NULL, is_backfilling = 1 WHERE stream = 'satflow'`).run();
+  // Reset to page 1 — backfill walks `sortDirection=asc` so page 1 is the
+  // oldest sale in the collection. New sales appended at the latest page
+  // don't shift the older pages we're walking through.
+  db.prepare(`UPDATE poll_state SET last_cursor = 'page:1', is_backfilling = 1 WHERE stream = 'satflow'`).run();
   return { mode: 'init-backfill', done: true };
 }
 
@@ -551,24 +556,33 @@ async function runSatflowTick(opts: { force?: 'incremental' | 'backfill' }): Pro
     opts.force === 'backfill' || (opts.force !== 'incremental' && state.is_backfilling === 1);
   const maxPages = backfilling ? SATFLOW_BACKFILL_MAX_PAGES_PER_TICK : SATFLOW_INCREMENTAL_MAX_PAGES;
 
+  // Pagination model:
+  //   incremental: walk page 1 → N with sortDirection=desc (newest first),
+  //     stop when an entire page is duplicates of events already in DB
+  //     (or we hit maxPages, or the API returns < pageSize items).
+  //   backfill:    walk page N → N+1 with sortDirection=asc (oldest first),
+  //     resume from `last_cursor='page:N'`. Asc ordering means newly-arrived
+  //     sales land on the latest page and don't shift older pages we're
+  //     still walking through.
+  const sortDirection: 'asc' | 'desc' = backfilling ? 'asc' : 'desc';
+  let nextPage = backfilling ? Math.max(1, parsePageFromCursor(state.last_cursor) ?? 1) : 1;
+
+  // Build the inscription_id → inscription_number resolution map once per
+  // tick. Sales whose inscription_id isn't in this map are skipped (counted
+  // as `unresolved`); they'll be ingested on a later tick once the ord
+  // bootstrap pass has populated their inscription_id in the inscriptions
+  // table.
+  const idToNumber = buildIdToNumberMap();
+
   const startedAt = Date.now();
-  // A `ts:<n>` last_cursor is our own sentinel from a prior tick where Satflow
-  // didn't expose nextCursor — translate it back to `since` regardless of mode
-  // so we never round-trip the sentinel to Satflow as ?cursor=.
-  let cursor: string | null = null;
-  let since: number | null = null;
-  if (state.last_cursor?.startsWith('ts:')) {
-    since = parseSinceFromCursor(state.last_cursor);
-  } else if (backfilling) {
-    cursor = state.last_cursor;
-  }
   let upgraded = 0;
   let inserted = 0;
+  let unresolved = 0;
   let pagesUsed = 0;
   let drained = false;
   let errMsg: string | null = null;
-  let oldestSeen: number | null = null;
-  let newestSeen: number | null = null;
+  let totalReported: number | null = null;
+  let lastPageReached = nextPage - 1;
 
   for (let i = 0; i < maxPages; i++) {
     if (Date.now() - startedAt > TICK_WALLCLOCK_BUDGET_MS) break;
@@ -577,61 +591,55 @@ async function runSatflowTick(opts: { force?: 'incremental' | 'backfill' }): Pro
     let page;
     try {
       page = await fetchSalesPage({
-        collectionId: SATFLOW_COLLECTION_ID,
-        since,
-        cursor,
-        count: SATFLOW_PAGE_SIZE,
+        collectionSlug: SATFLOW_COLLECTION_SLUG,
+        page: nextPage,
+        pageSize: SATFLOW_PAGE_SIZE,
+        sortDirection,
         apiKey,
       });
       pagesUsed++;
+      lastPageReached = nextPage;
+      totalReported = page.total;
     } catch (err) {
       errMsg = errorMessage(err);
       break;
     }
 
-    if (page.items.length === 0) {
+    if (page.rawCount === 0) {
       drained = true;
       break;
     }
 
-    const ap = applySalesTransaction(page.items);
+    const ap = applySalesTransaction(page.items, idToNumber);
     upgraded += ap.upgraded;
     inserted += ap.inserted;
+    unresolved += ap.unresolved;
 
-    for (const it of page.items) {
-      if (oldestSeen == null || it.block_timestamp < oldestSeen) oldestSeen = it.block_timestamp;
-      if (newestSeen == null || it.block_timestamp > newestSeen) newestSeen = it.block_timestamp;
-    }
-
-    if (page.nextCursor) {
-      cursor = page.nextCursor;
-    } else if (backfilling && page.oldestTimestamp != null) {
-      // Cursor not exposed by API: page backwards by oldest-timestamp seen.
-      since = page.oldestTimestamp - 1;
-      cursor = `ts:${since}`;
-    } else {
+    // Incremental stop condition: an entire page yielded zero new writes
+    // (every sale is already in events). Once that's true newer pages can
+    // only repeat what we've seen, so further fetching is wasteful.
+    if (!backfilling && ap.inserted === 0 && ap.upgraded === 0 && ap.unresolved === 0) {
       drained = true;
       break;
     }
 
-    if (page.rawCount < SATFLOW_PAGE_SIZE) {
+    if (!page.hasMore) {
       drained = true;
       break;
     }
+
+    nextPage++;
   }
 
-  // Persist cursor: backfill resumes where it left off; incremental remembers the
-  // newest timestamp we saw so the next tick can ask for `since` that.
-  let nextCursor = cursor;
-  if (!backfilling && newestSeen != null) {
-    nextCursor = `ts:${newestSeen}`;
-  }
+  // Persist cursor: backfill records the next page to fetch. Incremental
+  // doesn't need a cursor — it always restarts at page 1 — so we clear it.
+  const nextCursor = backfilling ? `page:${drained ? lastPageReached : nextPage}` : null;
 
   stmts.setPollResult.run({
     stream: 'satflow',
     status: errMsg ? errMsg.slice(0, 500) : 'ok',
     event_count: inserted + upgraded,
-    cursor: nextCursor ?? null,
+    cursor: nextCursor,
   });
 
   if (backfilling && drained && !errMsg) {
@@ -643,31 +651,60 @@ async function runSatflowTick(opts: { force?: 'incremental' | 'backfill' }): Pro
     pages: pagesUsed,
     inserted,
     upgraded,
-    oldest: oldestSeen,
-    newest: newestSeen,
+    unresolved,
+    lastPage: lastPageReached,
+    total: totalReported,
     done: drained,
     ...(errMsg ? { error: errMsg } : {}),
   };
 }
 
-function parseSinceFromCursor(cursor: string | null): number | null {
+function parsePageFromCursor(cursor: string | null): number | null {
   if (!cursor) return null;
-  const m = /^ts:(\d+)$/.exec(cursor);
-  return m ? parseInt(m[1], 10) : null;
+  const m = /^page:(\d+)$/.exec(cursor);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) && n >= 1 ? n : null;
 }
 
-function applySalesTransaction(sales: NormalizedSale[]): {
+function buildIdToNumberMap(): Map<string, number> {
+  const stmts = getStmts();
+  const rows = stmts.listInscriptionIdToNumber.all([]) as Array<{
+    inscription_id: string;
+    inscription_number: number;
+  }>;
+  const map = new Map<string, number>();
+  for (const r of rows) map.set(r.inscription_id, r.inscription_number);
+  return map;
+}
+
+function applySalesTransaction(
+  sales: NormalizedSale[],
+  idToNumber: Map<string, number>
+): {
   upgraded: number;
   inserted: number;
+  unresolved: number;
 } {
-  if (sales.length === 0) return { upgraded: 0, inserted: 0 };
+  if (sales.length === 0) return { upgraded: 0, inserted: 0, unresolved: 0 };
   const stmts = getStmts();
   const db = getDb();
   let upgraded = 0;
   let inserted = 0;
+  let unresolved = 0;
 
   const tx = db.transaction(() => {
     for (const sale of sales) {
+      const inscription_number = idToNumber.get(sale.inscription_id);
+      if (inscription_number == null) {
+        // We don't know this inscription yet — ord bootstrap hasn't populated
+        // its inscription_id in our table. Skip; a later tick will pick it up
+        // once bootstrap catches up. (For OMB-only collectionSlug, every
+        // inscription should eventually be known.)
+        unresolved++;
+        continue;
+      }
+
       const existing = stmts.findEventByInscriptionAndTxid.get({
         inscription_id: sale.inscription_id,
         txid: sale.txid,
@@ -702,14 +739,14 @@ function applySalesTransaction(sales: NormalizedSale[]): {
 
       // Standalone insert: ord hasn't seen the transfer yet (or won't).
       stmts.upsertInscriptionFromEvent.run({
-        inscription_number: sale.inscription_number,
+        inscription_number,
         inscription_id: sale.inscription_id,
         inscribe_at: null,
         block_timestamp: sale.block_timestamp,
       });
       const r = stmts.insertEvent.run({
         inscription_id: sale.inscription_id,
-        inscription_number: sale.inscription_number,
+        inscription_number,
         event_type: 'sold',
         block_height: sale.block_height,
         block_timestamp: sale.block_timestamp,
@@ -724,7 +761,7 @@ function applySalesTransaction(sales: NormalizedSale[]): {
       if (r.changes > 0) {
         inserted++;
         stmts.bumpInscriptionAggregates.run({
-          inscription_number: sale.inscription_number,
+          inscription_number,
           event_type: 'sold',
           sale_price_sats: sale.sale_price_sats,
           block_timestamp: sale.block_timestamp,
@@ -734,7 +771,7 @@ function applySalesTransaction(sales: NormalizedSale[]): {
   });
   tx();
 
-  return { upgraded, inserted };
+  return { upgraded, inserted, unresolved };
 }
 
 // ---------------- helpers ----------------
