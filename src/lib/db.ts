@@ -5,7 +5,7 @@ import Database, { type Database as DB } from 'better-sqlite3';
 import imageData from '../data/images.json';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 type ImageEntry = { filename: string; description: string; tags: string[] };
 type ImagesByColor = Record<string, ImageEntry[]>;
@@ -53,6 +53,7 @@ function migrate(db: DB): void {
         upgradeV2ToV3(db);
         upgradeV3ToV4(db);
         upgradeV4ToV5(db);
+        upgradeV5ToV6(db);
       } else {
         initSchemaLatest(db);
       }
@@ -61,6 +62,7 @@ function migrate(db: DB): void {
       if (current < 3) upgradeV2ToV3(db);
       if (current < 4) upgradeV3ToV4(db);
       if (current < 5) upgradeV4ToV5(db);
+      if (current < 6) upgradeV5ToV6(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -117,7 +119,7 @@ function initSchemaLatest(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_events_type_id         ON events (event_type, id DESC);
 
     CREATE TABLE IF NOT EXISTS poll_state (
-      stream            TEXT PRIMARY KEY CHECK (stream IN ('ord','satflow')),
+      stream            TEXT PRIMARY KEY CHECK (stream IN ('ord','satflow','satflow_listings')),
       last_cursor       TEXT,
       last_run_at       INTEGER,
       last_status       TEXT,
@@ -125,7 +127,32 @@ function initSchemaLatest(db: DB): void {
       is_backfilling    INTEGER NOT NULL DEFAULT 0,
       last_known_height INTEGER
     );
-    INSERT OR IGNORE INTO poll_state (stream) VALUES ('ord'), ('satflow');
+    INSERT OR IGNORE INTO poll_state (stream) VALUES ('ord'), ('satflow'), ('satflow_listings');
+
+    -- Snapshot of currently-active listings on Satflow. Refreshed atomically
+    -- every listings tick (DELETE + bulk INSERT in a transaction). One row per
+    -- inscription; if multiple marketplaces ever list the same one, the lowest
+    -- price wins (write-time conflict resolution via INSERT … ON CONFLICT).
+    CREATE TABLE IF NOT EXISTS active_listings (
+      inscription_number INTEGER PRIMARY KEY,
+      inscription_id     TEXT    NOT NULL,
+      satflow_id         TEXT    NOT NULL,
+      price_sats         INTEGER NOT NULL,
+      seller             TEXT,
+      marketplace        TEXT    NOT NULL DEFAULT 'satflow',
+      listed_at          INTEGER NOT NULL,
+      refreshed_at       INTEGER NOT NULL DEFAULT (unixepoch()),
+      FOREIGN KEY (inscription_number) REFERENCES inscriptions (inscription_number) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_listings_price ON active_listings (price_sats);
+
+    -- Rolling counter for Satflow API call quota visibility. Single row.
+    CREATE TABLE IF NOT EXISTS satflow_call_budget (
+      id            INTEGER PRIMARY KEY CHECK (id = 1),
+      window_start  INTEGER NOT NULL,
+      call_count    INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT OR IGNORE INTO satflow_call_budget (id, window_start, call_count) VALUES (1, unixepoch(), 0);
 
     CREATE TABLE IF NOT EXISTS slideshows (
       slug        TEXT PRIMARY KEY,
@@ -215,6 +242,48 @@ function upgradeV3ToV4(db: DB): void {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_events_type_id ON events (event_type, id DESC)`);
 }
 
+function upgradeV5ToV6(db: DB): void {
+  // Add active_listings table + extend poll_state CHECK to permit a third
+  // stream value ('satflow_listings'). SQLite can't ALTER a CHECK constraint
+  // in place, so we rebuild poll_state. Existing rows ('ord', 'satflow') are
+  // copied verbatim; the new stream gets a default row.
+  db.exec(`
+    CREATE TABLE poll_state_v6 (
+      stream            TEXT PRIMARY KEY CHECK (stream IN ('ord','satflow','satflow_listings')),
+      last_cursor       TEXT,
+      last_run_at       INTEGER,
+      last_status       TEXT,
+      last_event_count  INTEGER,
+      is_backfilling    INTEGER NOT NULL DEFAULT 0,
+      last_known_height INTEGER
+    );
+    INSERT INTO poll_state_v6 SELECT * FROM poll_state;
+    DROP TABLE poll_state;
+    ALTER TABLE poll_state_v6 RENAME TO poll_state;
+    INSERT OR IGNORE INTO poll_state (stream) VALUES ('satflow_listings');
+
+    CREATE TABLE active_listings (
+      inscription_number INTEGER PRIMARY KEY,
+      inscription_id     TEXT    NOT NULL,
+      satflow_id         TEXT    NOT NULL,
+      price_sats         INTEGER NOT NULL,
+      seller             TEXT,
+      marketplace        TEXT    NOT NULL DEFAULT 'satflow',
+      listed_at          INTEGER NOT NULL,
+      refreshed_at       INTEGER NOT NULL DEFAULT (unixepoch()),
+      FOREIGN KEY (inscription_number) REFERENCES inscriptions (inscription_number) ON DELETE CASCADE
+    );
+    CREATE INDEX idx_listings_price ON active_listings (price_sats);
+
+    CREATE TABLE satflow_call_budget (
+      id            INTEGER PRIMARY KEY CHECK (id = 1),
+      window_start  INTEGER NOT NULL,
+      call_count    INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO satflow_call_budget (id, window_start, call_count) VALUES (1, unixepoch(), 0);
+  `);
+}
+
 function upgradeV4ToV5(db: DB): void {
   // Round-robin poll order: without this, runOrdTick always polls in
   // inscription_number ASC and breaks at the wallclock budget, so the back
@@ -297,6 +366,16 @@ type Stmts = {
   topByVolume: ReturnType<DB['prepare']>;
   topByHighestSale: ReturnType<DB['prepare']>;
   topHolders: ReturnType<DB['prepare']>;
+  // listings
+  upsertActiveListing: ReturnType<DB['prepare']>;
+  deleteStaleListings: ReturnType<DB['prepare']>;
+  truncateActiveListings: ReturnType<DB['prepare']>;
+  getActiveListing: ReturnType<DB['prepare']>;
+  countActiveListings: ReturnType<DB['prepare']>;
+  // satflow call budget
+  bumpSatflowCallCount: ReturnType<DB['prepare']>;
+  getSatflowCallBudget: ReturnType<DB['prepare']>;
+  resetSatflowCallBudget: ReturnType<DB['prepare']>;
 };
 
 let stmts: Stmts | null = null;
@@ -560,6 +639,56 @@ export function getStmts(): Stmts {
       ORDER BY inscription_count DESC, current_owner ASC
       LIMIT @limit
     `),
+
+    // Snapshot-replace pattern: on each listings tick we bulk-upsert every
+    // active listing the API returned, then DELETE rows whose refreshed_at
+    // is older than the cutoff (= rows we didn't see this tick = no longer
+    // active on Satflow). All within one transaction so readers see either
+    // the old snapshot or the new one, never a partial view.
+    upsertActiveListing: db.prepare(`
+      INSERT INTO active_listings (
+        inscription_number, inscription_id, satflow_id, price_sats,
+        seller, marketplace, listed_at, refreshed_at
+      ) VALUES (
+        @inscription_number, @inscription_id, @satflow_id, @price_sats,
+        @seller, @marketplace, @listed_at, @refreshed_at
+      )
+      ON CONFLICT(inscription_number) DO UPDATE SET
+        inscription_id = excluded.inscription_id,
+        satflow_id     = excluded.satflow_id,
+        price_sats     = excluded.price_sats,
+        seller         = excluded.seller,
+        marketplace    = excluded.marketplace,
+        listed_at      = excluded.listed_at,
+        refreshed_at   = excluded.refreshed_at
+    `),
+
+    deleteStaleListings: db.prepare(`
+      DELETE FROM active_listings WHERE refreshed_at < @cutoff
+    `),
+
+    truncateActiveListings: db.prepare(`DELETE FROM active_listings`),
+
+    getActiveListing: db.prepare(`
+      SELECT * FROM active_listings WHERE inscription_number = ?
+    `),
+
+    countActiveListings: db.prepare(`SELECT COUNT(*) AS n FROM active_listings`),
+
+    // Rolling monthly call counter. Resets when window_start is more than 30
+    // days old — slightly imprecise vs. calendar months, but operationally
+    // simpler and matches the "100k requests per month" framing.
+    bumpSatflowCallCount: db.prepare(`
+      UPDATE satflow_call_budget SET call_count = call_count + 1 WHERE id = 1
+    `),
+
+    getSatflowCallBudget: db.prepare(`
+      SELECT window_start, call_count FROM satflow_call_budget WHERE id = 1
+    `),
+
+    resetSatflowCallBudget: db.prepare(`
+      UPDATE satflow_call_budget SET window_start = unixepoch(), call_count = 0 WHERE id = 1
+    `),
   };
   return stmts;
 }
@@ -602,6 +731,17 @@ export type InscriptionRow = {
   sale_count: number;
   total_volume_sats: number;
   highest_sale_sats: number;
+};
+
+export type ActiveListingRow = {
+  inscription_number: number;
+  inscription_id: string;
+  satflow_id: string;
+  price_sats: number;
+  seller: string | null;
+  marketplace: string;
+  listed_at: number;
+  refreshed_at: number;
 };
 
 export type HolderRow = {

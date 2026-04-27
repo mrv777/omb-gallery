@@ -12,8 +12,11 @@ import {
 } from '@/lib/ord';
 import {
   fetchSalesPage,
+  fetchListingsPage,
+  setCallCounter,
   SatflowError,
   type NormalizedSale,
+  type NormalizedListing,
 } from '@/lib/satflow';
 
 export const dynamic = 'force-dynamic';
@@ -38,6 +41,21 @@ const SATFLOW_INCREMENTAL_MAX_PAGES = 3;
 const SATFLOW_BACKFILL_MAX_PAGES_PER_TICK = 8;
 const SATFLOW_BACKFILL_POLITENESS_MS = 500;
 
+// Listings change frequently but the snapshot churn doesn't have to be
+// captured at sales-tick cadence. Run a refresh at most every 15 min,
+// regardless of how often the cron fires. Cuts ~67% of listing API calls.
+const LISTINGS_MIN_INTERVAL_SEC = 15 * 60;
+// Hard cap on pages walked per listings tick. With ~209 active OMB listings
+// at pageSize=100, 5 pages is ample headroom for growth and a defensive
+// brake if the API ever returns runaway data.
+const LISTINGS_MAX_PAGES = 5;
+// Soft alarm threshold for the monthly call budget. We don't BLOCK at this
+// threshold — that could disable the indexer silently — but we surface it in
+// the tick result so it shows up in the activity-page status bar.
+const SATFLOW_MONTHLY_BUDGET = 100_000;
+const SATFLOW_BUDGET_WARN_PCT = 0.8;
+const SATFLOW_BUDGET_WINDOW_SEC = 30 * 24 * 60 * 60;
+
 // Wallclock cap per tick. Bumped from 25s to 60s to absorb enrichment
 // (2 extra ord calls per detected transfer). The acquireLock window in
 // db.ts MUST stay ≥ this + safety margin or two ticks can run concurrently.
@@ -50,7 +68,12 @@ const ORD_REGRESSION_TOLERANCE = 6;
 
 type TickResult = {
   mode: string;
-  skipped?: 'concurrent' | 'budget' | 'not-configured';
+  skipped?:
+    | 'concurrent'
+    | 'budget'
+    | 'not-configured'
+    | 'interval-not-elapsed'
+    | 'empty-resolution';
   error?: string;
   done?: boolean;
 } & Record<string, unknown>;
@@ -73,6 +96,11 @@ async function handle(req: NextRequest): Promise<NextResponse> {
     return json({ error: 'unauthorized' }, 401);
   }
 
+  // Hook the satflow client up to the persistent monthly call counter on
+  // every request — cheap (idempotent setter), and keeps cold-start instances
+  // wired up without a separate boot path.
+  installSatflowCallCounter();
+
   const url = new URL(req.url);
   const mode = url.searchParams.get('mode') ?? 'auto';
 
@@ -91,11 +119,15 @@ async function handle(req: NextRequest): Promise<NextResponse> {
       case 'satflow-backfill':
         result = await runSatflowTick({ force: 'backfill' });
         break;
+      case 'listings':
+        result = await runListingsTick({ force: true });
+        break;
       case 'auto':
       default: {
         const ord = await runOrdTick();
         const satflow = await runSatflowTick({});
-        result = [ord, satflow];
+        const listings = await runListingsTick({ force: false });
+        result = [ord, satflow, listings];
         break;
       }
     }
@@ -105,6 +137,28 @@ async function handle(req: NextRequest): Promise<NextResponse> {
     const msg = err instanceof Error ? err.message : String(err);
     return json({ error: msg }, 500);
   }
+}
+
+let callCounterInstalled = false;
+function installSatflowCallCounter(): void {
+  if (callCounterInstalled) return;
+  callCounterInstalled = true;
+  setCallCounter(() => {
+    try {
+      const stmts = getStmts();
+      const budget = stmts.getSatflowCallBudget.get([]) as
+        | { window_start: number; call_count: number }
+        | undefined;
+      const now = Math.floor(Date.now() / 1000);
+      if (!budget || now - budget.window_start >= SATFLOW_BUDGET_WINDOW_SEC) {
+        stmts.resetSatflowCallBudget.run([]);
+      }
+      stmts.bumpSatflowCallCount.run([]);
+    } catch {
+      // Counter writes must never break ingestion. Failures here mean the
+      // budget reading drifts low — operationally tolerable.
+    }
+  });
 }
 
 // ---------------- mode: init-backfill ----------------
@@ -787,6 +841,176 @@ function applySalesTransaction(
   tx();
 
   return { upgraded, inserted, unresolved };
+}
+
+// ---------------- mode: listings ----------------
+
+async function runListingsTick(opts: { force: boolean }): Promise<TickResult> {
+  const apiKey = process.env.SATFLOW_API_KEY ?? null;
+  if (!process.env.SATFLOW_OMB_COLLECTION_ID) {
+    return { mode: 'listings', skipped: 'not-configured' };
+  }
+
+  const stmts = getStmts();
+
+  // Cadence guard: skip if last successful run was within the interval and
+  // we're not being explicitly forced (e.g. ?mode=listings).
+  if (!opts.force) {
+    const state = stmts.getPollState.get('satflow_listings') as PollStateRow | undefined;
+    if (state?.last_run_at && state.last_status === 'ok') {
+      const sinceLast = Math.floor(Date.now() / 1000) - state.last_run_at;
+      if (sinceLast < LISTINGS_MIN_INTERVAL_SEC) {
+        return { mode: 'listings', skipped: 'interval-not-elapsed', wait_s: LISTINGS_MIN_INTERVAL_SEC - sinceLast };
+      }
+    }
+  }
+
+  const lockRes = stmts.acquireLock.run('satflow_listings');
+  if (lockRes.changes === 0) {
+    return { mode: 'listings', skipped: 'concurrent' };
+  }
+
+  const idToNumber = buildIdToNumberMap();
+  const startedAt = Date.now();
+  let pagesUsed = 0;
+  let totalReported = 0;
+  let errMsg: string | null = null;
+
+  // Phase 1: collect every active listing across all pages BEFORE touching
+  // the DB. If any page fails, abort with the existing snapshot intact —
+  // never replace good data with a partial fetch.
+  const collected: NormalizedListing[] = [];
+  for (let page = 1; page <= LISTINGS_MAX_PAGES; page++) {
+    if (Date.now() - startedAt > TICK_WALLCLOCK_BUDGET_MS) {
+      errMsg = `wallclock budget exceeded after ${pagesUsed} pages`;
+      break;
+    }
+
+    let pageRes;
+    try {
+      pageRes = await fetchListingsPage({
+        collectionSlug: SATFLOW_COLLECTION_SLUG,
+        page,
+        pageSize: SATFLOW_PAGE_SIZE,
+        apiKey,
+      });
+      pagesUsed++;
+      totalReported = pageRes.total;
+    } catch (err) {
+      errMsg = errorMessage(err);
+      break;
+    }
+
+    collected.push(...pageRes.items);
+    if (!pageRes.hasMore) break;
+  }
+
+  if (errMsg) {
+    stmts.setPollResult.run({
+      stream: 'satflow_listings',
+      status: errMsg.slice(0, 500),
+      event_count: 0,
+      cursor: null,
+    });
+    return { mode: 'listings', pages: pagesUsed, error: errMsg };
+  }
+
+  // Phase 2: dedupe by inscription_id (lowest price wins). Same inscription
+  // can technically be listed by two different sellers; the cheaper one is
+  // what a buyer would actually take, so that's the one to store.
+  const byInscriptionId = new Map<string, NormalizedListing>();
+  for (const item of collected) {
+    const existing = byInscriptionId.get(item.inscription_id);
+    if (!existing || item.price_sats < existing.price_sats) {
+      byInscriptionId.set(item.inscription_id, item);
+    }
+  }
+
+  // Phase 3: resolve to inscription_number; bucket unresolved.
+  const ready: Array<NormalizedListing & { inscription_number: number }> = [];
+  let unresolved = 0;
+  for (const item of Array.from(byInscriptionId.values())) {
+    const num = idToNumber.get(item.inscription_id);
+    if (num == null) {
+      unresolved++;
+      continue;
+    }
+    ready.push({ ...item, inscription_number: num });
+  }
+
+  // Defensive: if we got data back but resolved ZERO of it, ord hasn't
+  // bootstrapped yet. Don't blow away the existing snapshot — keep stale
+  // data and try again next tick.
+  if (ready.length === 0 && unresolved > 0) {
+    stmts.setPollResult.run({
+      stream: 'satflow_listings',
+      status: 'ok-skipped-empty-resolution',
+      event_count: 0,
+      cursor: null,
+    });
+    return {
+      mode: 'listings',
+      pages: pagesUsed,
+      total: totalReported,
+      collected: collected.length,
+      unresolved,
+      written: 0,
+      skipped: 'empty-resolution',
+    };
+  }
+
+  // Phase 4: snapshot-replace inside one transaction. Readers see either the
+  // pre-tick snapshot or the post-tick snapshot, never a partial mid-write
+  // view. With ~209 active listings, this is well under 10ms.
+  const refreshedAt = Math.floor(Date.now() / 1000);
+  const tx = getDb().transaction(() => {
+    for (const item of ready) {
+      stmts.upsertActiveListing.run({
+        inscription_number: item.inscription_number,
+        inscription_id: item.inscription_id,
+        satflow_id: item.satflow_id,
+        price_sats: item.price_sats,
+        seller: item.seller,
+        marketplace: 'satflow',
+        listed_at: item.listed_at,
+        refreshed_at: refreshedAt,
+      });
+    }
+    // Anything not refreshed this tick is no longer active on Satflow.
+    stmts.deleteStaleListings.run({ cutoff: refreshedAt });
+  });
+  tx();
+
+  // Surface budget warning in the response so the activity status bar can
+  // show it. Soft-fail-only: never blocks tick execution.
+  const budget = stmts.getSatflowCallBudget.get([]) as
+    | { window_start: number; call_count: number }
+    | undefined;
+  const budgetPct = budget ? budget.call_count / SATFLOW_MONTHLY_BUDGET : 0;
+  const budgetWarning = budgetPct >= SATFLOW_BUDGET_WARN_PCT
+    ? `monthly call budget at ${(budgetPct * 100).toFixed(0)}%`
+    : undefined;
+
+  const writtenCount = stmts.countActiveListings.get([]) as { n: number } | undefined;
+
+  stmts.setPollResult.run({
+    stream: 'satflow_listings',
+    status: 'ok',
+    event_count: ready.length,
+    cursor: null,
+  });
+
+  return {
+    mode: 'listings',
+    pages: pagesUsed,
+    total: totalReported,
+    collected: collected.length,
+    written: ready.length,
+    deduped: collected.length - byInscriptionId.size,
+    unresolved,
+    active_in_db: writtenCount?.n ?? null,
+    ...(budgetWarning ? { warning: budgetWarning } : {}),
+  };
 }
 
 // ---------------- helpers ----------------

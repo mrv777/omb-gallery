@@ -4,6 +4,25 @@ const SATFLOW_BASE = (process.env.SATFLOW_BASE_URL ?? 'https://api.satflow.com')
 const REQUEST_TIMEOUT_MS = 20_000;
 const MAX_RETRIES = 5;
 
+// Satflow plan is 5 req/s with a 10-burst tolerance. We pace at 4/s sustained
+// using a minimum-spacing token bucket: every call must be at least
+// MIN_INTERVAL_MS after the previous one's reserved slot. This is stricter
+// than a sliding-window cap (which permits microbursts when many awakeners
+// resolve on the same JS tick) and keeps us comfortably under the limit even
+// across retries and concurrent modes.
+const RATE_LIMIT_RPS = 4;
+const MIN_INTERVAL_MS = 1000 / RATE_LIMIT_RPS;
+let nextSlotAt = 0;
+
+/** Optional hook the caller can install to track API usage in persistent
+ * storage. Called once per HTTP request that actually reaches Satflow
+ * (NOT counted: in-memory rate-limit waits, retries that immediately fail). */
+export type CallCounter = () => void;
+let callCounter: CallCounter | null = null;
+export function setCallCounter(fn: CallCounter | null): void {
+  callCounter = fn;
+}
+
 /**
  * A normalized Satflow sale, ready for the poller to consume. Note that
  * `inscription_number` is intentionally NOT part of this shape: Satflow's
@@ -68,6 +87,33 @@ export class SatflowError extends Error {
   }
 }
 
+/** Active listing snapshot, normalized. Like NormalizedSale, no inscription_number. */
+export type NormalizedListing = {
+  satflow_id: string;
+  inscription_id: string;
+  price_sats: number;
+  seller: string | null;
+  /** Unix seconds when this listing was created on Satflow (`createdAt`). */
+  listed_at: number;
+  raw_json: string;
+};
+
+export type FetchListingsArgs = {
+  collectionSlug: string;
+  page?: number;
+  pageSize?: number;
+  apiKey?: string | null;
+};
+
+export type FetchListingsResult = {
+  items: NormalizedListing[];
+  rawCount: number;
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
+};
+
 // ---------------- public API ----------------
 
 export async function fetchSalesPage(args: FetchSalesArgs): Promise<FetchSalesResult> {
@@ -88,6 +134,37 @@ export async function fetchSalesPage(args: FetchSalesArgs): Promise<FetchSalesRe
   const items: NormalizedSale[] = [];
   for (const it of raw) {
     const norm = normalizeSale(it);
+    if (norm) items.push(norm);
+  }
+  return {
+    items,
+    rawCount: raw.length,
+    page,
+    pageSize,
+    total,
+    hasMore: raw.length >= pageSize,
+  };
+}
+
+export async function fetchListingsPage(args: FetchListingsArgs): Promise<FetchListingsResult> {
+  const page = args.page ?? 1;
+  const pageSize = args.pageSize ?? 100;
+
+  // active=true (default) = currently-listed only. We don't care about
+  // cancelled or filled history (sales table covers fills).
+  const url = new URL(`${SATFLOW_BASE}/v1/activity/listings`);
+  url.searchParams.set('collectionSlug', args.collectionSlug);
+  url.searchParams.set('page', String(page));
+  url.searchParams.set('pageSize', String(pageSize));
+  url.searchParams.set('sortBy', 'createdAt');
+  url.searchParams.set('sortDirection', 'desc');
+
+  const json = await getWithRetry(url.toString(), args.apiKey);
+  const raw = extractListings(json);
+  const total = extractTotal(json);
+  const items: NormalizedListing[] = [];
+  for (const it of raw) {
+    const norm = normalizeListing(it);
     if (norm) items.push(norm);
   }
   return {
@@ -193,6 +270,56 @@ function normalizeSale(item: Record<string, unknown>): NormalizedSale | null {
   };
 }
 
+function extractListings(json: unknown): Record<string, unknown>[] {
+  if (!json || typeof json !== 'object') return [];
+  const obj = json as Record<string, unknown>;
+  const data = obj.data;
+  if (!data || typeof data !== 'object') return [];
+  const listings = (data as Record<string, unknown>).listings;
+  if (!Array.isArray(listings)) return [];
+  return listings.filter((x) => x && typeof x === 'object') as Record<string, unknown>[];
+}
+
+function normalizeListing(item: Record<string, unknown>): NormalizedListing | null {
+  // Defensive: skip listings that already terminated (cancelled / filled /
+  // invalid) even though we asked for active. Keeps the snapshot clean if
+  // Satflow's `active=true` filter is ever loosened.
+  if (
+    item.cancelledAt != null ||
+    item.fillCompletedAt != null ||
+    item.fillPendingAt != null ||
+    item.invalidAt != null
+  ) {
+    return null;
+  }
+
+  const order = pickOrder(item);
+  if (!order || order.kind !== 'ask') return null; // only ask-orders are listings
+
+  const inscription_id = pickString(order.body, ['inscriptionId', 'inscription_id']);
+  if (!inscription_id) return null;
+
+  const price_sats = pickInt(item, ['price']) ?? pickInt(order.body, ['price']);
+  if (price_sats == null || price_sats <= 0) return null;
+
+  const listed_at =
+    parseIsoToUnix(pickString(item, ['createdAt', 'timestamp'])) ??
+    parseIsoToUnix(pickString(item, ['updatedAt']));
+  if (listed_at == null) return null;
+
+  const seller = pickString(order.body, ['sellerOrdAddress', 'sellerReceiveAddress']);
+  const satflow_id = pickString(item, ['id']) ?? '';
+
+  return {
+    satflow_id,
+    inscription_id,
+    price_sats,
+    seller,
+    listed_at,
+    raw_json: JSON.stringify(item),
+  };
+}
+
 function parseIsoToUnix(iso: string | null): number | null {
   if (!iso) return null;
   const ms = Date.parse(iso);
@@ -224,11 +351,19 @@ async function getWithRetry(url: string, apiKey?: string | null): Promise<unknow
 }
 
 async function getOnce(url: string, apiKey?: string | null): Promise<unknown> {
+  await waitForRateLimit();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (apiKey) headers['x-api-key'] = apiKey;
+    if (callCounter) {
+      try {
+        callCounter();
+      } catch {
+        // Counter failures must never break the actual API call.
+      }
+    }
     const res = await fetch(url, { headers, signal: controller.signal });
 
     if (res.status === 429) {
@@ -283,6 +418,29 @@ async function safeText(res: Response): Promise<string> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Token-bucket-style limiter. Each caller atomically reserves the next
+ * available slot (at least MIN_INTERVAL_MS after the previously-reserved
+ * slot), then sleeps until that slot. The reservation is non-yielding so
+ * concurrent callers receive distinct, monotonically-increasing slots and
+ * never collide into a microburst — even if many resolve on the same JS tick.
+ *
+ * Sporadic callers don't pay: if the next slot is already in the past, the
+ * sleep is zero.
+ */
+async function waitForRateLimit(): Promise<void> {
+  const now = Date.now();
+  const slot = Math.max(now, nextSlotAt);
+  nextSlotAt = slot + MIN_INTERVAL_MS;
+  const wait = slot - now;
+  if (wait > 0) await sleep(wait);
+}
+
+/** Test-only escape hatch to clear the rate limiter between unit tests. */
+export function _resetRateLimitForTest(): void {
+  nextSlotAt = 0;
 }
 
 // ---------------- field helpers ----------------

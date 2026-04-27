@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getStmts, type EventRow, type InscriptionRow } from '@/lib/db';
+import {
+  getStmts,
+  type EventRow,
+  type InscriptionRow,
+  type ActiveListingRow,
+} from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -20,5 +25,10 @@ export async function GET(
     return NextResponse.json({ error: 'not found' }, { status: 404 });
   }
   const events = stmts.getInscriptionEvents.all(num) as EventRow[];
-  return NextResponse.json({ inscription, events });
+  const listing = stmts.getActiveListing.get(num) as ActiveListingRow | undefined;
+  return NextResponse.json({
+    inscription,
+    events,
+    current_listing: listing ?? null,
+  });
 }
