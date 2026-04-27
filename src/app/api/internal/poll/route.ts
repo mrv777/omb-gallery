@@ -631,9 +631,21 @@ async function runSatflowTick(opts: { force?: 'incremental' | 'backfill' }): Pro
     nextPage++;
   }
 
-  // Persist cursor: backfill records the next page to fetch. Incremental
-  // doesn't need a cursor — it always restarts at page 1 — so we clear it.
-  const nextCursor = backfilling ? `page:${drained ? lastPageReached : nextPage}` : null;
+  // Persist cursor:
+  //   incremental: no cursor (always starts page 1).
+  //   backfill drained AND fully resolved: park at last page; flag will clear below.
+  //   backfill drained but unresolved>0: ord hasn't bootstrapped those inscriptions
+  //     yet, so reset to page 1 so a later pass (after ord catches up) picks them up.
+  //   backfill mid-walk: park at the next page to fetch.
+  const allResolved = unresolved === 0;
+  let nextCursor: string | null;
+  if (!backfilling) {
+    nextCursor = null;
+  } else if (drained && !allResolved) {
+    nextCursor = 'page:1';
+  } else {
+    nextCursor = `page:${drained ? lastPageReached : nextPage}`;
+  }
 
   stmts.setPollResult.run({
     stream: 'satflow',
@@ -642,7 +654,10 @@ async function runSatflowTick(opts: { force?: 'incremental' | 'backfill' }): Pro
     cursor: nextCursor,
   });
 
-  if (backfilling && drained && !errMsg) {
+  // Only clear the backfilling flag once we've drained AND every sale resolved.
+  // Otherwise we keep is_backfilling=1 so the next cron tick resumes (from page 1)
+  // and re-tries the unresolved tail.
+  if (backfilling && drained && allResolved && !errMsg) {
     stmts.setBackfilling.run({ stream: 'satflow', flag: 0 });
   }
 

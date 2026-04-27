@@ -37,20 +37,28 @@ ENV HOSTNAME=0.0.0.0
 WORKDIR /app
 
 # sqlite3 + rclone for the nightly backup scheduled task; curl for health/poll triggers.
+# gosu lets the entrypoint repair /data ownership as root then drop to nextjs.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends sqlite3 rclone curl ca-certificates \
+    && apt-get install -y --no-install-recommends sqlite3 rclone curl ca-certificates gosu \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system --gid 1001 nodejs \
     && useradd --system --uid 1001 --gid nodejs nextjs
 
-# Persistent volume mount target. Coolify mounts a named volume here.
+# Persistent volume mount target. Coolify mounts a named volume here at
+# runtime, which masks this build-time chown — the entrypoint fixes it
+# back up on each boot.
 RUN mkdir -p /data && chown -R nextjs:nodejs /data
 
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-USER nextjs
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Container starts as root (briefly) so the entrypoint can chown /data;
+# it then exec's the app as nextjs via gosu. Don't set USER here.
 EXPOSE 3000
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "server.js"]
