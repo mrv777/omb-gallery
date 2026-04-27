@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb, getStmts, walCheckpoint, type PollStateRow } from '@/lib/db';
 import {
   fetchBlockHeight,
+  fetchBlockTimestamp,
   fetchInscriptionDetail,
   fetchInscriptionsBatch,
+  fetchOutputConfirmations,
   txidFromOutput,
   OrdError,
   type OrdInscriptionState,
@@ -20,15 +22,24 @@ export const runtime = 'nodejs';
 const SATFLOW_COLLECTION_ID = process.env.SATFLOW_OMB_COLLECTION_ID ?? 'omb';
 
 const ORD_BATCH_SIZE = 500;
-const ORD_BOOTSTRAP_MAX_PER_TICK = 200;
-const ORD_BOOTSTRAP_DELAY_MS = 50;
+const ORD_BOOTSTRAP_MAX_PER_TICK = 300;
+const ORD_BOOTSTRAP_CONCURRENCY = 5;
+const ORD_BOOTSTRAP_WAVE_DELAY_MS = 25;
+
+// Per-tick concurrency for /output + /r/blockinfo enrichment lookups.
+// Each detected transfer needs 2 sequential ord calls; wider parallelism
+// drains the work fast but risks overloading ord on a catch-up burst.
+const ORD_ENRICHMENT_CONCURRENCY = 8;
 
 const SATFLOW_PAGE_SIZE = 100;
 const SATFLOW_INCREMENTAL_MAX_PAGES = 3;
 const SATFLOW_BACKFILL_MAX_PAGES_PER_TICK = 8;
 const SATFLOW_BACKFILL_POLITENESS_MS = 500;
 
-const TICK_WALLCLOCK_BUDGET_MS = 25_000;
+// Wallclock cap per tick. Bumped from 25s to 60s to absorb enrichment
+// (2 extra ord calls per detected transfer). The acquireLock window in
+// db.ts MUST stay ≥ this + safety margin or two ticks can run concurrently.
+const TICK_WALLCLOCK_BUDGET_MS = 60_000;
 
 // If ord reports a tip more than this many blocks below the highest we've
 // previously seen, treat it as stale (re-indexing, cached reverse-proxy
@@ -196,14 +207,29 @@ async function runOrdTick(): Promise<TickResult> {
       states = await fetchInscriptionsBatch(chunk);
     } catch (err) {
       errMsg = errorMessage(err);
+      // Don't mark polled — fetch failed, retry next tick.
       break;
     }
 
     checked += states.length;
-    const tickResult = applyOrdStates(states, indexed, blockHeight);
+
+    // Identify transfer satpoints (output changed since last poll) so we
+    // can enrich them with real on-chain block_height/block_timestamp
+    // before writing events. ord's batch endpoint only ships the *current*
+    // satpoint, not when the move happened; without enrichment every
+    // event would carry the poll-time as its timestamp.
+    const transferSatpoints = collectTransferSatpoints(states, indexed);
+    const enrichmentMap = await enrichTransfers(transferSatpoints, blockHeight);
+
+    const tickResult = applyOrdStates(states, indexed, blockHeight, enrichmentMap);
     changed += tickResult.changed;
     inserted += tickResult.inserted;
     initialized += tickResult.initialized;
+    // Mark every ID we asked about — including ones ord didn't return —
+    // so the round-robin order in listInscriptionsForPoll advances. A
+    // consistently-missing ID would otherwise pin itself to the front
+    // of the queue and starve the rest.
+    markChunkPolled(chunk);
   }
 
   setOrdResult(errMsg ? errMsg.slice(0, 500) : 'ok', inserted);
@@ -236,32 +262,46 @@ async function bootstrapInscriptionIds(): Promise<number> {
 
   let bootstrapped = 0;
   const startedAt = Date.now();
-  for (const row of missing) {
+  // Bootstrap in waves of N concurrent fetches: ord can serve them in
+  // parallel, so this gives ~Nx the throughput of the previous sequential
+  // loop without piling up requests faster than ord can keep up. Each
+  // wave only commits the inscriptions it finished — partial-wave failures
+  // (504, 429) just drop into the next tick.
+  for (let i = 0; i < missing.length; i += ORD_BOOTSTRAP_CONCURRENCY) {
     if (Date.now() - startedAt > TICK_WALLCLOCK_BUDGET_MS / 2) break;
-    try {
-      const detail = await fetchInscriptionDetail(row.inscription_number);
-      if (detail.inscription_id) {
-        // Populate current_output + current_owner from the same call so the
-        // first ?mode=ord tick after bootstrap doesn't risk missing a real
-        // transfer via the initial-sync no-event guard in applyOrdStates.
-        stmts.setInscriptionState.run({
-          inscription_number: row.inscription_number,
-          inscription_id: detail.inscription_id,
-          current_output: detail.output,
-          current_owner: detail.address,
-        });
-        bootstrapped++;
+    const wave = missing.slice(i, i + ORD_BOOTSTRAP_CONCURRENCY);
+    const results = await Promise.allSettled(
+      wave.map((row) => fetchInscriptionDetail(row.inscription_number))
+    );
+    for (let j = 0; j < results.length; j++) {
+      const r = results[j];
+      const row = wave[j];
+      if (r.status === 'rejected') {
+        // 404 is expected for inscriptions ord doesn't know about yet
+        // (very-recent mints, or mints past ord's current sync height).
+        // Anything else is a real error — surface it.
+        if (r.reason instanceof OrdError && r.reason.status === 404) continue;
+        throw r.reason;
       }
-    } catch (err) {
-      // 404 is non-retryable but expected for inscriptions ord doesn't know about
-      // (e.g. very-recent mints). Skip and try again next tick.
-      if (err instanceof OrdError && err.status === 404) continue;
-      throw err;
+      const detail = r.value;
+      if (!detail.inscription_id) continue;
+      // Populate current_output + current_owner from the same call so the
+      // first ?mode=ord tick after bootstrap doesn't risk missing a real
+      // transfer via the initial-sync no-event guard in applyOrdStates.
+      stmts.setInscriptionState.run({
+        inscription_number: row.inscription_number,
+        inscription_id: detail.inscription_id,
+        current_output: detail.output,
+        current_owner: detail.address,
+      });
+      bootstrapped++;
     }
-    await sleep(ORD_BOOTSTRAP_DELAY_MS);
+    await sleep(ORD_BOOTSTRAP_WAVE_DELAY_MS);
   }
   return bootstrapped;
 }
+
+type EnrichmentMap = Map<string, { block_height: number; block_timestamp: number }>;
 
 function applyOrdStates(
   states: OrdInscriptionState[],
@@ -269,7 +309,8 @@ function applyOrdStates(
     string,
     { inscription_number: number; current_output: string | null; current_owner: string | null }
   >,
-  blockHeight: number | null
+  blockHeight: number | null,
+  enrichmentMap: EnrichmentMap
 ): { changed: number; inserted: number; initialized: number } {
   if (states.length === 0) return { changed: 0, inserted: 0, initialized: 0 };
   const stmts = getStmts();
@@ -318,19 +359,29 @@ function applyOrdStates(
         continue;
       }
       changed++;
+      // Prefer real on-chain block_height/timestamp from enrichment; fall
+      // back to chain-tip + now-time only if enrichment failed (ord 404,
+      // mempool tx with confirmations=0, network blip). Fallback events
+      // can be detected via block_height === blockHeight and re-enriched
+      // by a future ?mode=enrich pass if we ever add one.
+      const enriched = enrichmentMap.get(newOutput);
       const ev = {
         inscription_id: s.inscription_id,
         inscription_number: known.inscription_number,
         event_type: 'transferred' as const,
-        block_height: blockHeight,
-        block_timestamp: nowTs,
+        block_height: enriched?.block_height ?? blockHeight,
+        block_timestamp: enriched?.block_timestamp ?? nowTs,
         new_satpoint: newOutput,
         old_owner: known.current_owner,
         new_owner: s.address,
         marketplace: null,
         sale_price_sats: null,
         txid,
-        raw_json: JSON.stringify({ source: 'ord', state: s }),
+        raw_json: JSON.stringify({
+          source: 'ord',
+          state: s,
+          enriched: enriched ? true : false,
+        }),
       };
 
       stmts.upsertInscriptionFromEvent.run({
@@ -368,6 +419,99 @@ function applyOrdStates(
   tx();
 
   return { changed, inserted, initialized };
+}
+
+/**
+ * Sync pre-pass: identify which `(state, indexed)` pairs represent a real
+ * transfer that needs enrichment. Mirrors the diff logic in applyOrdStates
+ * but writes nothing — we only need a list of satpoints to look up.
+ */
+function collectTransferSatpoints(
+  states: OrdInscriptionState[],
+  indexed: Map<
+    string,
+    { inscription_number: number; current_output: string | null; current_owner: string | null }
+  >
+): string[] {
+  const out: string[] = [];
+  for (const s of states) {
+    const known = indexed.get(s.inscription_id);
+    if (!known) continue;
+    if (s.output == null) continue;
+    if (known.current_output == null) continue; // initial sync, no event
+    if (known.current_output === s.output) continue;
+    if (!txidFromOutput(s.output)) continue;
+    out.push(s.output);
+  }
+  return out;
+}
+
+/**
+ * For each detected transfer satpoint, derive the on-chain block_height
+ * (from `confirmations` on /output) and block_timestamp (from /r/blockinfo).
+ * Two ord calls per unique satpoint; runs in parallel waves of N to keep
+ * burst latency bounded without overloading ord.
+ *
+ * Failures (404, malformed, timeout, mempool tx with confirmations=0) are
+ * silently dropped — the caller falls back to chain-tip + now-time so we
+ * still emit the transfer event, just with imprecise time.
+ */
+async function enrichTransfers(
+  satpoints: string[],
+  ordTip: number | null
+): Promise<EnrichmentMap> {
+  const map: EnrichmentMap = new Map();
+  if (satpoints.length === 0 || ordTip == null) return map;
+  const unique = Array.from(new Set(satpoints));
+
+  // Step 1: parallel /output lookups → confirmations → block_height
+  const heights = new Map<string, number>();
+  for (let i = 0; i < unique.length; i += ORD_ENRICHMENT_CONCURRENCY) {
+    const wave = unique.slice(i, i + ORD_ENRICHMENT_CONCURRENCY);
+    const results = await Promise.allSettled(
+      wave.map((sp) => fetchOutputConfirmations(sp))
+    );
+    for (let j = 0; j < results.length; j++) {
+      const r = results[j];
+      if (r.status !== 'fulfilled' || r.value == null || r.value < 1) continue;
+      const height = ordTip - r.value + 1;
+      if (height < 1) continue;
+      heights.set(wave[j], height);
+    }
+  }
+
+  // Step 2: parallel /r/blockinfo lookups, deduped by height
+  const uniqueHeights = Array.from(new Set(heights.values()));
+  const heightToTs = new Map<number, number>();
+  for (let i = 0; i < uniqueHeights.length; i += ORD_ENRICHMENT_CONCURRENCY) {
+    const wave = uniqueHeights.slice(i, i + ORD_ENRICHMENT_CONCURRENCY);
+    const results = await Promise.allSettled(wave.map((h) => fetchBlockTimestamp(h)));
+    for (let j = 0; j < results.length; j++) {
+      const r = results[j];
+      if (r.status !== 'fulfilled' || r.value == null) continue;
+      heightToTs.set(wave[j], r.value);
+    }
+  }
+
+  // Step 3: stitch them
+  heights.forEach((height, sp) => {
+    const ts = heightToTs.get(height);
+    if (ts != null) map.set(sp, { block_height: height, block_timestamp: ts });
+  });
+  return map;
+}
+
+function markChunkPolled(ids: string[]): void {
+  if (ids.length === 0) return;
+  const stmts = getStmts();
+  const db = getDb();
+  const now = Math.floor(Date.now() / 1000);
+  const tx = db.transaction(() => {
+    for (const id of ids) {
+      stmts.markInscriptionPolled.run({ now, inscription_id: id });
+    }
+  });
+  tx();
 }
 
 function setOrdResult(status: string, eventCount: number): void {

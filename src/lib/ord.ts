@@ -84,6 +84,32 @@ export async function fetchInscriptionsBatch(
   return out;
 }
 
+/**
+ * `GET /output/<txid>:<vout>` — used to recover the on-chain block height
+ * for a transfer satpoint. ord doesn't expose the transfer's own block info
+ * directly (the inscription endpoint only ships *genesis* height/timestamp),
+ * so we derive it from `confirmations` against the chain tip.
+ *
+ * Returns confirmations of the tx that *created* this output. For a mempool
+ * tx, ord returns 0 (and we fall back to the poller's now-time at the call
+ * site). Returns 404 if ord doesn't know the output.
+ */
+export async function fetchOutputConfirmations(satpoint: string): Promise<number | null> {
+  const json = (await getJson(`${ensureBase()}/output/${satpoint}`)) as Record<string, unknown>;
+  return pickInt(json, ['confirmations']);
+}
+
+/**
+ * `GET /r/blockinfo/<height>` — small JSON (~700 bytes) with `timestamp`,
+ * `hash`, `height`, etc. Avoids `/block/<height>` which ships every tx in
+ * the block (megabytes for a full-fee block).
+ */
+export async function fetchBlockTimestamp(height: number): Promise<number | null> {
+  if (height < 1) return null;
+  const json = (await getJson(`${ensureBase()}/r/blockinfo/${height}`)) as Record<string, unknown>;
+  return pickInt(json, ['timestamp']);
+}
+
 // ---------------- normalization ----------------
 
 function extractList(json: unknown): Record<string, unknown>[] {

@@ -5,7 +5,7 @@ import Database, { type Database as DB } from 'better-sqlite3';
 import imageData from '../data/images.json';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 type ImageEntry = { filename: string; description: string; tags: string[] };
 type ImagesByColor = Record<string, ImageEntry[]>;
@@ -52,6 +52,7 @@ function migrate(db: DB): void {
         upgradeV1ToV2(db);
         upgradeV2ToV3(db);
         upgradeV3ToV4(db);
+        upgradeV4ToV5(db);
       } else {
         initSchemaLatest(db);
       }
@@ -59,6 +60,7 @@ function migrate(db: DB): void {
       if (current < 2) upgradeV1ToV2(db);
       if (current < 3) upgradeV2ToV3(db);
       if (current < 4) upgradeV3ToV4(db);
+      if (current < 5) upgradeV4ToV5(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -80,7 +82,8 @@ function initSchemaLatest(db: DB): void {
       transfer_count      INTEGER NOT NULL DEFAULT 0,
       sale_count          INTEGER NOT NULL DEFAULT 0,
       total_volume_sats   INTEGER NOT NULL DEFAULT 0,
-      highest_sale_sats   INTEGER NOT NULL DEFAULT 0
+      highest_sale_sats   INTEGER NOT NULL DEFAULT 0,
+      last_polled_at      INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_insc_movement   ON inscriptions (last_movement_at);
     CREATE INDEX IF NOT EXISTS idx_insc_xfer_count ON inscriptions (transfer_count DESC);
@@ -212,6 +215,20 @@ function upgradeV3ToV4(db: DB): void {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_events_type_id ON events (event_type, id DESC)`);
 }
 
+function upgradeV4ToV5(db: DB): void {
+  // Round-robin poll order: without this, runOrdTick always polls in
+  // inscription_number ASC and breaks at the wallclock budget, so the back
+  // half of the list never gets re-polled and silently misses transfers.
+  // Adding `last_polled_at` (default 0 = "never") and ordering by it ASC
+  // means each tick prioritizes least-recently-polled rows, so coverage
+  // catches up over a few ticks even when one tick doesn't fit them all.
+  // Idempotent: skip if column already exists.
+  const cols = db.pragma('table_info(inscriptions)') as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === 'last_polled_at')) {
+    db.exec(`ALTER TABLE inscriptions ADD COLUMN last_polled_at INTEGER NOT NULL DEFAULT 0`);
+  }
+}
+
 function seedInscriptions(db: DB): void {
   // One-time seed from images.json. Idempotent: INSERT OR IGNORE keeps existing rows
   // (with their accumulated event aggregates) untouched.
@@ -252,6 +269,7 @@ type Stmts = {
   // ord-specific reads
   listInscriptionsForPoll: ReturnType<DB['prepare']>;
   listInscriptionsMissingId: ReturnType<DB['prepare']>;
+  markInscriptionPolled: ReturnType<DB['prepare']>;
   // satflow event lookup
   findEventByInscriptionAndTxid: ReturnType<DB['prepare']>;
   // poll_state
@@ -362,7 +380,12 @@ export function getStmts(): Stmts {
     listInscriptionsForPoll: db.prepare(`
       SELECT inscription_number, inscription_id, current_output, current_owner
       FROM inscriptions
-      ORDER BY inscription_number
+      WHERE inscription_id IS NOT NULL
+      ORDER BY last_polled_at ASC, inscription_number ASC
+    `),
+
+    markInscriptionPolled: db.prepare(`
+      UPDATE inscriptions SET last_polled_at = @now WHERE inscription_id = @inscription_id
     `),
 
     listInscriptionsMissingId: db.prepare(`
@@ -381,12 +404,15 @@ export function getStmts(): Stmts {
 
     getPollState: db.prepare(`SELECT * FROM poll_state WHERE stream = ?`),
 
-    // Soft lock: succeeds only if no recent run for this stream.
+    // Soft lock: succeeds only if no recent run for this stream. The window
+    // must exceed the worst-case tick duration (TICK_WALLCLOCK_BUDGET_MS plus
+    // enrichment + I/O slack) — otherwise a still-running tick can be raced
+    // by a fresh cron call that acquires the lock and runs concurrently.
     acquireLock: db.prepare(`
       UPDATE poll_state
       SET last_run_at = unixepoch()
       WHERE stream = ?
-        AND (last_run_at IS NULL OR last_run_at < unixepoch() - 30)
+        AND (last_run_at IS NULL OR last_run_at < unixepoch() - 120)
     `),
 
     setPollResult: db.prepare(`
