@@ -78,7 +78,7 @@ export default function ActivityFeed() {
         </div>
 
         <div
-          role="tablist"
+          role="group"
           aria-label="Filter activity"
           className="flex items-center gap-1 font-mono text-[11px] tracking-[0.12em] uppercase"
         >
@@ -87,8 +87,8 @@ export default function ActivityFeed() {
             return (
               <button
                 key={f.key}
-                role="tab"
-                aria-selected={active}
+                type="button"
+                aria-pressed={active}
                 onClick={() => setFilter(f.key)}
                 className={`px-2 py-1 border transition-colors ${
                   active

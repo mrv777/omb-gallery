@@ -132,7 +132,7 @@ function normalizeInscriptionState(item: Record<string, unknown>): OrdInscriptio
   const inscription_number = pickInt(item, ['number', 'inscription_number']);
   if (!inscription_id || inscription_number == null) return null;
   const output = pickString(item, ['satpoint', 'output', 'location']);
-  const normalized_output = output ? stripVoutFromSatpoint(output) : null;
+  const normalized_output = output ? outputFromSatpoint(output) : null;
   return {
     inscription_id,
     inscription_number,
@@ -149,7 +149,7 @@ function normalizeInscriptionDetail(item: Record<string, unknown>): OrdInscripti
   return {
     inscription_id,
     inscription_number,
-    output: output ?? (satpoint ? stripVoutFromSatpoint(satpoint) : null),
+    output: output ?? (satpoint ? outputFromSatpoint(satpoint) : null),
     address: pickString(item, ['address', 'owner']),
     block_height: pickInt(item, ['height', 'genesis_height', 'block_height']),
     block_timestamp: pickInt(item, ['timestamp', 'block_timestamp', 'block_time', 'genesis_timestamp']),
@@ -159,11 +159,12 @@ function normalizeInscriptionDetail(item: Record<string, unknown>): OrdInscripti
 
 /**
  * ord's "satpoint" field is `<txid>:<vout>:<offset>`. The "output" we want for
- * change detection is `<txid>:<vout>` only — offset within an output isn't
- * relevant for transfer detection (and changes when the inscription is
- * "consolidated" into a different position within the same UTXO).
+ * change detection is `<txid>:<vout>` only — strip the trailing offset.
+ * Offset within an output isn't relevant for transfer detection (and changes
+ * when the inscription is "consolidated" into a different position within
+ * the same UTXO).
  */
-function stripVoutFromSatpoint(satpoint: string): string {
+function outputFromSatpoint(satpoint: string): string {
   const parts = satpoint.split(':');
   if (parts.length >= 2) return `${parts[0]}:${parts[1]}`;
   return satpoint;

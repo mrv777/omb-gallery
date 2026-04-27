@@ -294,6 +294,15 @@ async function bootstrapInscriptionIds(): Promise<number> {
         current_output: detail.output,
         current_owner: detail.address,
       });
+      // Populate inscribe_at from genesis timestamp if ord ships it. Without
+      // this, inscriptions that have never moved have NULL inscribe_at and
+      // detail pages can't compute "held since mint".
+      if (detail.block_timestamp != null) {
+        stmts.setInscriptionInscribeAt.run({
+          inscription_number: row.inscription_number,
+          inscribe_at: detail.block_timestamp,
+        });
+      }
       bootstrapped++;
     }
     await sleep(ORD_BOOTSTRAP_WAVE_DELAY_MS);
@@ -674,6 +683,11 @@ function applySalesTransaction(sales: NormalizedSale[]): {
           sale_price_sats: sale.sale_price_sats,
           old_owner: sale.seller,
           new_owner: sale.buyer,
+          // Pass through Satflow's on-chain timing so a transfer event written
+          // with poll-time fallback gets corrected on upgrade. Null values are
+          // COALESCEd in the SQL, so this never clobbers existing on-chain values.
+          block_height: sale.block_height,
+          block_timestamp: sale.block_timestamp,
           raw_json: sale.raw_json,
         });
         if (r.changes > 0) {

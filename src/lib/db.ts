@@ -266,6 +266,7 @@ type Stmts = {
   unbumpTransferOnUpgrade: ReturnType<DB['prepare']>;
   setInscriptionState: ReturnType<DB['prepare']>;
   setInscriptionId: ReturnType<DB['prepare']>;
+  setInscriptionInscribeAt: ReturnType<DB['prepare']>;
   // ord-specific reads
   listInscriptionsForPoll: ReturnType<DB['prepare']>;
   listInscriptionsMissingId: ReturnType<DB['prepare']>;
@@ -315,6 +316,11 @@ export function getStmts(): Stmts {
 
     // Used by Satflow when a 'transferred' row already exists for the same (inscription_id, txid):
     // upgrade it to a 'sold' row with marketplace + price.
+    //
+    // block_height/block_timestamp use COALESCE(@..., col) so Satflow can correct
+    // an event that was written with the poller's wallclock fallback (when ord
+    // enrichment failed): when Satflow ships real on-chain timing, it overwrites;
+    // when it ships nothing, the existing transfer values are preserved.
     upgradeEventToSold: db.prepare(`
       UPDATE events
       SET event_type      = 'sold',
@@ -322,6 +328,8 @@ export function getStmts(): Stmts {
           sale_price_sats = @sale_price_sats,
           old_owner       = COALESCE(@old_owner, old_owner),
           new_owner       = COALESCE(@new_owner, new_owner),
+          block_height    = COALESCE(@block_height, block_height),
+          block_timestamp = COALESCE(@block_timestamp, block_timestamp),
           raw_json        = COALESCE(@raw_json, raw_json)
       WHERE inscription_id = @inscription_id
         AND txid           = @txid
@@ -374,6 +382,15 @@ export function getStmts(): Stmts {
     setInscriptionId: db.prepare(`
       UPDATE inscriptions
       SET inscription_id = COALESCE(inscriptions.inscription_id, @inscription_id)
+      WHERE inscription_number = @inscription_number
+    `),
+
+    // Set inscribe_at (genesis timestamp) only if not already set. Used by the
+    // ord bootstrap pass to populate "held since mint" data for inscriptions
+    // that have never moved (no event would otherwise carry the genesis time).
+    setInscriptionInscribeAt: db.prepare(`
+      UPDATE inscriptions
+      SET inscribe_at = COALESCE(inscriptions.inscribe_at, @inscribe_at)
       WHERE inscription_number = @inscription_number
     `),
 

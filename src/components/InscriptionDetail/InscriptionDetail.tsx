@@ -130,8 +130,12 @@ export default function InscriptionDetail({
                   className="text-bone normal-case tracking-normal break-all"
                   title={inscription.current_output}
                 >
-                  {inscription.current_output.slice(0, 16)}…:
-                  {inscription.current_output.split(':')[1]}
+                  {(() => {
+                    const [txid, vout] = inscription.current_output.split(':');
+                    return vout != null
+                      ? `${txid.slice(0, 16)}…:${vout}`
+                      : inscription.current_output;
+                  })()}
                 </span>
               </div>
             )}

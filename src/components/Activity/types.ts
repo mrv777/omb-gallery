@@ -5,7 +5,7 @@ export type ApiEvent = {
   event_type: 'inscribed' | 'transferred' | 'sold';
   block_height: number | null;
   block_timestamp: number;
-  new_satpoint: string;
+  new_satpoint: string | null;
   old_owner: string | null;
   new_owner: string | null;
   marketplace: string | null;
