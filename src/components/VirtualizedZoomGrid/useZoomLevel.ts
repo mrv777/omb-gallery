@@ -7,8 +7,17 @@ import {
   ZOOM_DELTA_THRESHOLD
 } from './constants';
 
+// Phones (and similar narrow viewports) start at 5 columns instead of 10 so
+// tiles are recognizable at first paint. Users can still pinch / use −/+.
+const MOBILE_DEFAULT_ZOOM_INDEX = 2; // ZOOM_LEVELS[2] = 5 columns
+
 export function useZoomLevel() {
-  const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX);
+  const [zoomIndex, setZoomIndex] = useState(() => {
+    if (typeof window === 'undefined') return DEFAULT_ZOOM_INDEX;
+    return window.matchMedia('(max-width: 767px)').matches
+      ? MOBILE_DEFAULT_ZOOM_INDEX
+      : DEFAULT_ZOOM_INDEX;
+  });
   const accumulatedDelta = useRef(0);
 
   const handleZoomGesture = useCallback((delta: number, isDiscrete: boolean) => {

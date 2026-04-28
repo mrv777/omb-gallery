@@ -1,6 +1,6 @@
 "use client";
 
-import React, { memo, useEffect } from 'react';
+import React, { memo, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { GalleryImage } from '@/lib/types';
 import { useFavorites } from '@/lib/FavoritesContext';
@@ -34,6 +34,10 @@ const ImageModal = memo(function ImageModal({
   onNext,
 }: ImageModalProps) {
   const { isFavorite, toggleFavorite } = useFavorites();
+
+  // Touch-swipe horizontal nav (mirror of the slideshow gesture). Declared
+  // before any conditional return to keep hook order stable.
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
 
   // Warm the browser cache for the adjacent pieces so arrow-key nav is
   // instant. Effect runs after paint, so it doesn't starve the current
@@ -69,6 +73,23 @@ const ImageModal = memo(function ImageModal({
   const favorited = isFavorite(image.src);
   const id = inscriptionId(image.src);
   const colorLabel = COLOR_LABELS[image.color] ?? image.color.toUpperCase();
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    if (!t) return;
+    touchStart.current = { x: t.clientX, y: t.clientY };
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (!touchStart.current) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStart.current.x;
+    const dy = t.clientY - touchStart.current.y;
+    touchStart.current = null;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
+      if (dx < 0) onNext();
+      else onPrev();
+    }
+  };
 
   return (
     <div
@@ -121,6 +142,8 @@ const ImageModal = memo(function ImageModal({
       <div
         className="flex-1 flex items-center justify-center min-h-0 px-4 sm:px-12 relative"
         onClick={(e) => e.stopPropagation()}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
       >
         <button
           type="button"

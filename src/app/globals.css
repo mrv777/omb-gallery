@@ -116,11 +116,15 @@ body {
   background: rgba(0, 0, 0, 0.8);
 }
 
-/* Touch devices can't hover, so keep the heart visible. */
-@media (hover: none) {
-  .grid-cell-fav {
-    opacity: 1;
-  }
+/* Brief scale + ring pulse when a long-press toggles a favorite. */
+@keyframes omb-fav-flash {
+  0%   { transform: scale(1);    box-shadow: inset 0 0 0 0 var(--accent-red); }
+  40%  { transform: scale(0.94); box-shadow: inset 0 0 0 3px var(--accent-red); }
+  100% { transform: scale(1);    box-shadow: inset 0 0 0 0 var(--accent-red); }
+}
+
+.grid-cell-flash {
+  animation: omb-fav-flash 280ms ease-out;
 }
 
 /* Remove native number-input spinners in search field */

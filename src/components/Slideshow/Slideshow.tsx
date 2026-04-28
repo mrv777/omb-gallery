@@ -273,22 +273,31 @@ export default function Slideshow({
   }, [shareOpen, togglePlaying, goPrev, goNext, toggleFullscreen, toggleOrder, stepSpeed, nudgeControls, exit]);
 
   // Touch swipe
-  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const touchStart = useRef<{ x: number; y: number; controlsWereVisible: boolean } | null>(null);
   const onTouchStart = (e: React.TouchEvent) => {
     const t = e.touches[0];
-    touchStart.current = { x: t.clientX, y: t.clientY };
+    touchStart.current = {
+      x: t.clientX,
+      y: t.clientY,
+      controlsWereVisible: controlsVisible,
+    };
   };
   const onTouchEnd = (e: React.TouchEvent) => {
     if (!touchStart.current) return;
     const t = e.changedTouches[0];
     const dx = t.clientX - touchStart.current.x;
     const dy = t.clientY - touchStart.current.y;
+    const wasVisible = touchStart.current.controlsWereVisible;
     touchStart.current = null;
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
       if (dx < 0) goNext();
       else goPrev();
     } else if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
-      togglePlaying();
+      // First tap when controls are hidden just reveals them; the next tap
+      // (with controls visible) toggles play. Avoids accidental pauses when
+      // users tap to "wake up" the UI.
+      if (wasVisible) togglePlaying();
+      else nudgeControls();
     }
   };
 

@@ -11,7 +11,7 @@ const SECTIONS: Section[] = [
     items: [
       { label: 'Color swatches', body: 'Filter by red / blue / green / orange / black. "ALL" clears the filter.' },
       { label: 'Search', body: 'Type an inscription number or caption keyword.' },
-      { label: 'Heart (♡ / ♥)', body: 'Hover a tile to reveal its heart and click to favorite. Shift-click a tile as a keyboard shortcut. Toggle the header heart to show only your favorites.' },
+      { label: 'Heart (♡ / ♥)', body: 'Desktop: hover a tile to reveal its heart and click to favorite (or shift-click the tile). Mobile: long-press a tile to favorite — favorited tiles get a red ring. Toggle the header heart to show only your favorites.' },
       { label: '▶ PLAY', body: 'Plays the current filter as a slideshow. Disabled when no images match.' },
       { label: '− / + / zoom', body: 'Changes how many columns render. Pinch/scroll-zoom also works.' },
       { label: 'Click a piece', body: 'Opens the full-size modal. Use ← / → to move, Esc to close.' },
@@ -39,8 +39,7 @@ const SECTIONS: Section[] = [
   },
 ];
 
-export default function HelpButton() {
-  const [open, setOpen] = useState(false);
+export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -53,17 +52,19 @@ export default function HelpButton() {
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        setOpen(false);
+        onClose();
       }
     };
     window.addEventListener('keydown', onKey, { capture: true });
     return () => window.removeEventListener('keydown', onKey, { capture: true });
-  }, [open]);
+  }, [open, onClose]);
 
-  const modal = open ? (
+  if (!open || !mounted) return null;
+
+  return createPortal(
     <div
       className="fixed inset-0 z-[2000] bg-ink-0/80 backdrop-blur-sm flex items-start sm:items-center justify-center px-4 py-8 overflow-y-auto"
-      onClick={() => setOpen(false)}
+      onClick={onClose}
     >
       <div
         role="dialog"
@@ -76,7 +77,7 @@ export default function HelpButton() {
           <h2 className="text-bone text-sm">How this works</h2>
           <button
             type="button"
-            onClick={() => setOpen(false)}
+            onClick={onClose}
             className="h-8 w-8 flex items-center justify-center text-bone-dim hover:text-bone transition-colors -mr-2 -mt-1"
             aria-label="Close"
           >
@@ -117,8 +118,13 @@ export default function HelpButton() {
           </a>
         </p>
       </div>
-    </div>
-  ) : null;
+    </div>,
+    document.body
+  );
+}
+
+export default function HelpButton() {
+  const [open, setOpen] = useState(false);
 
   return (
     <>
@@ -131,7 +137,7 @@ export default function HelpButton() {
         ?
       </button>
 
-      {mounted && modal ? createPortal(modal, document.body) : null}
+      <HelpDialog open={open} onClose={() => setOpen(false)} />
     </>
   );
 }

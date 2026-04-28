@@ -1,9 +1,10 @@
 "use client";
 
-import React, { memo } from 'react';
+import React, { memo, useCallback } from 'react';
 import Link from 'next/link';
 import { ColorFilter } from '@/lib/types';
 import HelpButton from './HelpButton';
+import MobileMenu from './MobileMenu';
 
 interface FilterControlsProps {
   colorFilter: ColorFilter;
@@ -48,145 +49,177 @@ const FilterControls = memo(function FilterControls({
   searchInputRef,
   playHref,
 }: FilterControlsProps) {
+  // The search input is rendered in two places (desktop row 1, mobile row 2)
+  // and only one is visible at a time per breakpoint. A plain shared ref
+  // gets overwritten by whichever element mounts last, which on desktop is
+  // the hidden mobile input — so the `/` shortcut would focus a display:none
+  // element. This callback only stores the visible one.
+  const setSearchRef = useCallback(
+    (el: HTMLInputElement | null) => {
+      if (el && el.offsetParent !== null) {
+        searchInputRef.current = el;
+      }
+    },
+    [searchInputRef]
+  );
+
+  const filtersBlock = (
+    <div className="flex items-center shrink-0">
+      <button
+        type="button"
+        onClick={() => onColorFilterChange('all')}
+        className={`h-10 px-2.5 flex items-center text-[11px] tracking-[0.12em] transition-colors ${
+          colorFilter === 'all' ? 'text-bone' : 'text-bone-dim hover:text-bone'
+        }`}
+        aria-label="Show all colors"
+      >
+        <span
+          className={`border px-1.5 py-0.5 ${
+            colorFilter === 'all' ? 'border-bone' : 'border-transparent'
+          }`}
+        >
+          ALL
+        </span>
+      </button>
+      {SWATCHES.map(({ value, label, cls }) => {
+        const active = colorFilter === value;
+        return (
+          <button
+            key={value}
+            type="button"
+            onClick={() => onColorFilterChange(value)}
+            className="h-10 w-9 flex items-center justify-center group"
+            aria-label={`Filter by ${label}`}
+          >
+            <span
+              className={`block w-3.5 h-3.5 ${cls} transition-[outline] ${
+                active
+                  ? 'outline outline-1 outline-offset-[3px] outline-bone'
+                  : 'opacity-70 group-hover:opacity-100'
+              }`}
+            />
+          </button>
+        );
+      })}
+      <button
+        type="button"
+        onClick={onToggleFavoritesOnly}
+        className={`h-10 w-10 flex items-center justify-center text-lg leading-none transition-colors ${
+          showFavoritesOnly ? 'text-accent-red' : 'text-bone-dim hover:text-bone'
+        }`}
+        aria-label={showFavoritesOnly ? 'Show all pieces' : 'Show favorites only'}
+      >
+        {showFavoritesOnly ? '♥' : '♡'}
+      </button>
+      {playHref ? (
+        <Link
+          href={playHref}
+          className="h-10 px-2 flex items-center text-bone-dim hover:text-bone transition-colors"
+          aria-label="Play slideshow of current filter"
+        >
+          <span className="border border-transparent px-1.5 py-0.5 text-[11px] tracking-[0.12em]">
+            ▶ PLAY
+          </span>
+        </Link>
+      ) : (
+        <span
+          className="h-10 px-2 flex items-center text-bone-dim opacity-30 cursor-not-allowed"
+          aria-label="Play slideshow (no images selected)"
+          aria-disabled="true"
+          title="No images in the current filter"
+        >
+          <span className="border border-transparent px-1.5 py-0.5 text-[11px] tracking-[0.12em]">
+            ▶ PLAY
+          </span>
+        </span>
+      )}
+    </div>
+  );
+
+  const searchInput = (
+    <input
+      ref={setSearchRef}
+      type="search"
+      value={searchQuery}
+      onChange={onSearchChange}
+      placeholder="/  search inscription # or keyword"
+      className="w-full bg-transparent border-0 border-b border-ink-2 focus:border-bone outline-none h-10 px-0 text-sm font-mono tracking-[0.06em] text-bone placeholder:text-bone-dim placeholder:normal-case placeholder:tracking-[0.04em] transition-colors"
+      spellCheck={false}
+      autoComplete="off"
+    />
+  );
+
+  const zoomCluster = (
+    <div className="flex items-center shrink-0">
+      <button
+        type="button"
+        onClick={onZoomOut}
+        disabled={!canZoomOut}
+        className={`h-10 w-8 flex items-center justify-center text-base leading-none transition-colors ${
+          canZoomOut ? 'text-bone-dim hover:text-bone' : 'text-bone-dim opacity-30 cursor-not-allowed'
+        }`}
+        aria-label="Zoom out (more columns)"
+      >
+        −
+      </button>
+      <span className="text-bone tabular-nums w-12 text-center text-xs">
+        {String(columnCount).padStart(2, '0')}/{maxColumnCount}
+      </span>
+      <button
+        type="button"
+        onClick={onZoomIn}
+        disabled={!canZoomIn}
+        className={`h-10 w-8 flex items-center justify-center text-base leading-none transition-colors ${
+          canZoomIn ? 'text-bone-dim hover:text-bone' : 'text-bone-dim opacity-30 cursor-not-allowed'
+        }`}
+        aria-label="Zoom in (fewer columns)"
+      >
+        +
+      </button>
+    </div>
+  );
+
   return (
-    <div className="flex h-full items-center gap-4 sm:gap-6 px-4 sm:px-6 font-mono text-xs tracking-[0.08em] uppercase">
-      {/* Wordmark — desktop only */}
-      <div className="hidden md:block text-bone shrink-0">OMB</div>
-      {/* Nav — desktop only */}
-      <nav className="hidden md:flex items-center gap-3 sm:gap-5 shrink-0">
-        <span className="text-bone">
-          <span className="border border-bone px-1.5 py-0.5">gallery</span>
-        </span>
-        <Link
-          href="/activity"
-          className="text-bone-dim hover:text-bone transition-colors"
-        >
-          <span className="border border-transparent px-1.5 py-0.5">activity</span>
-        </Link>
-        <Link
-          href="/explorer"
-          className="text-bone-dim hover:text-bone transition-colors"
-        >
-          <span className="border border-transparent px-1.5 py-0.5">explorer</span>
-        </Link>
-      </nav>
+    <div className="h-full flex flex-col font-mono text-xs tracking-[0.08em] uppercase">
+      {/* Row 1: hamburger (mobile) + wordmark + nav (desktop) + filters + desktop search/zoom/help */}
+      <div className="flex items-center gap-3 sm:gap-6 px-3 sm:px-6 h-11 md:h-full">
+        <MobileMenu />
 
-      {/* Color filters */}
-      <div className="flex items-center shrink-0">
-        <button
-          type="button"
-          onClick={() => onColorFilterChange('all')}
-          className={`h-10 px-2.5 flex items-center text-[11px] tracking-[0.12em] transition-colors ${
-            colorFilter === 'all'
-              ? 'text-bone'
-              : 'text-bone-dim hover:text-bone'
-          }`}
-          aria-label="Show all colors"
-        >
-          <span
-            className={`border px-1.5 py-0.5 ${
-              colorFilter === 'all' ? 'border-bone' : 'border-transparent'
-            }`}
-          >
-            ALL
+        {/* Wordmark — desktop only */}
+        <div className="hidden md:block text-bone shrink-0">OMB</div>
+        {/* Nav — desktop only */}
+        <nav className="hidden md:flex items-center gap-3 sm:gap-5 shrink-0">
+          <span className="text-bone">
+            <span className="border border-bone px-1.5 py-0.5">gallery</span>
           </span>
-        </button>
-        {SWATCHES.map(({ value, label, cls }) => {
-          const active = colorFilter === value;
-          return (
-            <button
-              key={value}
-              type="button"
-              onClick={() => onColorFilterChange(value)}
-              className="h-10 w-9 flex items-center justify-center group"
-              aria-label={`Filter by ${label}`}
-            >
-              <span
-                className={`block w-3.5 h-3.5 ${cls} transition-[outline] ${
-                  active
-                    ? 'outline outline-1 outline-offset-[3px] outline-bone'
-                    : 'opacity-70 group-hover:opacity-100'
-                }`}
-              />
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          onClick={onToggleFavoritesOnly}
-          className={`h-10 w-10 flex items-center justify-center text-lg leading-none transition-colors ${
-            showFavoritesOnly ? 'text-accent-red' : 'text-bone-dim hover:text-bone'
-          }`}
-          aria-label={showFavoritesOnly ? 'Show all pieces' : 'Show favorites only'}
-        >
-          {showFavoritesOnly ? '♥' : '♡'}
-        </button>
-        {playHref ? (
           <Link
-            href={playHref}
-            className="h-10 px-2 flex items-center text-bone-dim hover:text-bone transition-colors"
-            aria-label="Play slideshow of current filter"
+            href="/activity"
+            className="text-bone-dim hover:text-bone transition-colors"
           >
-            <span className="border border-transparent px-1.5 py-0.5 text-[11px] tracking-[0.12em]">
-              ▶ PLAY
-            </span>
+            <span className="border border-transparent px-1.5 py-0.5">activity</span>
           </Link>
-        ) : (
-          <span
-            className="h-10 px-2 flex items-center text-bone-dim opacity-30 cursor-not-allowed"
-            aria-label="Play slideshow (no images selected)"
-            aria-disabled="true"
-            title="No images in the current filter"
+          <Link
+            href="/explorer"
+            className="text-bone-dim hover:text-bone transition-colors"
           >
-            <span className="border border-transparent px-1.5 py-0.5 text-[11px] tracking-[0.12em]">
-              ▶ PLAY
-            </span>
-          </span>
-        )}
+            <span className="border border-transparent px-1.5 py-0.5">explorer</span>
+          </Link>
+        </nav>
+
+        {filtersBlock}
+
+        {/* Desktop search + zoom + help */}
+        <div className="hidden md:flex items-center gap-4 sm:gap-6 flex-1 min-w-0">
+          <div className="flex-1 min-w-0">{searchInput}</div>
+          {zoomCluster}
+          <HelpButton />
+        </div>
       </div>
 
-      {/* Search — grows to fill */}
-      <div className="flex-1 min-w-0">
-        <input
-          ref={searchInputRef}
-          type="search"
-          value={searchQuery}
-          onChange={onSearchChange}
-          placeholder="/  search inscription # or keyword"
-          className="w-full bg-transparent border-0 border-b border-ink-2 focus:border-bone outline-none h-10 px-0 text-sm font-mono tracking-[0.06em] text-bone placeholder:text-bone-dim placeholder:normal-case placeholder:tracking-[0.04em] transition-colors"
-          spellCheck={false}
-          autoComplete="off"
-        />
-      </div>
-
-      {/* Zoom status (compact, functional) */}
-      <div className="flex items-center shrink-0">
-        <button
-          type="button"
-          onClick={onZoomOut}
-          disabled={!canZoomOut}
-          className={`h-10 w-8 flex items-center justify-center text-base leading-none transition-colors ${
-            canZoomOut ? 'text-bone-dim hover:text-bone' : 'text-bone-dim opacity-30 cursor-not-allowed'
-          }`}
-          aria-label="Zoom out (more columns)"
-        >
-          −
-        </button>
-        <span className="text-bone tabular-nums w-12 text-center text-xs">
-          {String(columnCount).padStart(2, '0')}/{maxColumnCount}
-        </span>
-        <button
-          type="button"
-          onClick={onZoomIn}
-          disabled={!canZoomIn}
-          className={`h-10 w-8 flex items-center justify-center text-base leading-none transition-colors ${
-            canZoomIn ? 'text-bone-dim hover:text-bone' : 'text-bone-dim opacity-30 cursor-not-allowed'
-          }`}
-          aria-label="Zoom in (fewer columns)"
-        >
-          +
-        </button>
-        <HelpButton />
+      {/* Row 2 — mobile only: search + zoom */}
+      <div className="md:hidden flex items-center gap-3 px-3 h-11 border-t border-ink-2">
+        <div className="flex-1 min-w-0">{searchInput}</div>
+        {zoomCluster}
       </div>
     </div>
   );

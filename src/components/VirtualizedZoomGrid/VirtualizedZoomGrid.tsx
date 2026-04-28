@@ -27,6 +27,16 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
   const lastScrollTop = useRef(0);
   const scrollThreshold = 10; // Minimum scroll distance to trigger hide/show
 
+  // Mobile lays out the toolbar in two rows (filters + search/zoom).
+  const [isDesktop, setIsDesktop] = useState(true);
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)');
+    const update = () => setIsDesktop(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+
   // Filter state
   const [colorFilter, setColorFilter] = useState<ColorFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -269,7 +279,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     return () => scrollElement.removeEventListener('scroll', handleScroll);
   }, [handleScroll]);
 
-  const headerHeight = 48;
+  const headerHeight = isDesktop ? 48 : 88;
 
   return (
     <div className="gallery-container h-screen flex flex-col relative">

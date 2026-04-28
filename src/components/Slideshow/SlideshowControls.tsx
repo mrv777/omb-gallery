@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { MAX_SPEED, MIN_SPEED, clampSpeed, type Order, type Speed } from './Slideshow';
 
 type Props = {
@@ -40,6 +40,23 @@ const SlideshowControls = memo(function SlideshowControls({
   onShare,
   onExit,
 }: Props) {
+  // Hide the "full" button on platforms without the Fullscreen API (notably
+  // iPhone Safari) — the button would otherwise silently do nothing.
+  const [fullscreenSupported, setFullscreenSupported] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    setFullscreenSupported(
+      typeof document !== 'undefined' &&
+        'fullscreenEnabled' in document &&
+        !!document.fullscreenEnabled
+    );
+    const mq = window.matchMedia('(max-width: 767px)');
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+
   return (
     <div
       className={`absolute bottom-0 left-0 right-0 transition-opacity duration-300 px-3 pb-4 pt-10 bg-gradient-to-t from-ink-0 via-ink-0/70 to-transparent ${
@@ -78,7 +95,7 @@ const SlideshowControls = memo(function SlideshowControls({
 
         {/* Speed slider */}
         <label className="flex items-center gap-2 h-10 px-1">
-          <span className="text-bone-dim">speed</span>
+          {!isMobile && <span className="text-bone-dim">speed</span>}
           <input
             type="range"
             min={MIN_SPEED}
@@ -87,7 +104,7 @@ const SlideshowControls = memo(function SlideshowControls({
             value={speed}
             onChange={(e) => onSpeedChange(clampSpeed(Number(e.target.value)))}
             aria-label={`Speed ${speed} seconds`}
-            className="omb-speed-slider w-24 sm:w-32 accent-bone"
+            className="omb-speed-slider w-20 sm:w-32 accent-bone"
           />
           <span className="text-bone tabular-nums w-[2.5ch] text-right">{speed}s</span>
         </label>
@@ -124,17 +141,19 @@ const SlideshowControls = memo(function SlideshowControls({
 
         {/* Right cluster */}
         <div className="flex items-center">
-          <button
-            type="button"
-            onClick={onToggleFullscreen}
-            className="h-10 px-2 flex items-center text-bone-dim hover:text-bone transition-colors"
-            aria-label={isFs ? 'Exit fullscreen' : 'Enter fullscreen'}
-            aria-pressed={isFs}
-          >
-            <span className={`border px-1.5 py-0.5 ${isFs ? 'border-bone' : 'border-transparent'}`}>
-              full
-            </span>
-          </button>
+          {fullscreenSupported && (
+            <button
+              type="button"
+              onClick={onToggleFullscreen}
+              className="h-10 px-2 flex items-center text-bone-dim hover:text-bone transition-colors"
+              aria-label={isFs ? 'Exit fullscreen' : 'Enter fullscreen'}
+              aria-pressed={isFs}
+            >
+              <span className={`border px-1.5 py-0.5 ${isFs ? 'border-bone' : 'border-transparent'}`}>
+                full
+              </span>
+            </button>
+          )}
           {canShare && (
             <button
               type="button"

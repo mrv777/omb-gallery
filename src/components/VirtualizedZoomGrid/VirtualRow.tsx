@@ -1,6 +1,6 @@
 "use client";
 
-import React, { memo, useCallback, useRef } from 'react';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { GalleryImage } from '@/lib/types';
 import { useFavorites } from '@/lib/FavoritesContext';
 
@@ -17,6 +17,10 @@ function inscriptionId(src: string): string {
   const file = src.split('/').pop() ?? '';
   return file.replace(/\.[^./]+$/, '');
 }
+
+const LONG_PRESS_MS = 500;
+const TAP_MAX_MS = 300;
+const MOVE_CANCEL_PX = 10;
 
 interface VirtualRowProps {
   rowIndex: number;
@@ -43,7 +47,43 @@ const VirtualRow = memo(
     const mouseDownIndex = useRef<number>(-1);
     const { isFavorite, toggleFavorite } = useFavorites();
 
+    // Touch-device detection: gates heart rendering and chooses the long-press
+    // gesture over the always-on hover heart.
+    const [coarsePointer, setCoarsePointer] = useState(false);
+    useEffect(() => {
+      const mq = window.matchMedia('(hover: none) and (pointer: coarse)');
+      const update = () => setCoarsePointer(mq.matches);
+      update();
+      mq.addEventListener('change', update);
+      return () => mq.removeEventListener('change', update);
+    }, []);
+
+    // Long-press state
+    const longPressTimer = useRef<number | null>(null);
+    const touchStart = useRef<{ x: number; y: number; time: number; index: number } | null>(null);
+    const longPressFired = useRef(false);
+    const recentTouch = useRef(0);
+    const [flashedKey, setFlashedKey] = useState<string | null>(null);
+    const flashTimeout = useRef<number | null>(null);
+
+    const cancelLongPress = useCallback(() => {
+      if (longPressTimer.current !== null) {
+        window.clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+    }, []);
+
+    useEffect(() => {
+      return () => {
+        if (longPressTimer.current !== null) window.clearTimeout(longPressTimer.current);
+        if (flashTimeout.current !== null) window.clearTimeout(flashTimeout.current);
+      };
+    }, []);
+
     const handleMouseDown = useCallback((e: React.MouseEvent) => {
+      // Touch fires synthetic mouse events ~300ms later; ignore them so the
+      // long-press flow doesn't double-fire.
+      if (Date.now() - recentTouch.current < 500) return;
       // Ignore if the click originated inside the favorite button.
       if ((e.target as HTMLElement).closest('[data-fav-btn]')) return;
       const target = e.target as HTMLElement;
@@ -56,13 +96,14 @@ const VirtualRow = memo(
 
     const handleMouseUp = useCallback(
       (e: React.MouseEvent) => {
+        if (Date.now() - recentTouch.current < 500) return;
         if ((e.target as HTMLElement).closest('[data-fav-btn]')) return;
         const target = e.target as HTMLElement;
         const cell = target.closest('[data-index]') as HTMLElement;
         if (cell && mouseDownTime.current > 0) {
           const clickDuration = Date.now() - mouseDownTime.current;
           const index = parseInt(cell.dataset.index || '-1', 10);
-          if (clickDuration < 300 && index === mouseDownIndex.current && index >= 0) {
+          if (clickDuration < TAP_MAX_MS && index === mouseDownIndex.current && index >= 0) {
             const img = images[index];
             // Shift-click toggles favorite instead of opening the modal.
             if (e.shiftKey && img) {
@@ -78,6 +119,83 @@ const VirtualRow = memo(
       [onImageClick, images, toggleFavorite]
     );
 
+    const flash = useCallback((key: string) => {
+      setFlashedKey(key);
+      if (flashTimeout.current !== null) window.clearTimeout(flashTimeout.current);
+      flashTimeout.current = window.setTimeout(() => setFlashedKey(null), 300);
+    }, []);
+
+    const handleTouchStart = useCallback(
+      (e: React.TouchEvent) => {
+        // Multi-touch (pinch-to-zoom) — never long-press.
+        if (e.touches.length > 1) {
+          cancelLongPress();
+          touchStart.current = null;
+          return;
+        }
+        const target = e.target as HTMLElement;
+        if (target.closest('[data-fav-btn]')) return;
+        const cell = target.closest('[data-index]') as HTMLElement | null;
+        if (!cell) return;
+        const index = parseInt(cell.dataset.index || '-1', 10);
+        if (index < 0 || index >= images.length) return;
+        const t = e.touches[0];
+        if (!t) return;
+        touchStart.current = { x: t.clientX, y: t.clientY, time: Date.now(), index };
+        longPressFired.current = false;
+        cancelLongPress();
+        longPressTimer.current = window.setTimeout(() => {
+          const img = images[index];
+          if (!img) return;
+          longPressFired.current = true;
+          toggleFavorite(img.src);
+          if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+            navigator.vibrate(40);
+          }
+          flash(String(index));
+        }, LONG_PRESS_MS);
+      },
+      [images, toggleFavorite, cancelLongPress, flash]
+    );
+
+    const handleTouchMove = useCallback(
+      (e: React.TouchEvent) => {
+        if (!touchStart.current) return;
+        if (e.touches.length > 1) {
+          cancelLongPress();
+          return;
+        }
+        const t = e.touches[0];
+        if (!t) return;
+        const dx = t.clientX - touchStart.current.x;
+        const dy = t.clientY - touchStart.current.y;
+        if (Math.hypot(dx, dy) > MOVE_CANCEL_PX) cancelLongPress();
+      },
+      [cancelLongPress]
+    );
+
+    const handleTouchEnd = useCallback(() => {
+      cancelLongPress();
+      recentTouch.current = Date.now();
+      const start = touchStart.current;
+      touchStart.current = null;
+      if (!start) return;
+      if (longPressFired.current) {
+        longPressFired.current = false;
+        return;
+      }
+      const duration = Date.now() - start.time;
+      if (duration < TAP_MAX_MS && start.index >= 0) {
+        onImageClick(start.index);
+      }
+    }, [cancelLongPress, onImageClick]);
+
+    const handleTouchCancel = useCallback(() => {
+      cancelLongPress();
+      touchStart.current = null;
+      longPressFired.current = false;
+    }, [cancelLongPress]);
+
     const handleFavClick = useCallback(
       (e: React.MouseEvent<HTMLButtonElement>, src: string) => {
         e.stopPropagation();
@@ -90,6 +208,7 @@ const VirtualRow = memo(
     // hairline separator so it doesn't turn into visual noise at bird's-eye.
     const enableHover = columnCount <= 20;
     const cellShadow = enableHover ? 'inset 0 0 0 1px var(--ink-2)' : undefined;
+    const showHeart = enableHover && !coarsePointer;
 
     return (
       <div
@@ -103,6 +222,10 @@ const VirtualRow = memo(
         }}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchCancel}
       >
         {rowImages.map((image, colIndex) => {
           const globalIndex = startIndex + colIndex;
@@ -110,12 +233,21 @@ const VirtualRow = memo(
           const label = enableHover ? `#${inscriptionId(image.src)}` : undefined;
 
           const favorited = isFavorite(image.src);
+          const isFlashed = flashedKey === String(globalIndex);
+          // On touch the heart is gone — show a red ring on favorited cells so
+          // users can still tell what they've saved at a glance.
+          const cellBoxShadow =
+            coarsePointer && favorited
+              ? 'inset 0 0 0 2px var(--accent-red)'
+              : cellShadow;
           return (
             <div
               key={globalIndex}
               data-index={globalIndex}
               data-label={label}
-              className={enableHover ? 'grid-cell-hover' : undefined}
+              className={`${enableHover ? 'grid-cell-hover' : ''} ${
+                isFlashed ? 'grid-cell-flash' : ''
+              }`.trim()}
               style={{
                 width: cellSize,
                 height: cellSize,
@@ -124,10 +256,10 @@ const VirtualRow = memo(
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
                 cursor: 'pointer',
-                boxShadow: cellShadow,
+                boxShadow: cellBoxShadow,
               }}
             >
-              {enableHover && (
+              {showHeart && (
                 <button
                   type="button"
                   data-fav-btn=""
