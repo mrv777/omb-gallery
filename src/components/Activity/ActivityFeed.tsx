@@ -71,9 +71,22 @@ export default function ActivityFeed() {
             <span className="text-accent-orange">· backfilling history</span>
           )}
           {poll && poll.last_status && poll.last_status !== 'ok' && (
-            <span className="text-accent-red normal-case tracking-normal text-[10px]">
-              poll error: {poll.last_status.slice(0, 80)}
-            </span>
+            (() => {
+              // 404 on a specific inscription means ord hasn't reached its
+              // reveal block yet — expected during IBD, not an error.
+              const isIbd404 = /^404 from ord :: inscription/.test(poll.last_status);
+              return (
+                <span
+                  className={`normal-case tracking-normal text-[10px] ${
+                    isIbd404 ? 'text-accent-orange' : 'text-accent-red'
+                  }`}
+                >
+                  {isIbd404
+                    ? 'ord catching up — recent events may be delayed'
+                    : `poll error: ${poll.last_status.slice(0, 80)}`}
+                </span>
+              );
+            })()
           )}
         </div>
 
