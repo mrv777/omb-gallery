@@ -44,7 +44,12 @@ export async function GET(req: NextRequest) {
           holders: (stmts.countHolders.get({ collection }) as { n: number }).n,
         }
       : null;
-  const poll = stmts.getPollState.get('ord') as PollStateRow | undefined;
+  // ord bookkeeping lives under a single ('ord','omb') row — Phase 4 keeps
+  // it collection-agnostic since one batch poll covers every collection.
+  const poll = stmts.getPollState.get({
+    stream: 'ord',
+    collection: 'omb',
+  }) as PollStateRow | undefined;
 
   return NextResponse.json({
     events,

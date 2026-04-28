@@ -8,7 +8,7 @@ import bravocadosInscriptions from '../data/collections/bravocados/inscriptions.
 import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 // OMB-shape entry: filename = "<inscription_number>.jpg|webp", per-color groups.
 type ImageEntry = { filename: string; description: string; tags: string[] };
@@ -59,6 +59,7 @@ export function getDb(): DB {
   db.pragma('mmap_size = 268435456');
 
   migrate(db);
+  seedCollectionsAndPollStates(db);
   seedInscriptions(db);
 
   dbInstance = db;
@@ -86,6 +87,7 @@ function migrate(db: DB): void {
         upgradeV5ToV6(db);
         upgradeV6ToV7(db);
         upgradeV7ToV8(db);
+        upgradeV8ToV9(db);
       } else {
         initSchemaLatest(db);
       }
@@ -97,6 +99,7 @@ function migrate(db: DB): void {
       if (current < 6) upgradeV5ToV6(db);
       if (current < 7) upgradeV6ToV7(db);
       if (current < 8) upgradeV7ToV8(db);
+      if (current < 9) upgradeV8ToV9(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -177,17 +180,25 @@ function initSchemaLatest(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_events_id_desc         ON events (id DESC);
     CREATE INDEX IF NOT EXISTS idx_events_type_id         ON events (event_type, id DESC);
 
+    -- Composite-PK shape (Phase 4). Per-collection rows for per-collection
+    -- streams (satflow, satflow_listings); ord uses a single 'omb' row since
+    -- one batch poll covers every inscription regardless of collection.
     CREATE TABLE IF NOT EXISTS poll_state (
-      stream                    TEXT PRIMARY KEY CHECK (stream IN ('ord','satflow','satflow_listings')),
+      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings')),
+      collection_slug           TEXT NOT NULL REFERENCES collections (slug),
       last_cursor               TEXT,
       last_run_at               INTEGER,
       last_status               TEXT,
       last_event_count          INTEGER,
       is_backfilling            INTEGER NOT NULL DEFAULT 0,
       last_known_height         INTEGER,
-      backfill_unresolved_seen  INTEGER NOT NULL DEFAULT 0
+      backfill_unresolved_seen  INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (stream, collection_slug)
     );
-    INSERT OR IGNORE INTO poll_state (stream) VALUES ('ord'), ('satflow'), ('satflow_listings');
+    INSERT OR IGNORE INTO poll_state (stream, collection_slug) VALUES
+      ('ord', 'omb'),
+      ('satflow', 'omb'),
+      ('satflow_listings', 'omb');
 
     -- Snapshot of currently-active listings on Satflow. Refreshed atomically
     -- every listings tick (DELETE + bulk INSERT in a transaction). One row per
@@ -400,6 +411,42 @@ function upgradeV7ToV8(db: DB): void {
   `);
 }
 
+function upgradeV8ToV9(db: DB): void {
+  // Phase 4: rebuild poll_state with composite PK (stream, collection_slug).
+  // Existing 3 rows ('ord','satflow','satflow_listings') are tagged 'omb' —
+  // every prior row was OMB-only by construction. Future collections add
+  // per-collection rows for satflow + satflow_listings; ord keeps a single
+  // 'omb' bookkeeping row since one batch poll covers all inscriptions.
+  //
+  // SQLite can't add a column to a PK in place, so we copy-and-swap. Wrapped
+  // in the outer migration transaction (see migrate()) so a crash mid-rebuild
+  // leaves the DB recoverable on restart.
+  db.exec(`
+    CREATE TABLE poll_state_v9 (
+      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings')),
+      collection_slug           TEXT NOT NULL REFERENCES collections (slug),
+      last_cursor               TEXT,
+      last_run_at               INTEGER,
+      last_status               TEXT,
+      last_event_count          INTEGER,
+      is_backfilling            INTEGER NOT NULL DEFAULT 0,
+      last_known_height         INTEGER,
+      backfill_unresolved_seen  INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (stream, collection_slug)
+    );
+    INSERT INTO poll_state_v9 (
+      stream, collection_slug, last_cursor, last_run_at, last_status,
+      last_event_count, is_backfilling, last_known_height, backfill_unresolved_seen
+    )
+    SELECT
+      stream, 'omb', last_cursor, last_run_at, last_status,
+      last_event_count, is_backfilling, last_known_height, backfill_unresolved_seen
+    FROM poll_state;
+    DROP TABLE poll_state;
+    ALTER TABLE poll_state_v9 RENAME TO poll_state;
+  `);
+}
+
 function upgradeV4ToV5(db: DB): void {
   // Round-robin poll order: without this, runOrdTick always polls in
   // inscription_number ASC and breaks at the wallclock budget, so the back
@@ -412,6 +459,44 @@ function upgradeV4ToV5(db: DB): void {
   if (!cols.some((c) => c.name === 'last_polled_at')) {
     db.exec(`ALTER TABLE inscriptions ADD COLUMN last_polled_at INTEGER NOT NULL DEFAULT 0`);
   }
+}
+
+function seedCollectionsAndPollStates(db: DB): void {
+  // Always-runs seed (cheap: one INSERT OR IGNORE per registered collection
+  // plus 2 per satflow-tracked one). Lives outside seedInscriptions because
+  // the inscription seed short-circuits once the row count matches, so a
+  // post-migration server boot would otherwise skip both.
+  // Upsert so manifest edits to name / satflow_slug actually reach existing
+  // rows. Preserves `enabled` (operator-controlled — no programmatic writer)
+  // and lets a typo fix in a manifest take effect on next deploy without a
+  // manual UPDATE on prod SQLite.
+  const upsertCollection = db.prepare(`
+    INSERT INTO collections (slug, name, satflow_slug, enabled)
+    VALUES (@slug, @name, @satflow_slug, 1)
+    ON CONFLICT(slug) DO UPDATE SET
+      name         = excluded.name,
+      satflow_slug = excluded.satflow_slug
+  `);
+  // Per-collection poll_state rows for satflow streams. ord intentionally
+  // stays as a single ('ord','omb') row — one batch poll already covers
+  // every inscription regardless of collection.
+  const upsertSatflowStreams = db.prepare(`
+    INSERT OR IGNORE INTO poll_state (stream, collection_slug)
+    VALUES ('satflow', @slug), ('satflow_listings', @slug)
+  `);
+  const tx = db.transaction(() => {
+    for (const { manifest } of COLLECTIONS) {
+      upsertCollection.run({
+        slug: manifest.slug,
+        name: manifest.name,
+        satflow_slug: manifest.satflow_slug,
+      });
+      if (manifest.satflow_slug) {
+        upsertSatflowStreams.run({ slug: manifest.slug });
+      }
+    }
+  });
+  tx();
 }
 
 function seedInscriptions(db: DB): void {
@@ -447,18 +532,8 @@ function seedInscriptions(db: DB): void {
       inscription_id  = COALESCE(inscriptions.inscription_id, excluded.inscription_id),
       collection_slug = COALESCE(inscriptions.collection_slug, excluded.collection_slug)
   `);
-  const upsertCollection = db.prepare(`
-    INSERT OR IGNORE INTO collections (slug, name, satflow_slug, enabled)
-    VALUES (@slug, @name, @satflow_slug, 1)
-  `);
-
   const tx = db.transaction(() => {
     for (const { manifest, data } of COLLECTIONS) {
-      upsertCollection.run({
-        slug: manifest.slug,
-        name: manifest.name,
-        satflow_slug: manifest.satflow_slug,
-      });
 
       if (manifest.shape === 'flat') {
         for (const entry of data as FlatEntry[]) {
@@ -511,6 +586,7 @@ type Stmts = {
   setBackfilling: ReturnType<DB['prepare']>;
   setBackfillUnresolvedSeen: ReturnType<DB['prepare']>;
   setKnownHeight: ReturnType<DB['prepare']>;
+  listEnabledCollections: ReturnType<DB['prepare']>;
   // reads
   getRecentEvents: ReturnType<DB['prepare']>;
   getRecentEventsAfter: ReturnType<DB['prepare']>;
@@ -683,16 +759,19 @@ export function getStmts(): Stmts {
       WHERE inscription_id IS NOT NULL
     `),
 
-    getPollState: db.prepare(`SELECT * FROM poll_state WHERE stream = ?`),
+    getPollState: db.prepare(`
+      SELECT * FROM poll_state WHERE stream = @stream AND collection_slug = @collection
+    `),
 
-    // Soft lock: succeeds only if no recent run for this stream. The window
-    // must exceed the worst-case tick duration (TICK_WALLCLOCK_BUDGET_MS plus
-    // enrichment + I/O slack) — otherwise a still-running tick can be raced
-    // by a fresh cron call that acquires the lock and runs concurrently.
+    // Soft lock: succeeds only if no recent run for this (stream, collection).
+    // The window must exceed the worst-case tick duration
+    // (TICK_WALLCLOCK_BUDGET_MS plus enrichment + I/O slack) — otherwise a
+    // still-running tick can be raced by a fresh cron call.
     acquireLock: db.prepare(`
       UPDATE poll_state
       SET last_run_at = unixepoch()
-      WHERE stream = ?
+      WHERE stream = @stream
+        AND collection_slug = @collection
         AND (last_run_at IS NULL OR last_run_at < unixepoch() - 120)
     `),
 
@@ -702,19 +781,29 @@ export function getStmts(): Stmts {
           last_status = @status,
           last_event_count = @event_count,
           last_cursor = COALESCE(@cursor, last_cursor)
-      WHERE stream = @stream
+      WHERE stream = @stream AND collection_slug = @collection
     `),
 
     setBackfilling: db.prepare(`
-      UPDATE poll_state SET is_backfilling = @flag WHERE stream = @stream
+      UPDATE poll_state SET is_backfilling = @flag
+      WHERE stream = @stream AND collection_slug = @collection
     `),
 
     setBackfillUnresolvedSeen: db.prepare(`
-      UPDATE poll_state SET backfill_unresolved_seen = @count WHERE stream = @stream
+      UPDATE poll_state SET backfill_unresolved_seen = @count
+      WHERE stream = @stream AND collection_slug = @collection
     `),
 
     setKnownHeight: db.prepare(`
-      UPDATE poll_state SET last_known_height = @height WHERE stream = @stream
+      UPDATE poll_state SET last_known_height = @height
+      WHERE stream = @stream AND collection_slug = @collection
+    `),
+
+    listEnabledCollections: db.prepare(`
+      SELECT slug, name, satflow_slug
+      FROM collections
+      WHERE enabled = 1
+      ORDER BY slug ASC
     `),
 
     // The four event-feed queries scope to a single collection by joining
@@ -866,8 +955,15 @@ export function getStmts(): Stmts {
         refreshed_at   = excluded.refreshed_at
     `),
 
+    // Scoped to one collection: per-collection ticks must not wipe out
+    // listings owned by another collection that wasn't refreshed this tick.
+    // The IN-subquery filter walks idx_insc_collection (small, fast).
     deleteStaleListings: db.prepare(`
-      DELETE FROM active_listings WHERE refreshed_at < @cutoff
+      DELETE FROM active_listings
+      WHERE refreshed_at < @cutoff
+        AND inscription_number IN (
+          SELECT inscription_number FROM inscriptions WHERE collection_slug = @collection
+        )
     `),
 
     truncateActiveListings: db.prepare(`DELETE FROM active_listings`),
@@ -955,6 +1051,7 @@ export type HolderRow = {
 
 export type PollStateRow = {
   stream: 'ord' | 'satflow' | 'satflow_listings';
+  collection_slug: string;
   last_cursor: string | null;
   last_run_at: number | null;
   last_status: string | null;
@@ -962,4 +1059,10 @@ export type PollStateRow = {
   is_backfilling: number;
   last_known_height: number | null;
   backfill_unresolved_seen: number;
+};
+
+export type CollectionRow = {
+  slug: string;
+  name: string;
+  satflow_slug: string | null;
 };

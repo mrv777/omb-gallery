@@ -37,18 +37,27 @@ describe('poll_state v7 — backfill_unresolved_seen', () => {
     const ver = db.pragma('user_version', { simple: true });
     expect(ver).toBeGreaterThanOrEqual(7);
     const row = db
-      .prepare(`SELECT backfill_unresolved_seen AS n FROM poll_state WHERE stream = 'satflow'`)
+      .prepare(
+        `SELECT backfill_unresolved_seen AS n FROM poll_state
+         WHERE stream = 'satflow' AND collection_slug = 'omb'`
+      )
       .get() as { n: number };
     expect(row.n).toBe(0);
   });
 
   it('persists across reads via setBackfillUnresolvedSeen', () => {
     const stmts = dbModule.getStmts();
-    stmts.setBackfillUnresolvedSeen.run({ stream: 'satflow', count: 7 });
-    const row1 = stmts.getPollState.get('satflow') as { backfill_unresolved_seen: number };
+    stmts.setBackfillUnresolvedSeen.run({ stream: 'satflow', collection: 'omb', count: 7 });
+    const row1 = stmts.getPollState.get({
+      stream: 'satflow',
+      collection: 'omb',
+    }) as { backfill_unresolved_seen: number };
     expect(row1.backfill_unresolved_seen).toBe(7);
-    stmts.setBackfillUnresolvedSeen.run({ stream: 'satflow', count: 0 });
-    const row2 = stmts.getPollState.get('satflow') as { backfill_unresolved_seen: number };
+    stmts.setBackfillUnresolvedSeen.run({ stream: 'satflow', collection: 'omb', count: 0 });
+    const row2 = stmts.getPollState.get({
+      stream: 'satflow',
+      collection: 'omb',
+    }) as { backfill_unresolved_seen: number };
     expect(row2.backfill_unresolved_seen).toBe(0);
   });
 });
@@ -194,7 +203,7 @@ describe('active_listings schema + statements', () => {
     });
     expect((stmts.countActiveListings.get([]) as { n: number }).n).toBe(3);
 
-    stmts.deleteStaleListings.run({ cutoff: 1700000102 });
+    stmts.deleteStaleListings.run({ cutoff: 1700000102, collection: 'omb' });
     expect((stmts.countActiveListings.get([]) as { n: number }).n).toBe(1);
   });
 

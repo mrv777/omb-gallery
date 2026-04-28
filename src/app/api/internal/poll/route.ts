@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb, getStmts, walCheckpoint, type PollStateRow } from '@/lib/db';
+import {
+  getDb,
+  getStmts,
+  walCheckpoint,
+  type CollectionRow,
+  type PollStateRow,
+} from '@/lib/db';
 import {
   fetchBlockHeight,
   fetchBlockTimestamp,
@@ -22,9 +28,10 @@ import {
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-// The Satflow "collection slug" identifying OMB. The env var is named
-// `..._COLLECTION_ID` for historical reasons; its value is a slug like "omb".
-const SATFLOW_COLLECTION_SLUG = process.env.SATFLOW_OMB_COLLECTION_ID ?? 'omb';
+// Optional per-collection override for the Satflow API slug. The env var
+// is named `..._COLLECTION_ID` for historical reasons; its value is a slug
+// like "omb". When unset, the slug from the collection's manifest wins.
+const SATFLOW_OMB_OVERRIDE = process.env.SATFLOW_OMB_COLLECTION_ID ?? null;
 
 const ORD_BATCH_SIZE = 500;
 const ORD_BOOTSTRAP_MAX_PER_TICK = 300;
@@ -103,31 +110,35 @@ async function handle(req: NextRequest): Promise<NextResponse> {
 
   const url = new URL(req.url);
   const mode = url.searchParams.get('mode') ?? 'auto';
+  // Optional ?collection=<slug> to target a single collection. Default: all
+  // enabled collections with a satflow_slug. (ord is collection-agnostic and
+  // ignores this param.)
+  const onlyCollection = url.searchParams.get('collection');
 
   try {
     let result: TickResult | TickResult[];
     switch (mode) {
       case 'init-backfill':
-        result = initBackfill();
+        result = initBackfill(onlyCollection);
         break;
       case 'ord':
         result = await runOrdTick();
         break;
       case 'satflow':
-        result = await runSatflowTick({});
+        result = await iterateSatflowCollections(onlyCollection, {});
         break;
       case 'satflow-backfill':
-        result = await runSatflowTick({ force: 'backfill' });
+        result = await iterateSatflowCollections(onlyCollection, { force: 'backfill' });
         break;
       case 'listings':
-        result = await runListingsTick({ force: true });
+        result = await iterateListingsCollections(onlyCollection, { force: true });
         break;
       case 'auto':
       default: {
         const ord = await runOrdTick();
-        const satflow = await runSatflowTick({});
-        const listings = await runListingsTick({ force: false });
-        result = [ord, satflow, listings];
+        const satflow = await iterateSatflowCollections(onlyCollection, {});
+        const listings = await iterateListingsCollections(onlyCollection, { force: false });
+        result = [ord, ...satflow, ...listings];
         break;
       }
     }
@@ -161,20 +172,75 @@ function installSatflowCallCounter(): void {
   });
 }
 
+// ---------------- collection iteration helpers ----------------
+
+/**
+ * Resolve which satflow-tracked collections this request should hit. With
+ * `?collection=<slug>` we target one; otherwise every enabled collection
+ * whose manifest carries a satflow_slug. Returned with the API slug
+ * resolved (env override > manifest), so downstream code doesn't have to
+ * know about the override path.
+ */
+function resolveSatflowCollections(only: string | null): Array<{ slug: string; satflow_slug: string }> {
+  const stmts = getStmts();
+  const all = stmts.listEnabledCollections.all([]) as CollectionRow[];
+  const filtered = only ? all.filter((c) => c.slug === only) : all;
+  const out: Array<{ slug: string; satflow_slug: string }> = [];
+  for (const c of filtered) {
+    const apiSlug = c.slug === 'omb' && SATFLOW_OMB_OVERRIDE ? SATFLOW_OMB_OVERRIDE : c.satflow_slug;
+    if (!apiSlug) continue;
+    out.push({ slug: c.slug, satflow_slug: apiSlug });
+  }
+  return out;
+}
+
+async function iterateSatflowCollections(
+  only: string | null,
+  opts: { force?: 'incremental' | 'backfill' }
+): Promise<TickResult[]> {
+  const cols = resolveSatflowCollections(only);
+  if (cols.length === 0) return [{ mode: 'satflow', skipped: 'not-configured' }];
+  const out: TickResult[] = [];
+  for (const c of cols) {
+    out.push(await runSatflowTick(c, opts));
+  }
+  return out;
+}
+
+async function iterateListingsCollections(
+  only: string | null,
+  opts: { force: boolean }
+): Promise<TickResult[]> {
+  const cols = resolveSatflowCollections(only);
+  if (cols.length === 0) return [{ mode: 'listings', skipped: 'not-configured' }];
+  const out: TickResult[] = [];
+  for (const c of cols) {
+    out.push(await runListingsTick(c, opts));
+  }
+  return out;
+}
+
 // ---------------- mode: init-backfill ----------------
 
-function initBackfill(): TickResult {
+function initBackfill(only: string | null): TickResult | TickResult[] {
+  const cols = resolveSatflowCollections(only);
+  if (cols.length === 0) return { mode: 'init-backfill', skipped: 'not-configured' };
   const db = getDb();
-  // Reset to page 1 — backfill walks `sortDirection=asc` so page 1 is the
-  // oldest sale in the collection. New sales appended at the latest page
-  // don't shift the older pages we're walking through. Also zero the
-  // cross-tick unresolved counter so the new walk starts clean.
-  db.prepare(
+  // Reset to page 1 per collection — backfill walks `sortDirection=asc` so
+  // page 1 is the oldest sale. New sales appended at the latest page don't
+  // shift older pages we're walking through. Also zero the cross-tick
+  // unresolved counter so the new walk starts clean.
+  const stmt = db.prepare(
     `UPDATE poll_state
      SET last_cursor = 'page:1', is_backfilling = 1, backfill_unresolved_seen = 0
-     WHERE stream = 'satflow'`
-  ).run();
-  return { mode: 'init-backfill', done: true };
+     WHERE stream = 'satflow' AND collection_slug = @collection`
+  );
+  const out: TickResult[] = [];
+  for (const c of cols) {
+    stmt.run({ collection: c.slug });
+    out.push({ mode: 'init-backfill', collection: c.slug, done: true });
+  }
+  return out;
 }
 
 // ---------------- mode: ord ----------------
@@ -185,7 +251,9 @@ async function runOrdTick(): Promise<TickResult> {
   }
 
   const stmts = getStmts();
-  const lockRes = stmts.acquireLock.run('ord');
+  // ord uses a single ('ord','omb') bookkeeping row — one batch poll covers
+  // every inscription regardless of collection (ord is collection-agnostic).
+  const lockRes = stmts.acquireLock.run({ stream: 'ord', collection: 'omb' });
   if (lockRes.changes === 0) {
     return { mode: 'ord', skipped: 'concurrent' };
   }
@@ -214,7 +282,10 @@ async function runOrdTick(): Promise<TickResult> {
   // and when ord catches up, those phantoms would compound with the real
   // transfers it then surfaces. Skip the entire tick (including bootstrap,
   // which also writes current_output) until ord recovers.
-  const priorState = stmts.getPollState.get('ord') as PollStateRow | undefined;
+  const priorState = stmts.getPollState.get({
+    stream: 'ord',
+    collection: 'omb',
+  }) as PollStateRow | undefined;
   const priorHeight = priorState?.last_known_height ?? null;
   if (priorHeight != null && blockHeight < priorHeight - ORD_REGRESSION_TOLERANCE) {
     const reason = `ord index behind chain tip: at ${blockHeight}, was at ${priorHeight}`;
@@ -301,7 +372,11 @@ async function runOrdTick(): Promise<TickResult> {
   // (i.e. we actually observed ord state). On pure failure, leave priorHeight
   // intact so the next tick's stale check still has a reference point.
   if (checked > 0 || initialized > 0 || changed > 0 || !errMsg) {
-    stmts.setKnownHeight.run({ stream: 'ord', height: newKnownHeight });
+    stmts.setKnownHeight.run({
+      stream: 'ord',
+      collection: 'omb',
+      height: newKnownHeight,
+    });
   }
 
   return {
@@ -590,6 +665,7 @@ function markChunkPolled(ids: string[]): void {
 function setOrdResult(status: string, eventCount: number): void {
   getStmts().setPollResult.run({
     stream: 'ord',
+    collection: 'omb',
     status,
     event_count: eventCount,
     cursor: null,
@@ -598,19 +674,22 @@ function setOrdResult(status: string, eventCount: number): void {
 
 // ---------------- mode: satflow ----------------
 
-async function runSatflowTick(opts: { force?: 'incremental' | 'backfill' }): Promise<TickResult> {
+async function runSatflowTick(
+  collection: { slug: string; satflow_slug: string },
+  opts: { force?: 'incremental' | 'backfill' }
+): Promise<TickResult> {
   const apiKey = process.env.SATFLOW_API_KEY ?? null;
-  if (!process.env.SATFLOW_OMB_COLLECTION_ID) {
-    return { mode: 'satflow', skipped: 'not-configured' };
-  }
 
   const stmts = getStmts();
-  const lockRes = stmts.acquireLock.run('satflow');
+  const lockRes = stmts.acquireLock.run({ stream: 'satflow', collection: collection.slug });
   if (lockRes.changes === 0) {
-    return { mode: 'satflow', skipped: 'concurrent' };
+    return { mode: 'satflow', collection: collection.slug, skipped: 'concurrent' };
   }
 
-  const state = stmts.getPollState.get('satflow') as PollStateRow;
+  const state = stmts.getPollState.get({
+    stream: 'satflow',
+    collection: collection.slug,
+  }) as PollStateRow;
   const backfilling =
     opts.force === 'backfill' || (opts.force !== 'incremental' && state.is_backfilling === 1);
   const maxPages = backfilling ? SATFLOW_BACKFILL_MAX_PAGES_PER_TICK : SATFLOW_INCREMENTAL_MAX_PAGES;
@@ -656,7 +735,7 @@ async function runSatflowTick(opts: { force?: 'incremental' | 'backfill' }): Pro
     let page;
     try {
       page = await fetchSalesPage({
-        collectionSlug: SATFLOW_COLLECTION_SLUG,
+        collectionSlug: collection.satflow_slug,
         page: nextPage,
         pageSize: SATFLOW_PAGE_SIZE,
         sortDirection,
@@ -720,24 +799,30 @@ async function runSatflowTick(opts: { force?: 'incremental' | 'backfill' }): Pro
 
   stmts.setPollResult.run({
     stream: 'satflow',
+    collection: collection.slug,
     status: errMsg ? errMsg.slice(0, 500) : 'ok',
     event_count: inserted + upgraded,
     cursor: nextCursor,
   });
 
   if (backfilling) {
-    stmts.setBackfillUnresolvedSeen.run({ stream: 'satflow', count: nextUnresolvedSeen });
+    stmts.setBackfillUnresolvedSeen.run({
+      stream: 'satflow',
+      collection: collection.slug,
+      count: nextUnresolvedSeen,
+    });
   }
 
   // Only clear the backfilling flag once we've drained AND every sale across
   // the whole walk resolved (not just this tick). Otherwise keep is_backfilling=1
   // so the next cron tick re-walks from page 1 and retries the unresolved tail.
   if (backfilling && drained && fullyClean && !errMsg) {
-    stmts.setBackfilling.run({ stream: 'satflow', flag: 0 });
+    stmts.setBackfilling.run({ stream: 'satflow', collection: collection.slug, flag: 0 });
   }
 
   return {
     mode: backfilling ? 'satflow-backfill' : 'satflow',
+    collection: collection.slug,
     pages: pagesUsed,
     inserted,
     upgraded,
@@ -876,29 +961,40 @@ function applySalesTransaction(
 
 // ---------------- mode: listings ----------------
 
-async function runListingsTick(opts: { force: boolean }): Promise<TickResult> {
+async function runListingsTick(
+  collection: { slug: string; satflow_slug: string },
+  opts: { force: boolean }
+): Promise<TickResult> {
   const apiKey = process.env.SATFLOW_API_KEY ?? null;
-  if (!process.env.SATFLOW_OMB_COLLECTION_ID) {
-    return { mode: 'listings', skipped: 'not-configured' };
-  }
 
   const stmts = getStmts();
 
   // Cadence guard: skip if last successful run was within the interval and
   // we're not being explicitly forced (e.g. ?mode=listings).
   if (!opts.force) {
-    const state = stmts.getPollState.get('satflow_listings') as PollStateRow | undefined;
+    const state = stmts.getPollState.get({
+      stream: 'satflow_listings',
+      collection: collection.slug,
+    }) as PollStateRow | undefined;
     if (state?.last_run_at && state.last_status === 'ok') {
       const sinceLast = Math.floor(Date.now() / 1000) - state.last_run_at;
       if (sinceLast < LISTINGS_MIN_INTERVAL_SEC) {
-        return { mode: 'listings', skipped: 'interval-not-elapsed', wait_s: LISTINGS_MIN_INTERVAL_SEC - sinceLast };
+        return {
+          mode: 'listings',
+          collection: collection.slug,
+          skipped: 'interval-not-elapsed',
+          wait_s: LISTINGS_MIN_INTERVAL_SEC - sinceLast,
+        };
       }
     }
   }
 
-  const lockRes = stmts.acquireLock.run('satflow_listings');
+  const lockRes = stmts.acquireLock.run({
+    stream: 'satflow_listings',
+    collection: collection.slug,
+  });
   if (lockRes.changes === 0) {
-    return { mode: 'listings', skipped: 'concurrent' };
+    return { mode: 'listings', collection: collection.slug, skipped: 'concurrent' };
   }
 
   const idToNumber = buildIdToNumberMap();
@@ -920,7 +1016,7 @@ async function runListingsTick(opts: { force: boolean }): Promise<TickResult> {
     let pageRes;
     try {
       pageRes = await fetchListingsPage({
-        collectionSlug: SATFLOW_COLLECTION_SLUG,
+        collectionSlug: collection.satflow_slug,
         page,
         pageSize: SATFLOW_PAGE_SIZE,
         apiKey,
@@ -939,11 +1035,12 @@ async function runListingsTick(opts: { force: boolean }): Promise<TickResult> {
   if (errMsg) {
     stmts.setPollResult.run({
       stream: 'satflow_listings',
+      collection: collection.slug,
       status: errMsg.slice(0, 500),
       event_count: 0,
       cursor: null,
     });
-    return { mode: 'listings', pages: pagesUsed, error: errMsg };
+    return { mode: 'listings', collection: collection.slug, pages: pagesUsed, error: errMsg };
   }
 
   // Phase 2: dedupe by inscription_id (lowest price wins). Same inscription
@@ -975,12 +1072,14 @@ async function runListingsTick(opts: { force: boolean }): Promise<TickResult> {
   if (ready.length === 0 && unresolved > 0) {
     stmts.setPollResult.run({
       stream: 'satflow_listings',
+      collection: collection.slug,
       status: 'ok-skipped-empty-resolution',
       event_count: 0,
       cursor: null,
     });
     return {
       mode: 'listings',
+      collection: collection.slug,
       pages: pagesUsed,
       total: totalReported,
       collected: collected.length,
@@ -1007,8 +1106,10 @@ async function runListingsTick(opts: { force: boolean }): Promise<TickResult> {
         refreshed_at: refreshedAt,
       });
     }
-    // Anything not refreshed this tick is no longer active on Satflow.
-    stmts.deleteStaleListings.run({ cutoff: refreshedAt });
+    // Anything not refreshed this tick (in this collection) is no longer
+    // active on Satflow. Scoped to the current collection so other
+    // collections' rows aren't affected.
+    stmts.deleteStaleListings.run({ cutoff: refreshedAt, collection: collection.slug });
   });
   tx();
 
@@ -1026,6 +1127,7 @@ async function runListingsTick(opts: { force: boolean }): Promise<TickResult> {
 
   stmts.setPollResult.run({
     stream: 'satflow_listings',
+    collection: collection.slug,
     status: 'ok',
     event_count: ready.length,
     cursor: null,
@@ -1033,6 +1135,7 @@ async function runListingsTick(opts: { force: boolean }): Promise<TickResult> {
 
   return {
     mode: 'listings',
+    collection: collection.slug,
     pages: pagesUsed,
     total: totalReported,
     collected: collected.length,

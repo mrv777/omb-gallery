@@ -3,11 +3,14 @@
 // One-shot collection seed from Satflow.
 //
 // Walks `/v1/activity/listings` and `/v1/activity/sales` for the given collection
-// slug, dedupes inscription_ids, and writes a static JSON inventory to
-// `src/data/collections/<slug>/`. Phase 4 uses this to materialize a 2nd
-// collection (Bitcoin Bravocados) without an ord query — `inscription_number`
-// gets resolved later by the existing live-poller bootstrap path
-// (`fetchInscriptionDetail` against ord).
+// slug, dedupes inscription_ids, then resolves each id to its inscription_number
+// via ord (`GET /inscription/<id>` against an ord HTTP base — defaults to
+// ordinals.com, no local-ord required). Writes a static JSON inventory to
+// `src/data/collections/<slug>/`.
+//
+// Why both id AND number: `inscription_number` is the PRIMARY KEY in our
+// schema, so id-only entries can't seed. Inscriptions found on Satflow that
+// ord doesn't recognise (404) are dropped from the output with a count log.
 //
 // What it captures:
 // - Every inscription currently listed on Satflow
@@ -16,18 +19,15 @@
 // What it misses:
 // - Inscriptions never listed and never sold on Satflow
 //
-// For collections we'll surface in the gallery, this is acceptable as a v1
-// inventory — the live poller fills in current_owner/current_output via ord
-// once it knows about an inscription_id, and `bootstrap-ord-ids.js` can later
-// be extended to enumerate via ord's children-of-parent endpoint if needed.
-//
 // Usage:
 //   SATFLOW_API_KEY=... node scripts/seed-collection-from-satflow.mjs \
 //     --slug=bravocados [--name="Bitcoin Bravocados"] \
-//     [--satflow-slug=bravocados] [--out=src/data/collections/bravocados]
+//     [--satflow-slug=bravocados] [--out=src/data/collections/bravocados] \
+//     [--ord-base-url=https://ordinals.com]
 //
 // Optional env:
 //   SATFLOW_BASE_URL   default https://api.satflow.com
+//   ORD_BASE_URL       default https://ordinals.com (override with --ord-base-url=)
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -45,6 +45,10 @@ if (!ARGS.slug) {
 }
 
 const SATFLOW_BASE = (process.env.SATFLOW_BASE_URL ?? 'https://api.satflow.com').replace(/\/+$/, '');
+const ORD_BASE = (ARGS['ord-base-url'] ?? process.env.ORD_BASE_URL ?? 'https://ordinals.com').replace(
+  /\/+$/,
+  ''
+);
 const API_KEY = process.env.SATFLOW_API_KEY ?? null;
 if (!API_KEY) {
   console.error('[seed] SATFLOW_API_KEY env is required.');
@@ -60,11 +64,13 @@ const OUT_DIR = ARGS.out
 
 const PAGE_SIZE = 100;
 const REQUEST_TIMEOUT_MS = 20_000;
+const ORD_CONCURRENCY = 10;
 
 async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   console.log(`[seed] target dir = ${path.relative(REPO_ROOT, OUT_DIR)}`);
   console.log(`[seed] satflow slug = ${SATFLOW_SLUG}`);
+  console.log(`[seed] ord base = ${ORD_BASE}`);
 
   const seen = new Set();
 
@@ -73,15 +79,31 @@ async function main() {
   // then sales — historical, can be many pages on a large collection
   await walkPaged('sales', '/v1/activity/sales', { sortBy: 'fillCompletedAt' }, seen);
 
-  const inscriptions = [...seen].sort().map((inscription_id) => ({ inscription_id }));
+  // Resolve inscription_number for every collected id. Numbers are required
+  // by the DB schema (PRIMARY KEY); ids without numbers can't seed and are
+  // dropped here with a count log.
+  const ids = [...seen];
+  const numbers = await resolveNumbersViaOrd(ids);
+
+  const inscriptions = ids
+    .filter((id) => numbers.has(id))
+    .map((inscription_id) => ({
+      inscription_id,
+      inscription_number: numbers.get(inscription_id),
+    }))
+    .sort((a, b) => a.inscription_number - b.inscription_number);
+
+  const dropped = ids.length - inscriptions.length;
   const manifest = {
     slug: OUR_SLUG,
     name: NAME,
     satflow_slug: SATFLOW_SLUG,
     shape: 'flat',
-    total_seen: inscriptions.length,
+    total_seen: ids.length,
+    total: inscriptions.length,
+    dropped_unresolved: dropped,
     generated_at: new Date().toISOString(),
-    source: 'satflow listings + sales (deduped)',
+    source: `satflow listings + sales (deduped), inscription_number resolved via ${ORD_BASE}`,
   };
 
   fs.writeFileSync(
@@ -91,8 +113,77 @@ async function main() {
   fs.writeFileSync(path.join(OUT_DIR, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 
   console.log(
-    `[seed] DONE — wrote ${inscriptions.length} unique inscription_ids to ${path.relative(REPO_ROOT, OUT_DIR)}/`
+    `[seed] DONE — wrote ${inscriptions.length} (id, number) pairs to ${path.relative(REPO_ROOT, OUT_DIR)}/ (dropped ${dropped} unresolved)`
   );
+}
+
+// Resolve inscription_number for each id via `GET <ord>/inscription/<id>`.
+// Runs `ORD_CONCURRENCY` requests in parallel; logs progress every 100 ids.
+// 404 responses (ord doesn't know that id) are silently skipped — caller
+// drops those entries from the output. Other errors abort the script.
+async function resolveNumbersViaOrd(ids) {
+  if (ids.length === 0) return new Map();
+  console.log(`[seed] resolving ${ids.length} inscription_numbers via ord (concurrency=${ORD_CONCURRENCY})`);
+  const out = new Map();
+  let done = 0;
+  let missing = 0;
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < ids.length) {
+      const i = cursor++;
+      const id = ids[i];
+      const result = await fetchOrdNumber(id);
+      done++;
+      if (result.status === 'ok') {
+        out.set(id, result.number);
+      } else if (result.status === 'missing') {
+        missing++;
+      } else {
+        // unrecoverable — surface and abort
+        throw new Error(`ord lookup failed for ${id}: ${result.error}`);
+      }
+      if (done % 100 === 0) {
+        console.log(`[seed] ord resolve progress: ${done}/${ids.length} (missing=${missing})`);
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: ORD_CONCURRENCY }, worker));
+  console.log(`[seed] ord resolve done: resolved=${out.size} missing=${missing}`);
+  return out;
+}
+
+async function fetchOrdNumber(id) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${ORD_BASE}/inscription/${id}`, {
+      headers: { Accept: 'application/json', 'User-Agent': 'omb-gallery/seed' },
+      signal: controller.signal,
+    });
+    if (res.status === 404) return { status: 'missing' };
+    if (res.status === 429) {
+      const retry = parseInt(res.headers.get('retry-after') ?? '30', 10);
+      console.warn(`[seed] ord 429 — sleeping ${retry}s`);
+      await sleep(retry * 1000);
+      return fetchOrdNumber(id);
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      return { status: 'error', error: `${res.status} ${res.statusText}: ${body.slice(0, 200)}` };
+    }
+    const json = await res.json();
+    const number = typeof json?.number === 'number' ? Math.trunc(json.number) : null;
+    if (number == null || !Number.isFinite(number)) {
+      return { status: 'error', error: `unexpected ord shape (no number): ${JSON.stringify(json).slice(0, 200)}` };
+    }
+    return { status: 'ok', number };
+  } catch (e) {
+    return { status: 'error', error: e?.message ?? String(e) };
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 async function walkPaged(label, pathname, extraParams, seen) {

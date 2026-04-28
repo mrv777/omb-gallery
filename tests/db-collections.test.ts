@@ -30,12 +30,91 @@ afterEach(() => {
   }
 });
 
-describe('schema v8 — collections + backfill_state', () => {
-  it('reaches user_version 8', () => {
+describe('schema v9 — collections + backfill_state + poll_state composite PK', () => {
+  it('reaches user_version 9', () => {
     const db = dbModule.getDb();
     const ver = db.pragma('user_version', { simple: true });
-    expect(ver).toBe(8);
+    expect(ver).toBe(9);
   });
+
+  it('seeds poll_state with composite (stream, collection_slug) rows', () => {
+    const db = dbModule.getDb();
+    // ord: single 'omb' row (one batch poll spans all collections).
+    // satflow + satflow_listings: per-collection rows for every collection
+    // whose manifest has a satflow_slug (omb + bravocados in this repo).
+    const rows = db
+      .prepare(`SELECT stream, collection_slug FROM poll_state ORDER BY stream, collection_slug`)
+      .all() as Array<{ stream: string; collection_slug: string }>;
+    expect(rows).toEqual([
+      { stream: 'ord', collection_slug: 'omb' },
+      { stream: 'satflow', collection_slug: 'bravocados' },
+      { stream: 'satflow', collection_slug: 'omb' },
+      { stream: 'satflow_listings', collection_slug: 'bravocados' },
+      { stream: 'satflow_listings', collection_slug: 'omb' },
+    ]);
+  });
+
+  it('rejects duplicate (stream, collection_slug) inserts via composite PK', () => {
+    const db = dbModule.getDb();
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO poll_state (stream, collection_slug) VALUES ('satflow', 'omb')`
+        )
+        .run()
+    ).toThrow();
+  });
+
+  it('listEnabledCollections returns rows sorted by slug', () => {
+    const stmts = dbModule.getStmts();
+    const rows = stmts.listEnabledCollections.all([]) as Array<{ slug: string }>;
+    expect(rows.map((r) => r.slug)).toEqual(['bravocados', 'omb']);
+  });
+
+  it('deleteStaleListings only deletes rows for the requested collection', () => {
+    const db = dbModule.getDb();
+    const stmts = dbModule.getStmts();
+    const omb = db
+      .prepare(`SELECT inscription_number FROM inscriptions WHERE collection_slug = 'omb' LIMIT 1`)
+      .get() as { inscription_number: number };
+    const bra = db
+      .prepare(
+        `SELECT inscription_number FROM inscriptions WHERE collection_slug = 'bravocados' LIMIT 1`
+      )
+      .get() as { inscription_number: number };
+    // Both listings are equally stale — only the targeted collection should
+    // be wiped. Without the collection filter, the OMB tick would clobber
+    // the Bravocados snapshot every 15 min.
+    stmts.upsertActiveListing.run({
+      inscription_number: omb.inscription_number,
+      inscription_id: 'a'.repeat(64) + 'i0',
+      satflow_id: 'sat-omb',
+      price_sats: 1,
+      seller: null,
+      marketplace: 'satflow',
+      listed_at: 1,
+      refreshed_at: 1,
+    });
+    stmts.upsertActiveListing.run({
+      inscription_number: bra.inscription_number,
+      inscription_id: 'b'.repeat(64) + 'i0',
+      satflow_id: 'sat-bra',
+      price_sats: 1,
+      seller: null,
+      marketplace: 'satflow',
+      listed_at: 1,
+      refreshed_at: 1,
+    });
+    expect((stmts.countActiveListings.get([]) as { n: number }).n).toBe(2);
+    stmts.deleteStaleListings.run({ cutoff: 100, collection: 'omb' });
+    const remaining = db
+      .prepare(`SELECT inscription_number FROM active_listings`)
+      .all() as Array<{ inscription_number: number }>;
+    expect(remaining).toEqual([{ inscription_number: bra.inscription_number }]);
+  });
+});
+
+describe('schema v8 — collections + backfill_state', () => {
 
   it('seeds the OMB collection row', () => {
     const db = dbModule.getDb();
