@@ -1,5 +1,5 @@
 import { GalleryImage } from "./types";
-import imageData from "../data/images.json";
+import imageData from "../data/collections/omb/inscriptions.json";
 
 type ImageEntry = { filename: string; description: string; tags: string[] };
 type ImagesByColor = Record<string, ImageEntry[]>;

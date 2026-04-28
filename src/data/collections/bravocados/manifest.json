@@ -1,0 +1,10 @@
+{
+  "slug": "bravocados",
+  "name": "Bitcoin Bravocados",
+  "satflow_slug": "bitcoin-bravocados",
+  "parent_inscription_id": "80c50933106c8fc99e245edacb5241a3abd191b192cc891ef5ac0c27e61ed749i0",
+  "shape": "flat",
+  "total": 1002,
+  "generated_at": "2026-04-28T00:38:17.886Z",
+  "source": "ord recursive /r/children/80c50933106c8fc99e245edacb5241a3abd191b192cc891ef5ac0c27e61ed749i0/inscriptions/* (base: https://ordinals.com)"
+}

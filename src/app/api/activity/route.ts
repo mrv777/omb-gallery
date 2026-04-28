@@ -12,6 +12,9 @@ export async function GET(req: NextRequest) {
   const limit = clamp(parseInt(url.searchParams.get('limit') ?? '', 10) || DEFAULT_LIMIT, 1, MAX_LIMIT);
   const cursorStr = url.searchParams.get('cursor');
   const cursor = cursorStr && /^\d+$/.test(cursorStr) ? parseInt(cursorStr, 10) : null;
+  // `||` not `??` so an empty `?collection=` falls back to default rather than
+  // querying with an empty string (which would match nothing).
+  const collection = url.searchParams.get('collection') || 'omb';
 
   const typeParam = url.searchParams.get('type');
   const eventType =
@@ -21,11 +24,11 @@ export async function GET(req: NextRequest) {
   const events = (
     eventType
       ? cursor != null
-        ? stmts.getRecentEventsByTypeAfter.all({ cursor, limit, event_type: eventType })
-        : stmts.getRecentEventsByType.all({ limit, event_type: eventType })
+        ? stmts.getRecentEventsByTypeAfter.all({ cursor, limit, event_type: eventType, collection })
+        : stmts.getRecentEventsByType.all({ limit, event_type: eventType, collection })
       : cursor != null
-        ? stmts.getRecentEventsAfter.all({ cursor, limit })
-        : stmts.getRecentEvents.all({ limit })
+        ? stmts.getRecentEventsAfter.all({ cursor, limit, collection })
+        : stmts.getRecentEvents.all({ limit, collection })
   ) as EventRow[];
 
   const next_cursor = events.length === limit ? events[events.length - 1].id : null;
@@ -37,8 +40,8 @@ export async function GET(req: NextRequest) {
   const totals =
     cursor == null
       ? {
-          events: (stmts.countEvents.get([]) as { n: number }).n,
-          holders: (stmts.countHolders.get([]) as { n: number }).n,
+          events: (stmts.countEvents.get({ collection }) as { n: number }).n,
+          holders: (stmts.countHolders.get({ collection }) as { n: number }).n,
         }
       : null;
   const poll = stmts.getPollState.get('ord') as PollStateRow | undefined;

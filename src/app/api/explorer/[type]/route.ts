@@ -26,21 +26,22 @@ export async function GET(
     1,
     MAX_LIMIT
   );
+  const collection = url.searchParams.get('collection') || 'omb';
 
   const stmts = getStmts();
   let rows: InscriptionRow[];
   switch (type) {
     case 'most-transferred':
-      rows = stmts.topByTransfers.all({ limit }) as InscriptionRow[];
+      rows = stmts.topByTransfers.all({ limit, collection }) as InscriptionRow[];
       break;
     case 'longest-unmoved':
-      rows = stmts.topByLongestUnmoved.all({ limit }) as InscriptionRow[];
+      rows = stmts.topByLongestUnmoved.all({ limit, collection }) as InscriptionRow[];
       break;
     case 'top-volume':
-      rows = stmts.topByVolume.all({ limit }) as InscriptionRow[];
+      rows = stmts.topByVolume.all({ limit, collection }) as InscriptionRow[];
       break;
     case 'highest-sale':
-      rows = stmts.topByHighestSale.all({ limit }) as InscriptionRow[];
+      rows = stmts.topByHighestSale.all({ limit, collection }) as InscriptionRow[];
       break;
   }
 

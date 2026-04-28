@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   ctx: { params: Promise<{ number: string }> }
 ) {
   const { number: numStr } = await ctx.params;
@@ -18,9 +18,16 @@ export async function GET(
   if (!Number.isFinite(num)) {
     return NextResponse.json({ error: 'invalid inscription number' }, { status: 400 });
   }
+  const collection = new URL(req.url).searchParams.get('collection') || 'omb';
 
   const stmts = getStmts();
-  const inscription = stmts.getInscription.get(num) as InscriptionRow | undefined;
+  // 404 covers two cases: number doesn't exist, or it exists in a different
+  // collection than the one requested. Both are "not found" from the caller's
+  // perspective — they get redirected/told to check the collection.
+  const inscription = stmts.getInscription.get({
+    inscription_number: num,
+    collection,
+  }) as InscriptionRow | undefined;
   if (!inscription) {
     return NextResponse.json({ error: 'not found' }, { status: 404 });
   }

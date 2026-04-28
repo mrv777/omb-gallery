@@ -30,7 +30,13 @@ export default async function InscriptionPage(
   if (!Number.isFinite(num) || num < 0) notFound();
 
   const stmts = getStmts();
-  const inscription = stmts.getInscription.get(num) as InscriptionRow | undefined;
+  // This route is OMB-specific (it pulls thumbnail metadata from
+  // inscriptionLookup, which is OMB-only). Phase 5 will add a collection-
+  // parameterized variant for Bravocados et al.
+  const inscription = stmts.getInscription.get({
+    inscription_number: num,
+    collection: 'omb',
+  }) as InscriptionRow | undefined;
   if (!inscription) notFound();
 
   const events = stmts.getAllInscriptionEvents.all(num) as EventRow[];
@@ -43,6 +49,7 @@ export default async function InscriptionPage(
         owner: inscription.current_owner,
         exclude: num,
         limit: OWNER_OTHERS_DISPLAY + 1,
+        collection: 'omb',
       }) as { inscription_number: number }[])
     : [];
   const ownerOthers = rawOwnerOthers.slice(0, OWNER_OTHERS_DISPLAY).map((r) => r.inscription_number);

@@ -2,13 +2,43 @@ import 'server-only';
 import path from 'node:path';
 import fs from 'node:fs';
 import Database, { type Database as DB } from 'better-sqlite3';
-import imageData from '../data/images.json';
+import ombInscriptions from '../data/collections/omb/inscriptions.json';
+import ombManifest from '../data/collections/omb/manifest.json';
+import bravocadosInscriptions from '../data/collections/bravocados/inscriptions.json';
+import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
+// OMB-shape entry: filename = "<inscription_number>.jpg|webp", per-color groups.
 type ImageEntry = { filename: string; description: string; tags: string[] };
 type ImagesByColor = Record<string, ImageEntry[]>;
+
+// Flat-shape entry (e.g. Bravocados): { inscription_id, inscription_number }.
+type FlatEntry = { inscription_id: string; inscription_number: number | null };
+
+type CollectionManifest = {
+  slug: string;
+  name: string;
+  satflow_slug: string | null;
+  /** 'color-grouped' = OMB-style; 'flat' = Bravocados-style. */
+  shape: 'color-grouped' | 'flat';
+};
+
+// Static collection registry. Adding a 3rd collection means: drop the JSON
+// pair under src/data/collections/<slug>/, add another entry here. Static
+// imports (vs runtime fs walk) keep Next.js bundling predictable and avoid
+// `outputFileTracingIncludes` configuration.
+const COLLECTIONS = [
+  {
+    manifest: ombManifest as CollectionManifest,
+    data: ombInscriptions as ImagesByColor,
+  },
+  {
+    manifest: bravocadosManifest as CollectionManifest,
+    data: bravocadosInscriptions as FlatEntry[],
+  },
+] as const;
 
 let dbInstance: DB | null = null;
 
@@ -55,6 +85,7 @@ function migrate(db: DB): void {
         upgradeV4ToV5(db);
         upgradeV5ToV6(db);
         upgradeV6ToV7(db);
+        upgradeV7ToV8(db);
       } else {
         initSchemaLatest(db);
       }
@@ -65,6 +96,7 @@ function migrate(db: DB): void {
       if (current < 5) upgradeV4ToV5(db);
       if (current < 6) upgradeV5ToV6(db);
       if (current < 7) upgradeV6ToV7(db);
+      if (current < 8) upgradeV7ToV8(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -73,6 +105,16 @@ function migrate(db: DB): void {
 
 function initSchemaLatest(db: DB): void {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS collections (
+      slug          TEXT PRIMARY KEY,
+      name          TEXT NOT NULL,
+      satflow_slug  TEXT,
+      enabled       INTEGER NOT NULL DEFAULT 1,
+      created_at    INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    INSERT OR IGNORE INTO collections (slug, name, satflow_slug, enabled)
+      VALUES ('omb', 'Ordinal Maxi Biz', 'omb', 1);
+
     CREATE TABLE IF NOT EXISTS inscriptions (
       inscription_number  INTEGER PRIMARY KEY,
       inscription_id      TEXT,
@@ -87,7 +129,8 @@ function initSchemaLatest(db: DB): void {
       sale_count          INTEGER NOT NULL DEFAULT 0,
       total_volume_sats   INTEGER NOT NULL DEFAULT 0,
       highest_sale_sats   INTEGER NOT NULL DEFAULT 0,
-      last_polled_at      INTEGER NOT NULL DEFAULT 0
+      last_polled_at      INTEGER NOT NULL DEFAULT 0,
+      collection_slug     TEXT REFERENCES collections (slug)
     );
     CREATE INDEX IF NOT EXISTS idx_insc_movement   ON inscriptions (last_movement_at);
     CREATE INDEX IF NOT EXISTS idx_insc_xfer_count ON inscriptions (transfer_count DESC);
@@ -96,6 +139,20 @@ function initSchemaLatest(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_insc_high_sale  ON inscriptions (highest_sale_sats DESC);
     CREATE INDEX IF NOT EXISTS idx_insc_owner      ON inscriptions (current_owner);
     CREATE INDEX IF NOT EXISTS idx_insc_id         ON inscriptions (inscription_id);
+    CREATE INDEX IF NOT EXISTS idx_insc_collection ON inscriptions (collection_slug, inscription_number);
+
+    CREATE TABLE IF NOT EXISTS backfill_state (
+      collection_slug      TEXT NOT NULL,
+      inscription_id       TEXT NOT NULL,
+      status               TEXT NOT NULL DEFAULT 'pending'
+                            CHECK (status IN ('pending','in_progress','done','error')),
+      walked_to_satpoint   TEXT,
+      transfers_recorded   INTEGER NOT NULL DEFAULT 0,
+      last_error           TEXT,
+      updated_at           INTEGER NOT NULL DEFAULT (unixepoch()),
+      PRIMARY KEY (collection_slug, inscription_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_backfill_status ON backfill_state (collection_slug, status);
 
     CREATE TABLE IF NOT EXISTS events (
       id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -299,6 +356,50 @@ function upgradeV6ToV7(db: DB): void {
   }
 }
 
+function upgradeV7ToV8(db: DB): void {
+  // Multi-collection groundwork. Purely additive: introduces a `collections`
+  // table, tags every existing inscription as 'omb', and adds `backfill_state`
+  // for the per-inscription transfer-history walker. No callsite changes
+  // required yet — every read still defaults to OMB until Phase 4 wires the
+  // poller through the collection axis.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS collections (
+      slug          TEXT PRIMARY KEY,
+      name          TEXT NOT NULL,
+      satflow_slug  TEXT,
+      enabled       INTEGER NOT NULL DEFAULT 1,
+      created_at    INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    INSERT OR IGNORE INTO collections (slug, name, satflow_slug, enabled)
+      VALUES ('omb', 'Ordinal Maxi Biz', 'omb', 1);
+  `);
+
+  const cols = db.pragma('table_info(inscriptions)') as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === 'collection_slug')) {
+    db.exec(`ALTER TABLE inscriptions ADD COLUMN collection_slug TEXT REFERENCES collections (slug)`);
+  }
+  // Backfill the column for every existing row. Every inscription in the DB
+  // today is an OMB by definition (collections/omb/inscriptions.json is the
+  // only seed source pre-Phase 4).
+  db.exec(`UPDATE inscriptions SET collection_slug = 'omb' WHERE collection_slug IS NULL`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_insc_collection ON inscriptions (collection_slug, inscription_number)`);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS backfill_state (
+      collection_slug      TEXT NOT NULL,
+      inscription_id       TEXT NOT NULL,
+      status               TEXT NOT NULL DEFAULT 'pending'
+                            CHECK (status IN ('pending','in_progress','done','error')),
+      walked_to_satpoint   TEXT,
+      transfers_recorded   INTEGER NOT NULL DEFAULT 0,
+      last_error           TEXT,
+      updated_at           INTEGER NOT NULL DEFAULT (unixepoch()),
+      PRIMARY KEY (collection_slug, inscription_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_backfill_status ON backfill_state (collection_slug, status);
+  `);
+}
+
 function upgradeV4ToV5(db: DB): void {
   // Round-robin poll order: without this, runOrdTick always polls in
   // inscription_number ASC and breaks at the wallclock budget, so the back
@@ -314,24 +415,68 @@ function upgradeV4ToV5(db: DB): void {
 }
 
 function seedInscriptions(db: DB): void {
-  // One-time seed from images.json. Idempotent: INSERT OR IGNORE keeps existing rows
-  // (with their accumulated event aggregates) untouched.
-  const existing = db.prepare('SELECT COUNT(*) AS n FROM inscriptions').get() as { n: number };
-  const data = imageData as ImagesByColor;
+  // Idempotent seed across every collection registered in COLLECTIONS.
+  // INSERT OR IGNORE keeps existing rows (and their accumulated event
+  // aggregates) untouched. Skipped entirely when the row count already
+  // matches the registry total — that's the hot path on every server boot.
   let candidateCount = 0;
-  for (const list of Object.values(data)) candidateCount += list.length;
+  for (const c of COLLECTIONS) {
+    candidateCount += c.manifest.shape === 'flat'
+      ? (c.data as FlatEntry[]).length
+      : Object.values(c.data as ImagesByColor).reduce((n, list) => n + list.length, 0);
+  }
+  const existing = db.prepare('SELECT COUNT(*) AS n FROM inscriptions').get() as { n: number };
   if (existing.n >= candidateCount) return;
 
-  const insert = db.prepare(
-    'INSERT OR IGNORE INTO inscriptions (inscription_number, color) VALUES (?, ?)'
-  );
+  // Two shapes of insert: OMB has a color but no inscription_id at seed time
+  // (id is bootstrapped later by ord). Bravocados has the id + number from
+  // the parent's children enumeration but no color. The COALESCE-on-conflict
+  // path lets a re-seed (e.g. after adding a column) populate fields that
+  // were NULL without overwriting later-set values.
+  const insertColored = db.prepare(`
+    INSERT INTO inscriptions (inscription_number, color, collection_slug)
+    VALUES (@number, @color, @slug)
+    ON CONFLICT(inscription_number) DO UPDATE SET
+      color           = COALESCE(inscriptions.color, excluded.color),
+      collection_slug = COALESCE(inscriptions.collection_slug, excluded.collection_slug)
+  `);
+  const insertFlat = db.prepare(`
+    INSERT INTO inscriptions (inscription_number, inscription_id, collection_slug)
+    VALUES (@number, @inscription_id, @slug)
+    ON CONFLICT(inscription_number) DO UPDATE SET
+      inscription_id  = COALESCE(inscriptions.inscription_id, excluded.inscription_id),
+      collection_slug = COALESCE(inscriptions.collection_slug, excluded.collection_slug)
+  `);
+  const upsertCollection = db.prepare(`
+    INSERT OR IGNORE INTO collections (slug, name, satflow_slug, enabled)
+    VALUES (@slug, @name, @satflow_slug, 1)
+  `);
+
   const tx = db.transaction(() => {
-    for (const [color, list] of Object.entries(data)) {
-      for (const entry of list) {
-        const numStr = entry.filename.replace(/\.[^/.]+$/, '');
-        const num = Number(numStr);
-        if (!Number.isFinite(num)) continue;
-        insert.run(num, color);
+    for (const { manifest, data } of COLLECTIONS) {
+      upsertCollection.run({
+        slug: manifest.slug,
+        name: manifest.name,
+        satflow_slug: manifest.satflow_slug,
+      });
+
+      if (manifest.shape === 'flat') {
+        for (const entry of data as FlatEntry[]) {
+          if (entry.inscription_number == null) continue; // skip rows we couldn't number
+          insertFlat.run({
+            number: entry.inscription_number,
+            inscription_id: entry.inscription_id,
+            slug: manifest.slug,
+          });
+        }
+      } else {
+        for (const [color, list] of Object.entries(data as ImagesByColor)) {
+          for (const entry of list) {
+            const num = Number(entry.filename.replace(/\.[^/.]+$/, ''));
+            if (!Number.isFinite(num)) continue;
+            insertColored.run({ number: num, color, slug: manifest.slug });
+          }
+        }
       }
     }
   });
@@ -572,43 +717,61 @@ export function getStmts(): Stmts {
       UPDATE poll_state SET last_known_height = @height WHERE stream = @stream
     `),
 
+    // The four event-feed queries scope to a single collection by joining
+    // through `inscriptions` (the `events` table has no collection_slug of
+    // its own — keeping it that way avoids a denormalized column to keep in
+    // sync). The join key is `inscription_number` (PK on inscriptions, indexed
+    // on events). Default `@collection = 'omb'` is enforced at the route layer.
     getRecentEvents: db.prepare(`
-      SELECT * FROM events
-      ORDER BY id DESC
+      SELECT e.* FROM events e
+      JOIN inscriptions i ON i.inscription_number = e.inscription_number
+      WHERE i.collection_slug = @collection
+      ORDER BY e.id DESC
       LIMIT @limit
     `),
 
     getRecentEventsAfter: db.prepare(`
-      SELECT * FROM events
-      WHERE id < @cursor
-      ORDER BY id DESC
+      SELECT e.* FROM events e
+      JOIN inscriptions i ON i.inscription_number = e.inscription_number
+      WHERE e.id < @cursor AND i.collection_slug = @collection
+      ORDER BY e.id DESC
       LIMIT @limit
     `),
 
     getRecentEventsByType: db.prepare(`
-      SELECT * FROM events
-      WHERE event_type = @event_type
-      ORDER BY id DESC
+      SELECT e.* FROM events e
+      JOIN inscriptions i ON i.inscription_number = e.inscription_number
+      WHERE e.event_type = @event_type AND i.collection_slug = @collection
+      ORDER BY e.id DESC
       LIMIT @limit
     `),
 
     getRecentEventsByTypeAfter: db.prepare(`
-      SELECT * FROM events
-      WHERE id < @cursor AND event_type = @event_type
-      ORDER BY id DESC
+      SELECT e.* FROM events e
+      JOIN inscriptions i ON i.inscription_number = e.inscription_number
+      WHERE e.id < @cursor AND e.event_type = @event_type AND i.collection_slug = @collection
+      ORDER BY e.id DESC
       LIMIT @limit
     `),
 
-    countEvents: db.prepare(`SELECT COUNT(*) AS n FROM events`),
+    countEvents: db.prepare(`
+      SELECT COUNT(*) AS n FROM events e
+      JOIN inscriptions i ON i.inscription_number = e.inscription_number
+      WHERE i.collection_slug = @collection
+    `),
 
     // Holders are derived from inscriptions.current_owner — count distinct non-null owners.
     countHolders: db.prepare(`
       SELECT COUNT(DISTINCT current_owner) AS n
       FROM inscriptions
       WHERE current_owner IS NOT NULL
+        AND collection_slug = @collection
     `),
 
-    getInscription: db.prepare(`SELECT * FROM inscriptions WHERE inscription_number = ?`),
+    getInscription: db.prepare(`
+      SELECT * FROM inscriptions
+      WHERE inscription_number = @inscription_number AND collection_slug = @collection
+    `),
 
     getInscriptionEvents: db.prepare(`
       SELECT * FROM events
@@ -631,6 +794,7 @@ export function getStmts(): Stmts {
       FROM inscriptions
       WHERE current_owner = @owner
         AND inscription_number != @exclude
+        AND collection_slug = @collection
       ORDER BY inscription_number
       LIMIT @limit
     `),
@@ -638,6 +802,7 @@ export function getStmts(): Stmts {
     topByTransfers: db.prepare(`
       SELECT * FROM inscriptions
       WHERE (transfer_count + sale_count) > 0
+        AND collection_slug = @collection
       ORDER BY (transfer_count + sale_count) DESC, last_movement_at DESC
       LIMIT @limit
     `),
@@ -645,6 +810,7 @@ export function getStmts(): Stmts {
     topByLongestUnmoved: db.prepare(`
       SELECT * FROM inscriptions
       WHERE last_movement_at IS NOT NULL
+        AND collection_slug = @collection
       ORDER BY last_movement_at ASC
       LIMIT @limit
     `),
@@ -652,6 +818,7 @@ export function getStmts(): Stmts {
     topByVolume: db.prepare(`
       SELECT * FROM inscriptions
       WHERE total_volume_sats > 0
+        AND collection_slug = @collection
       ORDER BY total_volume_sats DESC
       LIMIT @limit
     `),
@@ -659,6 +826,7 @@ export function getStmts(): Stmts {
     topByHighestSale: db.prepare(`
       SELECT * FROM inscriptions
       WHERE highest_sale_sats > 0
+        AND collection_slug = @collection
       ORDER BY highest_sale_sats DESC
       LIMIT @limit
     `),
@@ -669,6 +837,7 @@ export function getStmts(): Stmts {
              unixepoch()   AS updated_at
       FROM inscriptions
       WHERE current_owner IS NOT NULL
+        AND collection_slug = @collection
       GROUP BY current_owner
       ORDER BY inscription_count DESC, current_owner ASC
       LIMIT @limit

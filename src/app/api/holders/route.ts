@@ -14,10 +14,11 @@ export async function GET(req: NextRequest) {
     1,
     MAX_LIMIT
   );
+  const collection = url.searchParams.get('collection') || 'omb';
 
   const stmts = getStmts();
-  const items = stmts.topHolders.all({ limit }) as HolderRow[];
-  const total = (stmts.countHolders.get([]) as { n: number }).n;
+  const items = stmts.topHolders.all({ limit, collection }) as HolderRow[];
+  const total = (stmts.countHolders.get({ collection }) as { n: number }).n;
 
   return NextResponse.json({ items, total });
 }
