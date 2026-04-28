@@ -14,9 +14,27 @@
 //   BACKFILL_LIMIT     debug: only process N inscriptions
 //   BACKFILL_ONLY      debug: only process this inscription_number
 //   BACKFILL_MAX_HOPS  safety cap per inscription (default 250)
+//
+// CLI flags (override env where they overlap):
+//   --smoke                 Phase 2a smoke test: walk one inscription, pretty-print
+//                           the chain, do NOT write to the DB. Validates that the
+//                           home node's bitcoind/ord agree on satpoints + addresses
+//                           before we trust the full run.
+//   --inscription-id=<id>   Inscription ID to walk (smoke mode). Mutually
+//                           exclusive with --inscription-number.
+//   --inscription-number=N  Inscription number to walk (smoke mode). Resolved
+//                           via ord /inscription/<N>.
 
 const path = require('node:path');
-const Database = require('better-sqlite3');
+// better-sqlite3 is only needed in full-backfill mode (main()). Smoke mode
+// (Phase 2a) walks one inscription against ord+bitcoind and prints the chain
+// without ever opening the DB, so we lazy-load this require to let the smoke
+// path run on a host that doesn't have the native module compiled.
+let Database = null;
+function loadDatabase() {
+  if (!Database) Database = require('better-sqlite3');
+  return Database;
+}
 
 // Node's fetch (undici) refuses URLs containing inline credentials, so split
 // the user:pass off into a Basic Authorization header.
@@ -43,6 +61,21 @@ const LIMIT = process.env.BACKFILL_LIMIT ? parseInt(process.env.BACKFILL_LIMIT, 
 const ONLY = process.env.BACKFILL_ONLY ? parseInt(process.env.BACKFILL_ONLY, 10) : null;
 const MAX_HOPS = parseInt(process.env.BACKFILL_MAX_HOPS ?? '250', 10);
 const REQUEST_TIMEOUT_MS = 30_000;
+
+const ARGS = parseArgs(process.argv.slice(2));
+
+function parseArgs(argv) {
+  const out = { smoke: false, inscriptionId: null, inscriptionNumber: null };
+  for (const a of argv) {
+    if (a === '--smoke') out.smoke = true;
+    else if (a.startsWith('--inscription-id=')) out.inscriptionId = a.slice('--inscription-id='.length);
+    else if (a.startsWith('--inscription-number=')) {
+      const n = parseInt(a.slice('--inscription-number='.length), 10);
+      if (Number.isFinite(n)) out.inscriptionNumber = n;
+    }
+  }
+  return out;
+}
 
 if (!RPC_URL) {
   console.error('[backfill] BITCOIN_RPC_URL is required');
@@ -246,7 +279,7 @@ async function walkInscription({ inscription_id, inscription_number, satpoint, h
 // ---------------- main ----------------
 
 async function main() {
-  const db = new Database(DB_PATH);
+  const db = new (loadDatabase())(DB_PATH);
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000');
 
@@ -391,4 +424,99 @@ async function main() {
   db.close();
 }
 
-main().catch((e) => { console.error('[backfill] FATAL:', e); process.exit(1); });
+// ---------------- smoke mode (Phase 2a) ----------------
+//
+// Walks a single inscription end-to-end without touching the DB. Used to
+// validate that the home node's bitcoind/ord agree on satpoints + addresses
+// before we trust the full run. Compare the printed chain against an external
+// source-of-truth (BiS screenshots, mempool.space) for an inscription with
+// rich transfer history.
+async function smoke() {
+  if (!ARGS.inscriptionId && ARGS.inscriptionNumber == null) {
+    console.error(
+      '[smoke] --inscription-id=<id> or --inscription-number=<n> is required in smoke mode'
+    );
+    process.exit(1);
+  }
+
+  // Fail-fast probes so a bad RPC URL or unreachable ord shows up at the
+  // top of the output instead of buried inside the walk.
+  try {
+    const info = await rpc('getblockchaininfo', []);
+    console.log(`[smoke] bitcoind ok: blocks=${info.blocks} chain=${info.chain}`);
+  } catch (e) {
+    console.error('[smoke] bitcoind RPC failed:', e.message);
+    process.exit(1);
+  }
+
+  const lookup = ARGS.inscriptionId ?? ARGS.inscriptionNumber;
+  const insc = await fetchOrdInscription(lookup);
+  if (!insc) {
+    console.error(`[smoke] ord returned no inscription for ${lookup}`);
+    process.exit(1);
+  }
+  const inscription_id = insc.id ?? insc.inscription_id ?? ARGS.inscriptionId;
+  const inscription_number = insc.number ?? insc.inscription_number ?? ARGS.inscriptionNumber;
+  if (!insc.satpoint) {
+    console.error(`[smoke] ord response missing satpoint for ${inscription_id}`);
+    console.error('[smoke] response:', JSON.stringify(insc).slice(0, 400));
+    process.exit(1);
+  }
+  console.log(
+    `[smoke] inscription #${inscription_number} (${inscription_id})\n` +
+      `        current_satpoint = ${insc.satpoint}\n` +
+      `        current_address  = ${insc.address ?? '<none>'}\n` +
+      `        genesis_height   = ${insc.height ?? insc.genesis_height ?? '?'}\n`
+  );
+
+  const hops = { value: 0 };
+  const startedAt = Date.now();
+  const { events, reason } = await walkInscription({
+    inscription_id,
+    inscription_number,
+    satpoint: insc.satpoint,
+    hops,
+  });
+  const elapsedMs = Date.now() - startedAt;
+
+  if (events.length === 0) {
+    console.log(`[smoke] no transfer events walked. reason=${reason}`);
+    console.log(
+      `[smoke] (an inscription that has never moved post-genesis will land here — try a richer one.)`
+    );
+    return;
+  }
+
+  // Walker produces hops in newest→oldest order. Print in chronological order
+  // (oldest→newest) so it matches how a user reads transfer history elsewhere.
+  console.log(`[smoke] walked ${events.length} hop(s) in ${elapsedMs}ms — reason=${reason}\n`);
+  const chrono = [...events].reverse();
+  for (let i = 0; i < chrono.length; i++) {
+    const e = chrono[i];
+    const ts = e.block_timestamp
+      ? new Date(e.block_timestamp * 1000).toISOString()
+      : '<unconfirmed>';
+    const height = e.block_height ?? '?';
+    console.log(
+      `  #${i + 1}  block ${height}  ${ts}\n` +
+        `      txid:   ${e.txid}\n` +
+        `      from:   ${e.old_owner ?? '<unknown>'}\n` +
+        `      to:     ${e.new_owner ?? '<unknown>'}\n` +
+        `      satpoint: ${e.new_satpoint}`
+    );
+  }
+  console.log(
+    `\n[smoke] DONE — cross-check the chain above against mempool.space or BiS screenshots.\n` +
+      `        if heights/addresses match, ord's spent-output mapping is good and we can\n` +
+      `        proceed with Phase 2b (full walker against the prod DB).`
+  );
+}
+
+if (ARGS.smoke) {
+  smoke().catch((e) => {
+    console.error('[smoke] FATAL:', e);
+    process.exit(1);
+  });
+} else {
+  main().catch((e) => { console.error('[backfill] FATAL:', e); process.exit(1); });
+}
