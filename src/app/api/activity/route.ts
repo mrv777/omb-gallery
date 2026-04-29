@@ -10,8 +10,14 @@ const MAX_LIMIT = 100;
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const limit = clamp(parseInt(url.searchParams.get('limit') ?? '', 10) || DEFAULT_LIMIT, 1, MAX_LIMIT);
+  // Cursor format: "<block_timestamp>:<id>" (composite keyset). Older single-int
+  // cursors (legacy clients) are silently dropped — they'd order by id and
+  // produce wrong results against the new (block_timestamp, id) ordering.
   const cursorStr = url.searchParams.get('cursor');
-  const cursor = cursorStr && /^\d+$/.test(cursorStr) ? parseInt(cursorStr, 10) : null;
+  const cursorMatch = cursorStr ? /^(\d+):(\d+)$/.exec(cursorStr) : null;
+  const cursor = cursorMatch
+    ? { ts: parseInt(cursorMatch[1], 10), id: parseInt(cursorMatch[2], 10) }
+    : null;
   // `||` not `??` so an empty `?collection=` falls back to default rather than
   // querying with an empty string (which would match nothing).
   const collection = url.searchParams.get('collection') || 'omb';
@@ -24,14 +30,28 @@ export async function GET(req: NextRequest) {
   const events = (
     eventType
       ? cursor != null
-        ? stmts.getRecentEventsByTypeAfter.all({ cursor, limit, event_type: eventType, collection })
+        ? stmts.getRecentEventsByTypeAfter.all({
+            cursor_ts: cursor.ts,
+            cursor_id: cursor.id,
+            limit,
+            event_type: eventType,
+            collection,
+          })
         : stmts.getRecentEventsByType.all({ limit, event_type: eventType, collection })
       : cursor != null
-        ? stmts.getRecentEventsAfter.all({ cursor, limit, collection })
+        ? stmts.getRecentEventsAfter.all({
+            cursor_ts: cursor.ts,
+            cursor_id: cursor.id,
+            limit,
+            collection,
+          })
         : stmts.getRecentEvents.all({ limit, collection })
   ) as EventRow[];
 
-  const next_cursor = events.length === limit ? events[events.length - 1].id : null;
+  const next_cursor =
+    events.length === limit
+      ? `${events[events.length - 1].block_timestamp}:${events[events.length - 1].id}`
+      : null;
 
   // Totals only change when the poller writes — recomputing them on every
   // paginated request is wasted work. Compute them only on first-page (cursor

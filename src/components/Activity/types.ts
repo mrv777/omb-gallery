@@ -16,7 +16,7 @@ export type ApiEvent = {
 
 export type ApiActivityResponse = {
   events: ApiEvent[];
-  next_cursor: number | null;
+  next_cursor: string | null;
   totals: { events: number; holders: number } | null;
   poll: {
     last_run_at: number | null;

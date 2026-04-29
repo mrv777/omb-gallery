@@ -342,7 +342,16 @@ async function runOrdTick(): Promise<TickResult> {
       states = await fetchInscriptionsBatch(chunk);
     } catch (err) {
       errMsg = errorMessage(err);
-      // Don't mark polled — fetch failed, retry next tick.
+      // ord 404s the whole batch when ANY id in the chunk hasn't been
+      // revealed in its index yet (typical during IBD). Skip this chunk
+      // and rotate it to the back of the queue so the bad inscription
+      // doesn't pin itself to the front and starve every other chunk.
+      // Other error classes (5xx, network, malformed) keep the old
+      // behavior of breaking out so we retry on the next tick.
+      if (err instanceof OrdError && err.status === 404) {
+        markChunkPolled(chunk);
+        continue;
+      }
       break;
     }
 
@@ -412,15 +421,21 @@ async function bootstrapInscriptionIds(): Promise<number> {
     const results = await Promise.allSettled(
       wave.map((row) => fetchInscriptionDetail(row.inscription_number))
     );
+    // Hold onto the first hard error so we still process every fulfilled
+    // result in this wave before bailing — otherwise a single 5xx in the
+    // middle would silently discard the inscriptions before it.
+    let hardError: unknown = null;
     for (let j = 0; j < results.length; j++) {
       const r = results[j];
       const row = wave[j];
       if (r.status === 'rejected') {
         // 404 is expected for inscriptions ord doesn't know about yet
         // (very-recent mints, or mints past ord's current sync height).
-        // Anything else is a real error — surface it.
+        // Anything else is a real error — surface it once the wave's
+        // successes have all been committed.
         if (r.reason instanceof OrdError && r.reason.status === 404) continue;
-        throw r.reason;
+        if (hardError == null) hardError = r.reason;
+        continue;
       }
       const detail = r.value;
       if (!detail.inscription_id) continue;
@@ -444,6 +459,7 @@ async function bootstrapInscriptionIds(): Promise<number> {
       }
       bootstrapped++;
     }
+    if (hardError) throw hardError;
     await sleep(ORD_BOOTSTRAP_WAVE_DELAY_MS);
   }
   return bootstrapped;

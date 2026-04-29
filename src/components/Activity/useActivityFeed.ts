@@ -26,7 +26,7 @@ export function useActivityFeed(filter: FeedFilter = 'all') {
     error: null,
     reachedEnd: false,
   });
-  const cursorRef = useRef<number | null>(null);
+  const cursorRef = useRef<string | null>(null);
   const loadingRef = useRef<boolean>(false);
   const seenIdsRef = useRef<Set<number>>(new Set());
   const filterRef = useRef<FeedFilter>(filter);
@@ -35,10 +35,10 @@ export function useActivityFeed(filter: FeedFilter = 'all') {
   const reqGenRef = useRef(0);
 
   const buildUrl = useCallback(
-    (cursor: number | null) => {
+    (cursor: string | null) => {
       const url = new URL('/api/activity', window.location.origin);
       url.searchParams.set('limit', String(PAGE_SIZE));
-      if (cursor != null) url.searchParams.set('cursor', String(cursor));
+      if (cursor != null) url.searchParams.set('cursor', cursor);
       if (filterRef.current !== 'all') url.searchParams.set('type', filterRef.current);
       return url.toString();
     },

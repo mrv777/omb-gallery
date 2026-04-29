@@ -811,19 +811,26 @@ export function getStmts(): Stmts {
     // its own — keeping it that way avoids a denormalized column to keep in
     // sync). The join key is `inscription_number` (PK on inscriptions, indexed
     // on events). Default `@collection = 'omb'` is enforced at the route layer.
+    // Activity feed orders by on-chain time (block_timestamp), tie-breaking
+    // by id. Backfill ticks insert events newest-first into the DB, so id
+    // order doesn't match chronological order and ordering by id alone shows
+    // older sales above newer ones for the same inscription. Cursor is the
+    // (block_timestamp, id) of the last row from the previous page; SQLite
+    // row-value comparison gives us a stable keyset across the composite key.
     getRecentEvents: db.prepare(`
       SELECT e.* FROM events e
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
       WHERE i.collection_slug = @collection
-      ORDER BY e.id DESC
+      ORDER BY e.block_timestamp DESC, e.id DESC
       LIMIT @limit
     `),
 
     getRecentEventsAfter: db.prepare(`
       SELECT e.* FROM events e
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
-      WHERE e.id < @cursor AND i.collection_slug = @collection
-      ORDER BY e.id DESC
+      WHERE i.collection_slug = @collection
+        AND (e.block_timestamp, e.id) < (@cursor_ts, @cursor_id)
+      ORDER BY e.block_timestamp DESC, e.id DESC
       LIMIT @limit
     `),
 
@@ -831,15 +838,16 @@ export function getStmts(): Stmts {
       SELECT e.* FROM events e
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
       WHERE e.event_type = @event_type AND i.collection_slug = @collection
-      ORDER BY e.id DESC
+      ORDER BY e.block_timestamp DESC, e.id DESC
       LIMIT @limit
     `),
 
     getRecentEventsByTypeAfter: db.prepare(`
       SELECT e.* FROM events e
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
-      WHERE e.id < @cursor AND e.event_type = @event_type AND i.collection_slug = @collection
-      ORDER BY e.id DESC
+      WHERE e.event_type = @event_type AND i.collection_slug = @collection
+        AND (e.block_timestamp, e.id) < (@cursor_ts, @cursor_id)
+      ORDER BY e.block_timestamp DESC, e.id DESC
       LIMIT @limit
     `),
 
