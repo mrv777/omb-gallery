@@ -14,6 +14,11 @@ export type ApiEvent = {
   created_at: number;
 };
 
+/** Matrica profile overlay: wallet_addr → display data. Only populated for
+ * wallets that have a non-default Matrica profile. The map is restricted to
+ * addresses appearing in the events on this page so payload stays small. */
+export type ApiMatricaMap = Record<string, { username: string | null; avatar_url: string | null }>;
+
 export type ApiActivityResponse = {
   events: ApiEvent[];
   next_cursor: string | null;
@@ -24,6 +29,7 @@ export type ApiActivityResponse = {
     last_event_count: number | null;
     is_backfilling: boolean;
   } | null;
+  matrica: ApiMatricaMap;
 };
 
 export type ApiInscription = {
@@ -41,8 +47,17 @@ export type ApiInscription = {
   highest_sale_sats: number;
 };
 
+/** One identity in the top-holders leaderboard. When `is_user`, multiple
+ * wallets are rolled up under a Matrica profile and `wallets[]` lists them
+ * all (typically 1 — only one of the user's wallets actually holds OMBs).
+ * When NOT `is_user`, `wallets` is a single-element array containing
+ * `group_key` (the raw wallet address). */
 export type ApiHolder = {
-  wallet_addr: string;
+  group_key: string;
+  is_user: boolean;
+  username: string | null;
+  avatar_url: string | null;
+  wallets: string[];
   inscription_count: number;
   updated_at: number;
 };

@@ -26,6 +26,12 @@ const BRAVO_TILE_CAP = 60;
 
 type Props = {
   address: string;
+  /** Every wallet aggregated into this view. Always includes `address`.
+   * When a Matrica user is linked, also includes their other wallets we've
+   * indexed. Single-element when no Matrica profile or only one wallet linked. */
+  wallets: string[];
+  username: string | null;
+  avatarUrl: string | null;
   ombHoldings: InscriptionRow[];
   bravoHoldings: InscriptionRow[];
   events: EventRow[];
@@ -35,6 +41,9 @@ type Props = {
 
 export default function HolderProfile({
   address,
+  wallets,
+  username,
+  avatarUrl,
   ombHoldings,
   bravoHoldings,
   events,
@@ -45,6 +54,9 @@ export default function HolderProfile({
   const ombHidden = ombHoldings.length - ombShown.length;
   const bravoShown = bravoHoldings.slice(0, BRAVO_TILE_CAP);
   const bravoHidden = bravoHoldings.length - bravoShown.length;
+  const isAggregated = wallets.length > 1;
+  // Sibling wallets — every linked wallet other than the URL address.
+  const otherWallets = wallets.filter(w => w !== address);
 
   return (
     <section className="px-4 sm:px-6 pb-16 max-w-6xl mx-auto">
@@ -56,14 +68,64 @@ export default function HolderProfile({
       </Link>
 
       <div className="border border-ink-2 bg-ink-1 px-4 sm:px-5 py-4 mb-8 font-mono">
+        {/* Matrica identity header — shown when a username is known. */}
+        {username && (
+          <div className="flex items-center gap-3 mb-3">
+            {avatarUrl && (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={avatarUrl}
+                alt=""
+                loading="lazy"
+                className="w-10 h-10 rounded-sm bg-ink-2 object-cover"
+              />
+            )}
+            <div className="min-w-0">
+              <h1 className="text-base sm:text-lg text-bone normal-case tracking-normal truncate">
+                {username}
+              </h1>
+              <div className="text-[10px] text-bone-dim tracking-[0.08em] uppercase">
+                via matrica · {wallets.length} wallet{wallets.length === 1 ? '' : 's'}
+              </div>
+            </div>
+          </div>
+        )}
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2">
-          <h1 className="text-lg sm:text-xl text-bone tabular-nums">
+          <h1
+            className={`tabular-nums text-bone ${
+              username ? 'text-sm text-bone-dim' : 'text-lg sm:text-xl'
+            }`}
+          >
             {truncateAddr(address, 10, 8)}
           </h1>
         </div>
         <div className="text-[10px] tracking-normal text-bone-dim break-all mb-4 normal-case select-all">
           {address}
         </div>
+        {/* Linked wallets disclosure. Only renders when the user has more
+            than one wallet linked. Each is a deep-link to its own /holder
+            page, which renders the same aggregated view (we lookup user
+            from any wallet in the set). */}
+        {isAggregated && otherWallets.length > 0 && (
+          <div className="mb-4">
+            <div className="text-[10px] tracking-[0.12em] uppercase text-bone-dim mb-1.5">
+              also linked
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {otherWallets.map(w => (
+                <Link
+                  key={w}
+                  href={`/holder/${w}`}
+                  prefetch={false}
+                  className="inline-block border border-ink-2 hover:border-bone-dim px-2 py-1 text-[10px] text-bone-dim hover:text-bone tabular-nums normal-case tracking-normal"
+                  title={w}
+                >
+                  {truncateAddr(w, 8, 6)}
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
         <dl className="grid grid-cols-3 gap-x-4 text-[11px] tracking-[0.08em] uppercase text-bone-dim mb-4">
           <Stat label="OMB" value={ombHoldings.length.toLocaleString()} />
           <Stat label="bravocados" value={bravoHoldings.length.toLocaleString()} />
@@ -150,7 +212,8 @@ export default function HolderProfile({
         </div>
       )}
 
-      {/* Activity timeline — events involving this address on either side */}
+      {/* Activity timeline — events involving this address (or any sibling
+          wallet, when aggregated) on either side. */}
       <div>
         <div className="flex items-baseline justify-between mb-3">
           <h2 className="font-mono text-xs tracking-[0.12em] uppercase text-bone">
@@ -170,7 +233,7 @@ export default function HolderProfile({
         ) : (
           <div className="border border-ink-2 bg-ink-0">
             {events.map(ev => (
-              <HolderEventRow key={ev.id} event={ev} self={address} />
+              <HolderEventRow key={ev.id} event={ev} wallets={wallets} />
             ))}
           </div>
         )}
@@ -248,7 +311,7 @@ function BravocadosTile({
   );
 }
 
-function HolderEventRow({ event, self }: { event: EventRow; self: string }) {
+function HolderEventRow({ event, wallets }: { event: EventRow; wallets: string[] }) {
   const hit = lookupInscription(event.inscription_number);
   const tileBg = hit?.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
 
@@ -266,11 +329,23 @@ function HolderEventRow({ event, self }: { event: EventRow; self: string }) {
       ? 'border-bone-dim/40'
       : 'bg-accent-orange/10 border-accent-orange/40';
 
-  // Direction relative to the holder we're viewing.
-  const isOutgoing = event.old_owner === self && event.new_owner !== self;
-  const isIncoming = event.new_owner === self && event.old_owner !== self;
+  // Direction relative to the user (any of their linked wallets counts as
+  // "self"). When both sides are the user's own wallets, it's an internal
+  // transfer — neither outgoing nor incoming, no counter-party shown.
+  const selfSet = wallets;
+  const oldIsSelf = event.old_owner != null && selfSet.includes(event.old_owner);
+  const newIsSelf = event.new_owner != null && selfSet.includes(event.new_owner);
+  const isOutgoing = oldIsSelf && !newIsSelf;
+  const isIncoming = newIsSelf && !oldIsSelf;
+  const isInternal = oldIsSelf && newIsSelf;
   const counterParty = isOutgoing ? event.new_owner : isIncoming ? event.old_owner : null;
-  const directionLabel = isOutgoing ? 'sent →' : isIncoming ? '← received' : '';
+  const directionLabel = isOutgoing
+    ? 'sent →'
+    : isIncoming
+      ? '← received'
+      : isInternal
+        ? 'internal'
+        : '';
 
   const priceStr = isSold ? formatBtc(event.sale_price_sats) : '';
   const market = isSold ? marketplaceLabel(event.marketplace) : '';

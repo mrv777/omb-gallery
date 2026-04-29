@@ -18,6 +18,7 @@ import {
   type NormalizedSale,
   type NormalizedListing,
 } from '@/lib/satflow';
+import { fetchWalletProfile, MatricaError } from '@/lib/matrica';
 import { log } from '@/lib/log';
 
 export const dynamic = 'force-dynamic';
@@ -37,6 +38,18 @@ const ORD_BOOTSTRAP_WAVE_DELAY_MS = 25;
 // Each detected transfer needs 2 sequential ord calls; wider parallelism
 // drains the work fast but risks overloading ord on a catch-up burst.
 const ORD_ENRICHMENT_CONCURRENCY = 8;
+
+// Matrica wallet-linking. Per tick, probe N distinct OMB+bravocados owners
+// we haven't checked in MATRICA_STALENESS_SEC. With ~3-4k unique owners and
+// a daily cron, 200/tick drains a backlog in ~2 weeks; once steady-state,
+// only newly-seen owners (or ones whose row has aged out) get re-probed.
+// Pacing inside src/lib/matrica.ts is 1 req/s, so 200 calls ≈ 200s wallclock.
+const MATRICA_PER_TICK_LIMIT = 200;
+const MATRICA_STALENESS_SEC = 14 * 24 * 60 * 60; // 14 days
+// Matrica's 1 req/s sustained pacing means a 200-wallet tick takes ~3.5min.
+// Bump the wallclock budget for this mode only (the satflow/ord ticks stay
+// at TICK_WALLCLOCK_BUDGET_MS).
+const MATRICA_TICK_WALLCLOCK_BUDGET_MS = 5 * 60 * 1000;
 
 const SATFLOW_PAGE_SIZE = 100;
 const SATFLOW_INCREMENTAL_MAX_PAGES = 3;
@@ -130,8 +143,22 @@ async function handle(req: NextRequest): Promise<NextResponse> {
       case 'listings':
         result = await iterateListingsCollections(onlyCollection, { force: true });
         break;
+      case 'matrica': {
+        // Optional ?limit=N for operational testing (default = full per-tick).
+        const limOverride = parseInt(url.searchParams.get('limit') ?? '', 10);
+        const limit =
+          Number.isFinite(limOverride) && limOverride > 0
+            ? Math.min(limOverride, MATRICA_PER_TICK_LIMIT)
+            : MATRICA_PER_TICK_LIMIT;
+        result = await runMatricaTick({ limit });
+        break;
+      }
       case 'auto':
       default: {
+        // Matrica is intentionally NOT in 'auto'. Auto runs every 5min;
+        // Matrica probes are daily and far more expensive (1 req/s rate
+        // limit, 200 wallets/tick = ~3.5min wallclock). Run via its own
+        // ?mode=matrica cron at 0 5 * * *.
         const ord = await runOrdTick();
         const satflow = await iterateSatflowCollections(onlyCollection, {});
         const listings = await iterateListingsCollections(onlyCollection, { force: false });
@@ -1215,10 +1242,146 @@ async function runListingsTick(
   };
 }
 
+// ---------------- mode: matrica ----------------
+
+/**
+ * Probe Matrica for wallet → user mappings. The poller scans every
+ * `inscriptions.current_owner` we haven't checked in MATRICA_STALENESS_SEC,
+ * batched at MATRICA_PER_TICK_LIMIT/tick. For each address:
+ *   - 200 + user object → upsert matrica_users + wallet_links (linked).
+ *   - 400 "Wallet not found" → upsert wallet_links with NULL user_id (so
+ *     we don't re-probe before the staleness window elapses).
+ *   - 5xx / network → log and stop the tick (fresh attempt next cron).
+ *   - 403 "Invalid plan for enterprise call" → return immediately with
+ *     `error` populated; this is an account-level issue, not a transient.
+ *
+ * The matrica stream is collection-agnostic — one ('matrica','omb') row in
+ * poll_state. The probe set spans every collection's owners (it's keyed
+ * off `inscriptions.current_owner`, which already covers all collections).
+ */
+async function runMatricaTick(opts: { limit: number }): Promise<TickResult> {
+  const apiKey = process.env.MATRICA_API_KEY ?? null;
+  if (!apiKey) {
+    return { mode: 'matrica', skipped: 'not-configured' };
+  }
+
+  const stmts = getStmts();
+  const lockRes = stmts.acquireLock.run({ stream: 'matrica', collection: 'omb' });
+  if (lockRes.changes === 0) {
+    return { mode: 'matrica', skipped: 'concurrent' };
+  }
+
+  const startedAt = Date.now();
+  let lastHeartbeat = startedAt;
+  const nowSec = Math.floor(startedAt / 1000);
+  const staleBefore = nowSec - MATRICA_STALENESS_SEC;
+
+  const wallets = stmts.pickWalletsToProbe.all({
+    stale_before: staleBefore,
+    limit: opts.limit,
+  }) as Array<{ wallet_addr: string }>;
+
+  let checked = 0;
+  let linked = 0;
+  let unlinked = 0;
+  let errors = 0;
+  let errMsg: string | null = null;
+  let fatal = false; // 403 / persistent — stop the tick
+
+  for (const { wallet_addr } of wallets) {
+    const now = Date.now();
+    if (now - startedAt > MATRICA_TICK_WALLCLOCK_BUDGET_MS) {
+      log.info('poll/matrica', 'wallclock budget reached', { checked });
+      break;
+    }
+    // Refresh the lock periodically. The matrica tick can run for ~5min
+    // (limit=200 × 1 req/s pacing) which is longer than the 120s acquireLock
+    // window — without a heartbeat, a concurrent cron firing mid-tick could
+    // observe a stale last_run_at and acquire the lock, double-running the
+    // probe set. acquireLock's WHERE predicate makes this a no-op until 120s
+    // have actually elapsed since the last refresh, so the cost is one
+    // cheap UPDATE roughly every 60s.
+    if (now - lastHeartbeat >= 60_000) {
+      stmts.acquireLock.run({ stream: 'matrica', collection: 'omb' });
+      lastHeartbeat = now;
+    }
+    try {
+      const profile = await fetchWalletProfile(wallet_addr, apiKey);
+      checked++;
+      if (profile) {
+        // Upsert user + link in one transaction so partial writes never leave
+        // a dangling FK or a link to a missing user row.
+        const tx = getDb().transaction(() => {
+          stmts.upsertMatricaUser.run({
+            user_id: profile.user_id,
+            username: profile.username,
+            avatar_url: profile.avatar_url,
+            updated_at: nowSec,
+          });
+          stmts.upsertWalletLink.run({
+            wallet_addr,
+            matrica_user_id: profile.user_id,
+            checked_at: nowSec,
+          });
+        });
+        tx();
+        linked++;
+      } else {
+        stmts.upsertWalletLink.run({
+          wallet_addr,
+          matrica_user_id: null,
+          checked_at: nowSec,
+        });
+        unlinked++;
+      }
+    } catch (err) {
+      errors++;
+      errMsg = errorMessage(err);
+      // 403 = tier issue; no point retrying every wallet in the batch.
+      // Anything else — log and continue (per-wallet failures shouldn't
+      // poison the whole tick).
+      if (err instanceof MatricaError && err.status === 403) {
+        fatal = true;
+        log.error('poll/matrica', 'tier error — stopping tick', { error: errMsg });
+        break;
+      }
+      log.warn('poll/matrica', 'per-wallet error', { wallet_addr, error: errMsg });
+    }
+  }
+
+  stmts.setPollResult.run({
+    stream: 'matrica',
+    collection: 'omb',
+    status: fatal ? errMsg!.slice(0, 500) : 'ok',
+    event_count: linked,
+    cursor: null,
+  });
+
+  log.info('poll/matrica', fatal ? 'tick complete (fatal)' : 'tick complete', {
+    candidates: wallets.length,
+    checked,
+    linked,
+    unlinked,
+    errors,
+    dur_ms: Date.now() - startedAt,
+    error: fatal ? errMsg! : undefined,
+  });
+
+  return {
+    mode: 'matrica',
+    candidates: wallets.length,
+    checked,
+    linked,
+    unlinked,
+    errors,
+    ...(fatal ? { error: errMsg! } : {}),
+  };
+}
+
 // ---------------- helpers ----------------
 
 function errorMessage(err: unknown): string {
-  if (err instanceof OrdError || err instanceof SatflowError) {
+  if (err instanceof OrdError || err instanceof SatflowError || err instanceof MatricaError) {
     return `${err.message}${err.bodyExcerpt ? ' :: ' + err.bodyExcerpt.slice(0, 200) : ''}`;
   }
   if (err instanceof Error) return err.message;

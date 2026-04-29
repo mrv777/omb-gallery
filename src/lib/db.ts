@@ -8,7 +8,7 @@ import bravocadosInscriptions from '../data/collections/bravocados/inscriptions.
 import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
 
 // OMB-shape entry: filename = "<inscription_number>.jpg|webp", per-color groups.
 type ImageEntry = { filename: string; description: string; tags: string[] };
@@ -90,6 +90,7 @@ function migrate(db: DB): void {
         upgradeV8ToV9(db);
         upgradeV9ToV10(db);
         upgradeV10ToV11(db);
+        upgradeV11ToV12(db);
       } else {
         initSchemaLatest(db);
       }
@@ -104,6 +105,7 @@ function migrate(db: DB): void {
       if (current < 9) upgradeV8ToV9(db);
       if (current < 10) upgradeV9ToV10(db);
       if (current < 11) upgradeV10ToV11(db);
+      if (current < 12) upgradeV11ToV12(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -193,9 +195,10 @@ function initSchemaLatest(db: DB): void {
 
     -- Composite-PK shape (Phase 4). Per-collection rows for per-collection
     -- streams (satflow, satflow_listings); ord uses a single 'omb' row since
-    -- one batch poll covers every inscription regardless of collection.
+    -- one batch poll covers every inscription regardless of collection. The
+    -- 'matrica' stream is also collection-agnostic — one row keyed to 'omb'.
     CREATE TABLE IF NOT EXISTS poll_state (
-      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings')),
+      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica')),
       collection_slug           TEXT NOT NULL REFERENCES collections (slug),
       last_cursor               TEXT,
       last_run_at               INTEGER,
@@ -209,7 +212,28 @@ function initSchemaLatest(db: DB): void {
     INSERT OR IGNORE INTO poll_state (stream, collection_slug) VALUES
       ('ord', 'omb'),
       ('satflow', 'omb'),
-      ('satflow_listings', 'omb');
+      ('satflow_listings', 'omb'),
+      ('matrica', 'omb');
+
+    -- Matrica wallet-linking (Phase 5). matrica_users holds one row per
+    -- distinct Matrica user we've seen (across any wallet); wallet_links
+    -- is the wallet → user mapping. matrica_user_id IS NULL means
+    -- "we checked, no profile" — the row exists to prevent re-probing
+    -- before the staleness window elapses.
+    CREATE TABLE IF NOT EXISTS matrica_users (
+      user_id    TEXT PRIMARY KEY,
+      username   TEXT,
+      avatar_url TEXT,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS wallet_links (
+      wallet_addr     TEXT PRIMARY KEY,
+      matrica_user_id TEXT,
+      checked_at      INTEGER NOT NULL,
+      FOREIGN KEY (matrica_user_id) REFERENCES matrica_users(user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_wallet_links_user
+      ON wallet_links(matrica_user_id) WHERE matrica_user_id IS NOT NULL;
 
     -- Snapshot of currently-active listings on Satflow. Refreshed atomically
     -- every listings tick (DELETE + bulk INSERT in a transaction). One row per
@@ -485,6 +509,48 @@ function upgradeV10ToV11(db: DB): void {
   `);
 }
 
+function upgradeV11ToV12(db: DB): void {
+  // Phase 5: Matrica wallet-linking. Three changes:
+  //   1. Extend poll_state.stream CHECK to allow 'matrica'. SQLite can't
+  //      ALTER a CHECK in place, so copy-and-swap (same pattern as v6/v9).
+  //   2. Add matrica_users (one row per Matrica identity).
+  //   3. Add wallet_links (wallet → user, with NULL meaning "checked, no profile").
+  db.exec(`
+    CREATE TABLE poll_state_v12 (
+      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica')),
+      collection_slug           TEXT NOT NULL REFERENCES collections (slug),
+      last_cursor               TEXT,
+      last_run_at               INTEGER,
+      last_status               TEXT,
+      last_event_count          INTEGER,
+      is_backfilling            INTEGER NOT NULL DEFAULT 0,
+      last_known_height         INTEGER,
+      backfill_unresolved_seen  INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (stream, collection_slug)
+    );
+    INSERT INTO poll_state_v12 SELECT * FROM poll_state;
+    DROP TABLE poll_state;
+    ALTER TABLE poll_state_v12 RENAME TO poll_state;
+    INSERT OR IGNORE INTO poll_state (stream, collection_slug) VALUES ('matrica', 'omb');
+
+    CREATE TABLE matrica_users (
+      user_id    TEXT PRIMARY KEY,
+      username   TEXT,
+      avatar_url TEXT,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE wallet_links (
+      wallet_addr     TEXT PRIMARY KEY,
+      matrica_user_id TEXT,
+      checked_at      INTEGER NOT NULL,
+      FOREIGN KEY (matrica_user_id) REFERENCES matrica_users(user_id)
+    );
+    CREATE INDEX idx_wallet_links_user
+      ON wallet_links(matrica_user_id) WHERE matrica_user_id IS NOT NULL;
+  `);
+}
+
 function upgradeV4ToV5(db: DB): void {
   // Round-robin poll order: without this, runOrdTick always polls in
   // inscription_number ASC and breaks at the wallclock budget, so the back
@@ -655,6 +721,15 @@ type Stmts = {
   bumpSatflowCallCount: ReturnType<DB['prepare']>;
   getSatflowCallBudget: ReturnType<DB['prepare']>;
   resetSatflowCallBudget: ReturnType<DB['prepare']>;
+  // matrica wallet-linking
+  pickWalletsToProbe: ReturnType<DB['prepare']>;
+  upsertWalletLink: ReturnType<DB['prepare']>;
+  upsertMatricaUser: ReturnType<DB['prepare']>;
+  getWalletLink: ReturnType<DB['prepare']>;
+  getWalletsForUser: ReturnType<DB['prepare']>;
+  getMatricaProfilesForAddrs: ReturnType<DB['prepare']>;
+  topHoldersGrouped: ReturnType<DB['prepare']>;
+  countHolderIdentities: ReturnType<DB['prepare']>;
 };
 
 let stmts: Stmts | null = null;
@@ -1073,6 +1148,108 @@ export function getStmts(): Stmts {
     resetSatflowCallBudget: db.prepare(`
       UPDATE satflow_call_budget SET window_start = unixepoch(), call_count = 0 WHERE id = 1
     `),
+
+    // ---------------- matrica wallet-linking ----------------
+
+    // Pick wallets to probe against Matrica. Excludes wallets we've checked
+    // recently (to avoid re-probing both linked and known-not-linked rows
+    // every tick). The poller passes the collection-list in JS, since we want
+    // owners across BOTH OMB and Bravocados — not a single collection.
+    pickWalletsToProbe: db.prepare(`
+      SELECT DISTINCT i.current_owner AS wallet_addr
+      FROM inscriptions i
+      WHERE i.current_owner IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM wallet_links wl
+          WHERE wl.wallet_addr = i.current_owner
+            AND wl.checked_at > @stale_before
+        )
+      ORDER BY wallet_addr ASC
+      LIMIT @limit
+    `),
+
+    // Upsert a link. matrica_user_id is NULL when Matrica returned 400
+    // "Wallet not found" — we still write the row so we don't re-probe.
+    upsertWalletLink: db.prepare(`
+      INSERT INTO wallet_links (wallet_addr, matrica_user_id, checked_at)
+      VALUES (@wallet_addr, @matrica_user_id, @checked_at)
+      ON CONFLICT(wallet_addr) DO UPDATE SET
+        matrica_user_id = excluded.matrica_user_id,
+        checked_at      = excluded.checked_at
+    `),
+
+    upsertMatricaUser: db.prepare(`
+      INSERT INTO matrica_users (user_id, username, avatar_url, updated_at)
+      VALUES (@user_id, @username, @avatar_url, @updated_at)
+      ON CONFLICT(user_id) DO UPDATE SET
+        username   = excluded.username,
+        avatar_url = excluded.avatar_url,
+        updated_at = excluded.updated_at
+    `),
+
+    // Reader: full link + profile for one wallet (LEFT JOIN so we can tell
+    // "checked, no profile" from "never checked").
+    getWalletLink: db.prepare(`
+      SELECT wl.wallet_addr, wl.matrica_user_id, wl.checked_at,
+             mu.username, mu.avatar_url
+      FROM wallet_links wl
+      LEFT JOIN matrica_users mu ON mu.user_id = wl.matrica_user_id
+      WHERE wl.wallet_addr = @wallet_addr
+    `),
+
+    // Reader: every wallet we've linked to a given user. Used by /holder/[addr]
+    // to aggregate holdings across the user's wallets.
+    getWalletsForUser: db.prepare(`
+      SELECT wallet_addr FROM wallet_links
+      WHERE matrica_user_id = @user_id
+      ORDER BY wallet_addr ASC
+    `),
+
+    // Reader: bulk-lookup Matrica profile data for a JSON-array of wallet
+    // addresses. Used by /api/activity and the activity SSR pass to overlay
+    // @username on event rows. json_each(?) lets one prepared statement
+    // handle a dynamic IN-list — pass JSON.stringify(addrs).
+    getMatricaProfilesForAddrs: db.prepare(`
+      SELECT wl.wallet_addr, mu.username, mu.avatar_url
+      FROM wallet_links wl
+      JOIN matrica_users mu ON mu.user_id = wl.matrica_user_id
+      WHERE wl.wallet_addr IN (SELECT value FROM json_each(@addrs_json))
+    `),
+
+    // Reader: top holders, collapsed by Matrica user when one is known.
+    // Wallets without a wallet_links row, OR with matrica_user_id IS NULL
+    // (checked-no-profile), keep their wallet address as the group key.
+    // GROUP_CONCAT gives the route layer the full wallet set; the route
+    // splits it for `wallets[]` and uses the first entry for deep-linking.
+    topHoldersGrouped: db.prepare(`
+      SELECT
+        COALESCE(wl.matrica_user_id, i.current_owner)            AS group_key,
+        CASE WHEN wl.matrica_user_id IS NOT NULL THEN 1 ELSE 0 END AS is_user,
+        mu.username                                               AS username,
+        mu.avatar_url                                             AS avatar_url,
+        GROUP_CONCAT(DISTINCT i.current_owner)                    AS wallets_csv,
+        COUNT(*)                                                  AS inscription_count,
+        unixepoch()                                               AS updated_at
+      FROM inscriptions i
+      LEFT JOIN wallet_links  wl ON wl.wallet_addr = i.current_owner
+      LEFT JOIN matrica_users mu ON mu.user_id     = wl.matrica_user_id
+      WHERE i.current_owner IS NOT NULL
+        AND i.collection_slug = @collection
+      GROUP BY group_key
+      ORDER BY inscription_count DESC, group_key ASC
+      LIMIT @limit
+    `),
+
+    // Count distinct identities (Matrica user OR raw wallet). Replaces the
+    // raw-wallet countHolders for the explorer's "N holders" stat once we
+    // wire it up.
+    countHolderIdentities: db.prepare(`
+      SELECT COUNT(DISTINCT COALESCE(wl.matrica_user_id, i.current_owner)) AS n
+      FROM inscriptions i
+      LEFT JOIN wallet_links wl ON wl.wallet_addr = i.current_owner
+      WHERE i.current_owner IS NOT NULL
+        AND i.collection_slug = @collection
+    `),
   };
   return stmts;
 }
@@ -1135,7 +1312,7 @@ export type HolderRow = {
 };
 
 export type PollStateRow = {
-  stream: 'ord' | 'satflow' | 'satflow_listings';
+  stream: 'ord' | 'satflow' | 'satflow_listings' | 'matrica';
   collection_slug: string;
   last_cursor: string | null;
   last_run_at: number | null;
@@ -1150,4 +1327,31 @@ export type CollectionRow = {
   slug: string;
   name: string;
   satflow_slug: string | null;
+};
+
+export type MatricaUserRow = {
+  user_id: string;
+  username: string | null;
+  avatar_url: string | null;
+  updated_at: number;
+};
+
+export type WalletLinkRow = {
+  wallet_addr: string;
+  matrica_user_id: string | null;
+  checked_at: number;
+  username: string | null;
+  avatar_url: string | null;
+};
+
+/** Holder row collapsed by Matrica user (or by raw wallet when unlinked). */
+export type GroupedHolderRow = {
+  group_key: string;
+  is_user: 0 | 1;
+  username: string | null;
+  avatar_url: string | null;
+  /** Comma-separated wallet list — split in the route layer. */
+  wallets_csv: string;
+  inscription_count: number;
+  updated_at: number;
 };

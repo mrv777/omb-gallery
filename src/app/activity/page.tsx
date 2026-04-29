@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import ActivityFeed from '@/components/Activity/ActivityFeed';
 import SubpageShell from '@/components/SubpageShell';
 import { getStmts, type EventRow, type PollStateRow } from '@/lib/db';
+import { matricaProfilesForEvents } from '@/lib/matricaOverlay';
 import type { InitialActivity } from '@/components/Activity/useActivityFeed';
 
 export const metadata: Metadata = {
@@ -55,5 +56,6 @@ function loadInitialActivity(): InitialActivity {
           is_backfilling: pollRow.is_backfilling === 1,
         }
       : null,
+    matrica: matricaProfilesForEvents(events),
   };
 }

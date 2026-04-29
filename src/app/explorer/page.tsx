@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import SubpageShell from '@/components/SubpageShell';
 import Leaderboard from '@/components/Explorer/Leaderboard';
-import { getStmts, type HolderRow, type InscriptionRow } from '@/lib/db';
+import { getStmts, type GroupedHolderRow, type InscriptionRow } from '@/lib/db';
+import type { ApiHolder } from '@/components/Activity/types';
 
 export const metadata: Metadata = {
   title: 'Explorer · OMB Archive',
@@ -22,7 +23,19 @@ export default function ExplorerPage() {
   const unmoved = stmts.topByLongestUnmoved.all({ limit: 10, collection }) as InscriptionRow[];
   const volume = stmts.topByVolume.all({ limit: 10, collection }) as InscriptionRow[];
   const highSale = stmts.topByHighestSale.all({ limit: 10, collection }) as InscriptionRow[];
-  const holders = stmts.topHolders.all({ limit: 25, collection }) as HolderRow[];
+  const holderRows = stmts.topHoldersGrouped.all({
+    limit: 25,
+    collection,
+  }) as GroupedHolderRow[];
+  const holders: ApiHolder[] = holderRows.map(r => ({
+    group_key: r.group_key,
+    is_user: r.is_user === 1,
+    username: r.username,
+    avatar_url: r.avatar_url,
+    wallets: (r.wallets_csv ?? '').split(',').filter(Boolean),
+    inscription_count: r.inscription_count,
+    updated_at: r.updated_at,
+  }));
 
   return (
     <SubpageShell active="explorer">

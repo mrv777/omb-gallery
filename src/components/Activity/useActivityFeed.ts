@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ApiActivityResponse, ApiEvent } from './types';
+import type { ApiActivityResponse, ApiEvent, ApiMatricaMap } from './types';
 
 const PAGE_SIZE = 60;
 const REFRESH_MS = 60_000;
@@ -12,6 +12,10 @@ export type FeedState = {
   events: ApiEvent[];
   totals: { events: number; holders: number } | null;
   poll: ApiActivityResponse['poll'];
+  /** Wallet → Matrica display data. Accumulates across pages: each fetch
+   * adds entries for newly-seen addresses and never removes them, so once
+   * a row's username overlay is loaded it stays for the session. */
+  matrica: ApiMatricaMap;
   loading: boolean;
   error: string | null;
   reachedEnd: boolean;
@@ -25,6 +29,7 @@ export type InitialActivity = {
   next_cursor: string | null;
   totals: { events: number; holders: number } | null;
   poll: ApiActivityResponse['poll'];
+  matrica: ApiMatricaMap;
 };
 
 export function useActivityFeed(filter: FeedFilter = 'all', initial?: InitialActivity) {
@@ -32,6 +37,7 @@ export function useActivityFeed(filter: FeedFilter = 'all', initial?: InitialAct
     events: initial?.events ?? [],
     totals: initial?.totals ?? null,
     poll: initial?.poll ?? null,
+    matrica: initial?.matrica ?? {},
     loading: !initial,
     error: null,
     reachedEnd: initial != null && initial.next_cursor == null,
@@ -77,6 +83,7 @@ export function useActivityFeed(filter: FeedFilter = 'all', initial?: InitialAct
         // value we saw so paginated responses don't blank the header.
         totals: data.totals ?? prev.totals,
         poll: data.poll,
+        matrica: { ...prev.matrica, ...(data.matrica ?? {}) },
         loading: false,
         error: null,
         reachedEnd: data.next_cursor == null,
@@ -110,7 +117,12 @@ export function useActivityFeed(filter: FeedFilter = 'all', initial?: InitialAct
       if (myGen !== reqGenRef.current) return;
       const newOnes = data.events.filter(e => !seenIdsRef.current.has(e.id));
       if (newOnes.length === 0) {
-        setState(prev => ({ ...prev, totals: data.totals, poll: data.poll }));
+        setState(prev => ({
+          ...prev,
+          totals: data.totals,
+          poll: data.poll,
+          matrica: { ...prev.matrica, ...(data.matrica ?? {}) },
+        }));
         return;
       }
       for (const e of newOnes) seenIdsRef.current.add(e.id);
@@ -119,6 +131,7 @@ export function useActivityFeed(filter: FeedFilter = 'all', initial?: InitialAct
         events: [...newOnes, ...prev.events],
         totals: data.totals,
         poll: data.poll,
+        matrica: { ...prev.matrica, ...(data.matrica ?? {}) },
       }));
     } catch {
       // refresh failures are silent
@@ -146,6 +159,7 @@ export function useActivityFeed(filter: FeedFilter = 'all', initial?: InitialAct
       events: [],
       totals: null,
       poll: null,
+      matrica: {},
       loading: true,
       error: null,
       reachedEnd: false,

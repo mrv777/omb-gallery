@@ -44,7 +44,7 @@ export default function Leaderboard({ type, items, showSeeAll }: Props) {
           ))}
         {isHolders &&
           (items as ApiHolder[]).map((row, i) => (
-            <HolderRow key={row.wallet_addr} row={row} rank={i + 1} />
+            <HolderRow key={row.group_key} row={row} rank={i + 1} />
           ))}
       </ol>
     </div>
@@ -92,19 +92,37 @@ function InscriptionRow({
 }
 
 function HolderRow({ row, rank }: { row: ApiHolder; rank: number }) {
+  // Linked Matrica user: deep-link to the first wallet (which then aggregates
+  // across all linked wallets server-side). Unlinked wallet: link to itself.
+  const primaryWallet = row.wallets[0] ?? row.group_key;
+  const showsUsername = row.is_user && row.username && !looksLikeAddress(row.username);
+  const tooltip = row.is_user
+    ? `Matrica: ${row.username ?? row.group_key} (${row.wallets.length} wallet${row.wallets.length === 1 ? '' : 's'})`
+    : row.group_key;
   return (
     <li>
       <Link
-        href={`/holder/${row.wallet_addr}`}
+        href={`/holder/${primaryWallet}`}
         prefetch={false}
-        className="grid grid-cols-[1.5rem_1fr_auto] items-center gap-3 px-4 py-2 hover:bg-ink-2 transition-colors"
+        className="grid grid-cols-[1.5rem_1.25rem_1fr_auto] items-center gap-3 px-4 py-2 hover:bg-ink-2 transition-colors"
       >
         <span className="font-mono text-[11px] text-bone-dim tabular-nums">{rank}</span>
-        <span
-          className="font-mono text-xs text-bone truncate"
-          title={row.wallet_addr}
-        >
-          {truncateAddr(row.wallet_addr, 8, 6)}
+        <span className="block w-5 h-5 bg-ink-2 overflow-hidden rounded-sm">
+          {row.is_user && row.avatar_url && (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={row.avatar_url}
+              alt=""
+              loading="lazy"
+              className="w-full h-full object-cover"
+            />
+          )}
+        </span>
+        <span className="font-mono text-xs text-bone truncate" title={tooltip}>
+          {showsUsername ? row.username : truncateAddr(primaryWallet, 8, 6)}
+          {row.is_user && row.wallets.length > 1 && (
+            <span className="ml-1.5 text-[10px] text-bone-dim">×{row.wallets.length}</span>
+          )}
         </span>
         <span className="font-mono text-xs text-bone tabular-nums whitespace-nowrap">
           {row.inscription_count.toLocaleString()}
@@ -112,6 +130,13 @@ function HolderRow({ row, rank }: { row: ApiHolder; rank: number }) {
       </Link>
     </li>
   );
+}
+
+/** A few users on Matrica have their wallet address as their username
+ * (the default when no display name is set). Treat those as "no username"
+ * so we render the truncated address instead of a long unwieldy string. */
+function looksLikeAddress(s: string): boolean {
+  return /^bc1[a-z0-9]{30,}$/i.test(s) || /^0x[a-f0-9]{40}$/i.test(s) || s.length > 30;
 }
 
 function renderInscriptionMetric(row: ApiInscription, type: LeaderboardKey): string {

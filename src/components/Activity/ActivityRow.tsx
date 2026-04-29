@@ -2,7 +2,7 @@
 
 import { memo } from 'react';
 import Link from 'next/link';
-import type { ApiEvent } from './types';
+import type { ApiEvent, ApiMatricaMap } from './types';
 import { lookupInscription } from '@/lib/inscriptionLookup';
 import {
   formatBtc,
@@ -24,9 +24,11 @@ type Props = {
   event: ApiEvent;
   /** True when the row immediately above shares this inscription_number — visually fade the thumbnail to read as a thread. */
   groupedWithPrev: boolean;
+  /** Wallet → Matrica username/avatar overlay. Empty {} when no overlays apply. */
+  matrica: ApiMatricaMap;
 };
 
-const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev }: Props) {
+const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev, matrica }: Props) {
   const hit = lookupInscription(event.inscription_number);
   const inscriptionLink = `/inscription/${event.inscription_number}`;
   const tileBg = hit && hit.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
@@ -110,31 +112,9 @@ const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev }: Props)
 
       {/* Owners */}
       <div className="hidden sm:flex items-center gap-1.5 font-mono text-[11px] text-bone-dim min-w-0">
-        {event.old_owner ? (
-          <Link
-            href={`/holder/${event.old_owner}`}
-            prefetch={false}
-            className="hover:text-accent-orange truncate"
-            title={event.old_owner}
-          >
-            {truncateAddr(event.old_owner)}
-          </Link>
-        ) : (
-          <span>—</span>
-        )}
+        <OwnerLink addr={event.old_owner} matrica={matrica} />
         <span className="text-bone-dim/60 shrink-0">→</span>
-        {event.new_owner ? (
-          <Link
-            href={`/holder/${event.new_owner}`}
-            prefetch={false}
-            className="hover:text-accent-orange truncate"
-            title={event.new_owner}
-          >
-            {truncateAddr(event.new_owner)}
-          </Link>
-        ) : (
-          <span>—</span>
-        )}
+        <OwnerLink addr={event.new_owner} matrica={matrica} />
       </div>
 
       {/* Right rail: time + tx link */}
@@ -162,3 +142,39 @@ const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev }: Props)
 });
 
 export default ActivityRow;
+
+/** Renders an address slot in the activity feed: links to /holder/[addr],
+ * shows the Matrica `@username` when the address has a non-default profile,
+ * and falls back to the truncated address otherwise. The username is shown
+ * verbatim (no `@` prefix) since Matrica usernames aren't necessarily Twitter
+ * handles — but the visual treatment differs from a raw address so it reads
+ * as an identity. */
+function OwnerLink({
+  addr,
+  matrica,
+}: {
+  addr: string | null;
+  matrica: ApiMatricaMap;
+}) {
+  if (!addr) return <span>—</span>;
+  const profile = matrica[addr];
+  const username = profile?.username && !looksLikeAddress(profile.username) ? profile.username : null;
+  return (
+    <Link
+      href={`/holder/${addr}`}
+      prefetch={false}
+      className="hover:text-accent-orange truncate"
+      title={addr}
+    >
+      {username ? (
+        <span className="text-bone normal-case tracking-normal">{username}</span>
+      ) : (
+        truncateAddr(addr)
+      )}
+    </Link>
+  );
+}
+
+function looksLikeAddress(s: string): boolean {
+  return /^bc1[a-z0-9]{30,}$/i.test(s) || /^0x[a-f0-9]{40}$/i.test(s) || s.length > 30;
+}

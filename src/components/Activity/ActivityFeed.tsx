@@ -17,7 +17,7 @@ type Props = {
 
 export default function ActivityFeed({ initial }: Props) {
   const [filter, setFilter] = useState<FeedFilter>('all');
-  const { events, totals, poll, loading, error, reachedEnd, loadMore } = useActivityFeed(
+  const { events, totals, poll, matrica, loading, error, reachedEnd, loadMore } = useActivityFeed(
     filter,
     initial
   );
@@ -133,7 +133,12 @@ export default function ActivityFeed({ initial }: Props) {
       {events.length > 0 && (
         <div className="border border-ink-2 bg-ink-0">
           {events.map((ev, i) => (
-            <ActivityRow key={ev.id} event={ev} groupedWithPrev={grouped[i]} />
+            <ActivityRow
+              key={ev.id}
+              event={ev}
+              groupedWithPrev={grouped[i]}
+              matrica={matrica}
+            />
           ))}
         </div>
       )}

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStmts, type EventRow, type PollStateRow } from '@/lib/db';
+import { matricaProfilesForEvents } from '@/lib/matricaOverlay';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -97,6 +98,7 @@ export async function GET(req: NextRequest) {
             is_backfilling: poll.is_backfilling === 1,
           }
         : null,
+      matrica: matricaProfilesForEvents(events),
     },
     headers ? { headers } : undefined
   );
