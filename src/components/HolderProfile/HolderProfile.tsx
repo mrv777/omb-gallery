@@ -330,6 +330,11 @@ function HolderEventRow({ event, wallets }: { event: EventRow; wallets: string[]
       : isInternal
         ? 'internal'
         : '';
+  const directionColor = isOutgoing
+    ? 'text-accent-red'
+    : isIncoming
+      ? 'text-accent-green'
+      : 'text-bone-dim/80';
 
   const priceStr = isSold ? formatBtc(event.sale_price_sats) : '';
   const market = isSold ? marketplaceLabel(event.marketplace) : '';
@@ -392,7 +397,7 @@ function HolderEventRow({ event, wallets }: { event: EventRow; wallets: string[]
 
       <div className="hidden sm:flex items-center gap-1.5 font-mono text-[11px] text-bone-dim min-w-0">
         {directionLabel && (
-          <span className="text-bone-dim/80 shrink-0 normal-case tracking-normal">
+          <span className={`${directionColor} shrink-0 normal-case tracking-normal`}>
             {directionLabel}
           </span>
         )}
