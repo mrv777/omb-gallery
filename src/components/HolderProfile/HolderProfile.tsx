@@ -10,6 +10,7 @@ import {
   ordNetWalletLink,
   truncateAddr,
 } from '@/lib/format';
+import { WalletsList } from './WalletsList';
 
 const COLOR_TILE_BG: Record<string, string> = {
   red: 'bg-accent-red/20',
@@ -439,51 +440,3 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-/**
- * Wallet list for a Matrica-linked user. All wallets are peers — every
- * /holder/[wallet] route under the same user renders the identical
- * aggregated view, so we don't bother marking which wallet the URL points
- * to. Each row carries its own ord.net / ord.io buttons since those
- * external explorers are wallet-scoped.
- */
-function WalletsList({ wallets }: { wallets: string[] }) {
-  return (
-    <div>
-      <div className="text-[10px] tracking-[0.12em] uppercase text-bone-dim mb-2">
-        wallets · {wallets.length}
-      </div>
-      <ul className="divide-y divide-ink-2 border border-ink-2">
-        {wallets.map(w => (
-          <li key={w} className="flex items-center gap-2 sm:gap-3 px-3 py-2">
-            <Link
-              href={`/holder/${w}`}
-              prefetch={false}
-              className="font-mono text-xs text-bone hover:text-accent-orange tabular-nums truncate min-w-0"
-              title={w}
-            >
-              {truncateAddr(w, 10, 8)}
-            </Link>
-            <span className="ml-auto flex items-center gap-1.5 shrink-0">
-              <a
-                href={ordNetWalletLink(w)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="border border-ink-2 hover:border-bone-dim px-1.5 py-0.5 text-[9px] tracking-[0.12em] uppercase text-bone-dim hover:text-bone"
-              >
-                ord.net ↗
-              </a>
-              <a
-                href={addressLink(w)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="border border-ink-2 hover:border-bone-dim px-1.5 py-0.5 text-[9px] tracking-[0.12em] uppercase text-bone-dim hover:text-bone"
-              >
-                ord.io ↗
-              </a>
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
