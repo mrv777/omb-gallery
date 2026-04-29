@@ -117,6 +117,16 @@ const ImageModal = memo(function ImageModal({
           <span className="text-bone-dim hidden sm:inline">{currentImage + 1}/{images.length}</span>
         </div>
         <div className="flex items-center">
+          <a
+            href={`/inscription/${id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="h-11 w-11 flex items-center justify-center text-lg leading-none text-bone-dim hover:text-bone transition-colors"
+            aria-label="Open detail page in new tab"
+            title="Open detail page"
+          >
+            ⓘ
+          </a>
           <button
             type="button"
             onClick={() => toggleFavorite(image.src)}
