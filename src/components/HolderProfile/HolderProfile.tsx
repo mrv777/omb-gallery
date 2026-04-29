@@ -96,7 +96,7 @@ export default function HolderProfile({
               <Stat label="bravocados" value={bravoHoldings.length.toLocaleString()} />
               <Stat label="events" value={eventTotal.toLocaleString()} />
             </dl>
-            <WalletsList wallets={wallets} current={address} />
+            <WalletsList wallets={wallets} />
           </>
         ) : (
           // ── Wallet-centric header (no Matrica profile). Today's layout.
@@ -232,7 +232,7 @@ function OmbTile({ number }: { number: number }) {
     <Link
       href={`/inscription/${number}`}
       prefetch={false}
-      className={`block w-12 h-12 ${tileBg} overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors`}
+      className={`block w-20 h-20 sm:w-24 sm:h-24 ${tileBg} overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors`}
       title={`#${number}`}
     >
       {hit ? (
@@ -245,7 +245,7 @@ function OmbTile({ number }: { number: number }) {
           className="w-full h-full object-cover"
         />
       ) : (
-        <div className="w-full h-full flex items-center justify-center font-mono text-[9px] text-bone-dim">
+        <div className="w-full h-full flex items-center justify-center font-mono text-[10px] text-bone-dim">
           #{number}
         </div>
       )}
@@ -440,73 +440,49 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * Wallet list for a Matrica-linked user. One row per wallet, all peers —
- * the URL-current wallet is just visually marked, not given a different
- * treatment. Each row has its own ord.net / ord.io action buttons since
- * those external explorers are wallet-scoped.
- *
- * The address itself is rendered as a Link to that wallet's `/holder`
- * page; clicking a sibling navigates there (and that page renders the
- * same aggregated user view, with the new wallet as "current").
+ * Wallet list for a Matrica-linked user. All wallets are peers — every
+ * /holder/[wallet] route under the same user renders the identical
+ * aggregated view, so we don't bother marking which wallet the URL points
+ * to. Each row carries its own ord.net / ord.io buttons since those
+ * external explorers are wallet-scoped.
  */
-function WalletsList({ wallets, current }: { wallets: string[]; current: string }) {
+function WalletsList({ wallets }: { wallets: string[] }) {
   return (
     <div>
       <div className="text-[10px] tracking-[0.12em] uppercase text-bone-dim mb-2">
         wallets · {wallets.length}
       </div>
       <ul className="divide-y divide-ink-2 border border-ink-2">
-        {wallets.map(w => {
-          const isCurrent = w === current;
-          return (
-            <li
-              key={w}
-              className={`flex items-center gap-2 sm:gap-3 px-3 py-2 ${
-                isCurrent ? 'bg-ink-2/40' : ''
-              }`}
+        {wallets.map(w => (
+          <li key={w} className="flex items-center gap-2 sm:gap-3 px-3 py-2">
+            <Link
+              href={`/holder/${w}`}
+              prefetch={false}
+              className="font-mono text-xs text-bone hover:text-accent-orange tabular-nums truncate min-w-0"
+              title={w}
             >
-              {/* Leading dot marks the URL-current wallet. Rendered for
-                  every row so columns align. */}
-              <span
-                aria-hidden
-                className={`block w-1.5 h-1.5 rounded-full shrink-0 ${
-                  isCurrent ? 'bg-accent-orange' : 'bg-transparent'
-                }`}
-              />
-              <Link
-                href={`/holder/${w}`}
-                prefetch={false}
-                className="font-mono text-xs text-bone hover:text-accent-orange tabular-nums truncate min-w-0"
-                title={w}
+              {truncateAddr(w, 10, 8)}
+            </Link>
+            <span className="ml-auto flex items-center gap-1.5 shrink-0">
+              <a
+                href={ordNetWalletLink(w)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="border border-ink-2 hover:border-bone-dim px-1.5 py-0.5 text-[9px] tracking-[0.12em] uppercase text-bone-dim hover:text-bone"
               >
-                {truncateAddr(w, 10, 8)}
-              </Link>
-              {isCurrent && (
-                <span className="hidden sm:inline font-mono text-[9px] tracking-[0.12em] uppercase text-bone-dim shrink-0">
-                  viewing
-                </span>
-              )}
-              <span className="ml-auto flex items-center gap-1.5 shrink-0">
-                <a
-                  href={ordNetWalletLink(w)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="border border-ink-2 hover:border-bone-dim px-1.5 py-0.5 text-[9px] tracking-[0.12em] uppercase text-bone-dim hover:text-bone"
-                >
-                  ord.net ↗
-                </a>
-                <a
-                  href={addressLink(w)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="border border-ink-2 hover:border-bone-dim px-1.5 py-0.5 text-[9px] tracking-[0.12em] uppercase text-bone-dim hover:text-bone"
-                >
-                  ord.io ↗
-                </a>
-              </span>
-            </li>
-          );
-        })}
+                ord.net ↗
+              </a>
+              <a
+                href={addressLink(w)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="border border-ink-2 hover:border-bone-dim px-1.5 py-0.5 text-[9px] tracking-[0.12em] uppercase text-bone-dim hover:text-bone"
+              >
+                ord.io ↗
+              </a>
+            </span>
+          </li>
+        ))}
       </ul>
     </div>
   );
