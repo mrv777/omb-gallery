@@ -121,11 +121,25 @@ const ImageModal = memo(function ImageModal({
             href={`/inscription/${id}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="h-11 w-11 flex items-center justify-center text-lg leading-none text-bone-dim hover:text-bone transition-colors"
+            className="h-11 w-11 flex items-center justify-center text-bone-dim hover:text-bone transition-colors"
             aria-label="Open detail page in new tab"
             title="Open detail page"
           >
-            ⓘ
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.25"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="8" cy="8" r="6.5" />
+              <line x1="8" y1="7" x2="8" y2="11.5" />
+              <line x1="8" y1="4.75" x2="8" y2="4.75" />
+            </svg>
           </a>
           <button
             type="button"
