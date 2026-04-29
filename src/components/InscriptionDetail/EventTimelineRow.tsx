@@ -3,7 +3,7 @@ import {
   formatBtc,
   formatRelTime,
   marketplaceLabel,
-  mempoolTxLink,
+  memepoolTxLink,
   truncateAddr,
 } from '@/lib/format';
 import type { EventRow } from '@/lib/db';
@@ -27,7 +27,7 @@ export default function EventTimelineRow({ event }: Props) {
 
   const priceStr = isSold ? formatBtc(event.sale_price_sats) : '';
   const market = isSold ? marketplaceLabel(event.marketplace) : '';
-  const txLink = mempoolTxLink(event.txid);
+  const txLink = memepoolTxLink(event.txid);
 
   return (
     <div

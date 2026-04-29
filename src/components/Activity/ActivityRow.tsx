@@ -8,7 +8,7 @@ import {
   formatBtc,
   formatRelTime,
   marketplaceLabel,
-  mempoolTxLink,
+  memepoolTxLink,
   truncateAddr,
 } from '@/lib/format';
 
@@ -47,7 +47,7 @@ const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev }: Props)
 
   const priceStr = isSold ? formatBtc(event.sale_price_sats) : '';
   const market = isSold ? marketplaceLabel(event.marketplace) : '';
-  const txLink = mempoolTxLink(event.txid);
+  const txLink = memepoolTxLink(event.txid);
 
   return (
     <div

@@ -6,7 +6,8 @@ import {
   formatBtc,
   formatRelTime,
   marketplaceLabel,
-  mempoolTxLink,
+  memepoolTxLink,
+  ordNetWalletLink,
   truncateAddr,
 } from '@/lib/format';
 
@@ -70,20 +71,20 @@ export default function HolderProfile({
         </dl>
         <div className="flex flex-wrap gap-2 text-[10px] tracking-[0.12em] uppercase">
           <a
+            href={ordNetWalletLink(address)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
+          >
+            ord.net ↗
+          </a>
+          <a
             href={addressLink(address)}
             target="_blank"
             rel="noopener noreferrer"
             className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
           >
             ord.io ↗
-          </a>
-          <a
-            href={`https://mempool.space/address/${encodeURIComponent(address)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
-          >
-            mempool ↗
           </a>
         </div>
       </div>
@@ -273,7 +274,7 @@ function HolderEventRow({ event, self }: { event: EventRow; self: string }) {
 
   const priceStr = isSold ? formatBtc(event.sale_price_sats) : '';
   const market = isSold ? marketplaceLabel(event.marketplace) : '';
-  const txLink = mempoolTxLink(event.txid);
+  const txLink = memepoolTxLink(event.txid);
   const inscriptionLink = `/inscription/${event.inscription_number}`;
 
   return (

@@ -60,12 +60,22 @@ export function ordinalsLink(
   return 'https://ordinals.com';
 }
 
-export function mempoolTxLink(txid: string | null | undefined): string {
+export function memepoolTxLink(txid: string | null | undefined): string {
   if (!txid || txid === 'unknown') return '';
-  return `https://mempool.space/tx/${txid}`;
+  return `https://memepool.space/tx/${txid}`;
 }
 
 export function addressLink(addr: string | null | undefined): string {
   if (!addr) return '';
   return `https://ord.io/${addr}`;
+}
+
+export function ordNetWalletLink(addr: string | null | undefined): string {
+  if (!addr) return '';
+  return `https://ord.net/u/${addr}`;
+}
+
+export function satflowInscriptionLink(inscriptionId: string | null | undefined): string {
+  if (!inscriptionId || inscriptionId.startsWith('unknown-')) return '';
+  return `https://www.satflow.com/ordinal/${inscriptionId}`;
 }

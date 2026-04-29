@@ -1,7 +1,13 @@
 import Link from 'next/link';
 import type { EventRow, InscriptionRow } from '@/lib/db';
 import { lookupInscription } from '@/lib/inscriptionLookup';
-import { formatBtc, formatRelTime, ordinalsLink, truncateAddr } from '@/lib/format';
+import {
+  formatBtc,
+  formatRelTime,
+  ordinalsLink,
+  satflowInscriptionLink,
+  truncateAddr,
+} from '@/lib/format';
 import EventTimelineRow from './EventTimelineRow';
 
 const COLOR_TILE_BG: Record<string, string> = {
@@ -33,6 +39,7 @@ export default function InscriptionDetail({
   const hit = lookupInscription(inscription.inscription_number);
   const tileBg = hit?.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
   const ordLink = ordinalsLink(inscription.inscription_id, inscription.inscription_number);
+  const satflowLink = satflowInscriptionLink(inscription.inscription_id);
   const currentTxid = inscription.current_output ? inscription.current_output.split(':')[0] : null;
   const totalEvents = events.length;
   const transferCount = inscription.transfer_count ?? 0;
@@ -140,14 +147,24 @@ export default function InscriptionDetail({
             >
               ordinals.com ↗
             </a>
-            {currentTxid && (
+            {satflowLink && (
               <a
-                href={`https://mempool.space/tx/${currentTxid}`}
+                href={satflowLink}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
               >
-                mempool ↗
+                satflow ↗
+              </a>
+            )}
+            {currentTxid && (
+              <a
+                href={`https://memepool.space/tx/${currentTxid}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
+              >
+                memepool ↗
               </a>
             )}
             {hit && (
