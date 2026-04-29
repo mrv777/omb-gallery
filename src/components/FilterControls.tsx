@@ -3,6 +3,8 @@
 import React, { memo, useCallback } from 'react';
 import Link from 'next/link';
 import { ColorFilter } from '@/lib/types';
+import { appendColorParam } from '@/lib/colorFilter';
+import ColorSwatches from './ColorSwatches';
 import HelpButton from './HelpButton';
 import MobileMenu from './MobileMenu';
 
@@ -22,16 +24,6 @@ interface FilterControlsProps {
   searchInputRef: React.RefObject<HTMLInputElement | null>;
   playHref: string | null;
 }
-
-type SwatchDef = { value: ColorFilter; label: string; cls: string };
-
-const SWATCHES: SwatchDef[] = [
-  { value: 'red', label: 'red', cls: 'bg-accent-red' },
-  { value: 'blue', label: 'blue', cls: 'bg-accent-blue' },
-  { value: 'green', label: 'green', cls: 'bg-accent-green' },
-  { value: 'orange', label: 'orange', cls: 'bg-accent-orange' },
-  { value: 'black', label: 'black', cls: 'bg-accent-black' },
-];
 
 const FilterControls = memo(function FilterControls({
   colorFilter,
@@ -65,42 +57,7 @@ const FilterControls = memo(function FilterControls({
 
   const filtersBlock = (
     <div className="flex items-center shrink-0">
-      <button
-        type="button"
-        onClick={() => onColorFilterChange('all')}
-        className={`h-10 px-2.5 flex items-center text-[11px] tracking-[0.12em] transition-colors ${
-          colorFilter === 'all' ? 'text-bone' : 'text-bone-dim hover:text-bone'
-        }`}
-        aria-label="Show all colors"
-      >
-        <span
-          className={`border px-1.5 py-0.5 ${
-            colorFilter === 'all' ? 'border-bone' : 'border-transparent'
-          }`}
-        >
-          ALL
-        </span>
-      </button>
-      {SWATCHES.map(({ value, label, cls }) => {
-        const active = colorFilter === value;
-        return (
-          <button
-            key={value}
-            type="button"
-            onClick={() => onColorFilterChange(value)}
-            className="h-10 w-9 flex items-center justify-center group"
-            aria-label={`Filter by ${label}`}
-          >
-            <span
-              className={`block w-3.5 h-3.5 ${cls} transition-[outline] ${
-                active
-                  ? 'outline outline-1 outline-offset-[3px] outline-bone'
-                  : 'opacity-70 group-hover:opacity-100'
-              }`}
-            />
-          </button>
-        );
-      })}
+      <ColorSwatches color={colorFilter} onChange={onColorFilterChange} />
       <button
         type="button"
         onClick={onToggleFavoritesOnly}
@@ -196,10 +153,16 @@ const FilterControls = memo(function FilterControls({
           <span className="text-bone">
             <span className="border border-bone px-1.5 py-0.5">gallery</span>
           </span>
-          <Link href="/activity" className="text-bone-dim hover:text-bone transition-colors">
+          <Link
+            href={appendColorParam('/activity', colorFilter)}
+            className="text-bone-dim hover:text-bone transition-colors"
+          >
             <span className="border border-transparent px-1.5 py-0.5">activity</span>
           </Link>
-          <Link href="/explorer" className="text-bone-dim hover:text-bone transition-colors">
+          <Link
+            href={appendColorParam('/explorer', colorFilter)}
+            className="text-bone-dim hover:text-bone transition-colors"
+          >
             <span className="border border-transparent px-1.5 py-0.5">explorer</span>
           </Link>
         </nav>

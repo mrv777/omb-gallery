@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStmts, type GroupedHolderRow } from '@/lib/db';
+import { colorParamForSql, parseColorParam } from '@/lib/colorFilter';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -30,9 +31,10 @@ export async function GET(req: NextRequest) {
     MAX_LIMIT
   );
   const collection = url.searchParams.get('collection') || 'omb';
+  const color = colorParamForSql(parseColorParam(url.searchParams.get('color')));
 
   const stmts = getStmts();
-  const rows = stmts.topHoldersGrouped.all({ limit, collection }) as GroupedHolderRow[];
+  const rows = stmts.topHoldersGrouped.all({ limit, collection, color }) as GroupedHolderRow[];
   const items: HolderItem[] = rows.map(r => ({
     group_key: r.group_key,
     is_user: r.is_user === 1,
@@ -42,7 +44,7 @@ export async function GET(req: NextRequest) {
     inscription_count: r.inscription_count,
     updated_at: r.updated_at,
   }));
-  const total = (stmts.countHolderIdentities.get({ collection }) as { n: number }).n;
+  const total = (stmts.countHolderIdentities.get({ collection, color }) as { n: number }).n;
 
   return NextResponse.json(
     { items, total },

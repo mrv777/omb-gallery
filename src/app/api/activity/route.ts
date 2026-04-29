@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStmts, type EventRow, type PollStateRow } from '@/lib/db';
 import { matricaProfilesForEvents } from '@/lib/matricaOverlay';
+import { colorParamForSql, parseColorParam } from '@/lib/colorFilter';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -26,6 +27,7 @@ export async function GET(req: NextRequest) {
   // `||` not `??` so an empty `?collection=` falls back to default rather than
   // querying with an empty string (which would match nothing).
   const collection = url.searchParams.get('collection') || 'omb';
+  const color = colorParamForSql(parseColorParam(url.searchParams.get('color')));
 
   const typeParam = url.searchParams.get('type');
   const eventType =
@@ -41,16 +43,18 @@ export async function GET(req: NextRequest) {
             limit,
             event_type: eventType,
             collection,
+            color,
           })
-        : stmts.getRecentEventsByType.all({ limit, event_type: eventType, collection })
+        : stmts.getRecentEventsByType.all({ limit, event_type: eventType, collection, color })
       : cursor != null
         ? stmts.getRecentEventsAfter.all({
             cursor_ts: cursor.ts,
             cursor_id: cursor.id,
             limit,
             collection,
+            color,
           })
-        : stmts.getRecentEvents.all({ limit, collection })
+        : stmts.getRecentEvents.all({ limit, collection, color })
   ) as EventRow[];
 
   const next_cursor =
@@ -65,8 +69,8 @@ export async function GET(req: NextRequest) {
   const totals =
     cursor == null
       ? {
-          events: (stmts.countEvents.get({ collection }) as { n: number }).n,
-          holders: (stmts.countHolders.get({ collection }) as { n: number }).n,
+          events: (stmts.countEvents.get({ collection, color }) as { n: number }).n,
+          holders: (stmts.countHolders.get({ collection, color }) as { n: number }).n,
         }
       : null;
   // ord bookkeeping lives under a single ('ord','omb') row — Phase 4 keeps

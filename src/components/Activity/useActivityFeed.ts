@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ApiActivityResponse, ApiEvent, ApiMatricaMap } from './types';
+import type { ColorFilter } from '@/lib/types';
 
 const PAGE_SIZE = 60;
 const REFRESH_MS = 60_000;
@@ -32,7 +33,11 @@ export type InitialActivity = {
   matrica: ApiMatricaMap;
 };
 
-export function useActivityFeed(filter: FeedFilter = 'all', initial?: InitialActivity) {
+export function useActivityFeed(
+  filter: FeedFilter = 'all',
+  color: ColorFilter = 'all',
+  initial?: InitialActivity
+) {
   const [state, setState] = useState<FeedState>(() => ({
     events: initial?.events ?? [],
     totals: initial?.totals ?? null,
@@ -46,6 +51,7 @@ export function useActivityFeed(filter: FeedFilter = 'all', initial?: InitialAct
   const loadingRef = useRef<boolean>(false);
   const seenIdsRef = useRef<Set<number>>(new Set(initial?.events.map(e => e.id) ?? []));
   const filterRef = useRef<FeedFilter>(filter);
+  const colorRef = useRef<ColorFilter>(color);
   // Bumped on filter reset so an in-flight fetch's response can be discarded
   // when the filter has changed underneath it.
   const reqGenRef = useRef(0);
@@ -58,6 +64,7 @@ export function useActivityFeed(filter: FeedFilter = 'all', initial?: InitialAct
     url.searchParams.set('limit', String(PAGE_SIZE));
     if (cursor != null) url.searchParams.set('cursor', cursor);
     if (filterRef.current !== 'all') url.searchParams.set('type', filterRef.current);
+    if (colorRef.current !== 'all') url.searchParams.set('color', colorRef.current);
     return url.toString();
   }, []);
 
@@ -138,17 +145,20 @@ export function useActivityFeed(filter: FeedFilter = 'all', initial?: InitialAct
     }
   }, [buildUrl]);
 
-  // Reset on filter change so a new fetch starts from the top. Skip once on
-  // initial mount when we already have server-rendered data for the default
-  // filter — otherwise we'd immediately blow away the SSR-provided list and
-  // re-fetch, defeating the whole point of passing initial data in.
+  // Reset on filter or color change so a new fetch starts from the top. Skip
+  // once on initial mount when we already have server-rendered data for the
+  // current (filter, color) — otherwise we'd immediately blow away the
+  // SSR-provided list and re-fetch, defeating the whole point of passing
+  // initial data in.
   useEffect(() => {
     if (skipInitialReset.current) {
       skipInitialReset.current = false;
       filterRef.current = filter;
+      colorRef.current = color;
       return;
     }
     filterRef.current = filter;
+    colorRef.current = color;
     cursorRef.current = null;
     seenIdsRef.current = new Set();
     // Invalidate any in-flight request and clear the lock so the new loadMore
@@ -165,7 +175,7 @@ export function useActivityFeed(filter: FeedFilter = 'all', initial?: InitialAct
       reachedEnd: false,
     });
     loadMore();
-  }, [filter, loadMore]);
+  }, [filter, color, loadMore]);
 
   // Periodic head-refresh while tab is visible
   useEffect(() => {

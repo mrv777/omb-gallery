@@ -1,9 +1,11 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import SubpageShell from '@/components/SubpageShell';
+import HeaderColorSwatches from '@/components/HeaderColorSwatches';
 import Leaderboard from '@/components/Explorer/Leaderboard';
 import { LEADERBOARDS, type LeaderboardKey } from '@/components/Explorer/types';
 import { getStmts, type InscriptionRow } from '@/lib/db';
+import { colorParamForSql, parseColorParam } from '@/lib/colorFilter';
 
 const VALID: LeaderboardKey[] = [
   'most-transferred',
@@ -30,12 +32,18 @@ export async function generateMetadata({
 
 export default async function LeaderboardDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ type: string }>;
+  searchParams: Promise<{ color?: string }>;
 }) {
   const { type: typeRaw } = await params;
   if (!VALID.includes(typeRaw as LeaderboardKey)) notFound();
   const type = typeRaw as LeaderboardKey;
+
+  const sp = await searchParams;
+  const color = parseColorParam(sp.color);
+  const colorParam = colorParamForSql(color);
 
   const stmts = getStmts();
   const collection = 'omb';
@@ -43,23 +51,31 @@ export default async function LeaderboardDetailPage({
   const items = (() => {
     switch (type) {
       case 'most-transferred':
-        return stmts.topByTransfers.all({ limit, collection }) as InscriptionRow[];
+        return stmts.topByTransfers.all({ limit, collection, color: colorParam }) as InscriptionRow[];
       case 'longest-unmoved':
-        return stmts.topByLongestUnmoved.all({ limit, collection }) as InscriptionRow[];
+        return stmts.topByLongestUnmoved.all({
+          limit,
+          collection,
+          color: colorParam,
+        }) as InscriptionRow[];
       case 'top-volume':
-        return stmts.topByVolume.all({ limit, collection }) as InscriptionRow[];
+        return stmts.topByVolume.all({ limit, collection, color: colorParam }) as InscriptionRow[];
       case 'highest-sale':
-        return stmts.topByHighestSale.all({ limit, collection }) as InscriptionRow[];
+        return stmts.topByHighestSale.all({
+          limit,
+          collection,
+          color: colorParam,
+        }) as InscriptionRow[];
       default:
         return [] as InscriptionRow[];
     }
   })();
 
   return (
-    <SubpageShell active="explorer">
+    <SubpageShell active="explorer" color={color} headerControls={<HeaderColorSwatches />}>
       <section className="px-4 sm:px-6 pb-16">
         <div className="max-w-2xl">
-          <Leaderboard type={type} items={items} />
+          <Leaderboard type={type} items={items} color={color} />
         </div>
       </section>
     </SubpageShell>

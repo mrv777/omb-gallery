@@ -3,8 +3,9 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import debounce from 'lodash.debounce';
-import { GalleryImage, ColorFilter } from '@/lib/types';
+import { GalleryImage } from '@/lib/types';
 import { useFavorites } from '@/lib/FavoritesContext';
+import { useColorFilter } from '@/lib/useColorFilter';
 import { encodeIds } from '@/lib/slideshowCodec';
 import ImageModal from '../ImageModal';
 import FilterControls from '../FilterControls';
@@ -37,8 +38,9 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     return () => mq.removeEventListener('change', update);
   }, []);
 
-  // Filter state
-  const [colorFilter, setColorFilter] = useState<ColorFilter>('all');
+  // Filter state — color lives in the URL so it persists across gallery ↔
+  // activity ↔ explorer navigation. Search and favorites stay session-local.
+  const { color: colorFilter, setColor: setColorFilter } = useColorFilter();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);

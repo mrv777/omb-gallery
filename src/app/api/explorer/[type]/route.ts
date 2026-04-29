@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStmts, type InscriptionRow } from '@/lib/db';
+import { colorParamForSql, parseColorParam } from '@/lib/colorFilter';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -24,21 +25,22 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ type: strin
     MAX_LIMIT
   );
   const collection = url.searchParams.get('collection') || 'omb';
+  const color = colorParamForSql(parseColorParam(url.searchParams.get('color')));
 
   const stmts = getStmts();
   let rows: InscriptionRow[];
   switch (type) {
     case 'most-transferred':
-      rows = stmts.topByTransfers.all({ limit, collection }) as InscriptionRow[];
+      rows = stmts.topByTransfers.all({ limit, collection, color }) as InscriptionRow[];
       break;
     case 'longest-unmoved':
-      rows = stmts.topByLongestUnmoved.all({ limit, collection }) as InscriptionRow[];
+      rows = stmts.topByLongestUnmoved.all({ limit, collection, color }) as InscriptionRow[];
       break;
     case 'top-volume':
-      rows = stmts.topByVolume.all({ limit, collection }) as InscriptionRow[];
+      rows = stmts.topByVolume.all({ limit, collection, color }) as InscriptionRow[];
       break;
     case 'highest-sale':
-      rows = stmts.topByHighestSale.all({ limit, collection }) as InscriptionRow[];
+      rows = stmts.topByHighestSale.all({ limit, collection, color }) as InscriptionRow[];
       break;
   }
 

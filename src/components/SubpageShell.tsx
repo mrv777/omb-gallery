@@ -1,9 +1,16 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import HelpButton from './HelpButton';
+import type { ColorFilter } from '@/lib/types';
+import { appendColorParam } from '@/lib/colorFilter';
 
 type Props = {
   active?: 'activity' | 'explorer';
+  /** Pass through so cross-page nav links preserve the user's filter. */
+  color?: ColorFilter;
+  /** Optional content rendered in the header between nav and the help button.
+   * Used to surface the color swatches on /activity and /explorer. */
+  headerControls?: ReactNode;
   children: ReactNode;
 };
 
@@ -13,7 +20,12 @@ const NAV: { key: 'gallery' | 'activity' | 'explorer'; label: string; href: stri
   { key: 'explorer', label: 'explorer', href: '/explorer' },
 ];
 
-export default function SubpageShell({ active, children }: Props) {
+export default function SubpageShell({
+  active,
+  color = 'all',
+  headerControls,
+  children,
+}: Props) {
   return (
     <div className="h-screen w-full overflow-y-auto bg-ink-0 text-bone">
       <header className="sticky top-0 z-10 bg-ink-1/95 backdrop-blur border-b border-ink-2">
@@ -25,7 +37,7 @@ export default function SubpageShell({ active, children }: Props) {
               return (
                 <Link
                   key={item.key}
-                  href={item.href}
+                  href={appendColorParam(item.href, color)}
                   className={`transition-colors ${
                     isActive ? 'text-bone' : 'text-bone-dim hover:text-bone'
                   }`}
@@ -39,6 +51,7 @@ export default function SubpageShell({ active, children }: Props) {
               );
             })}
           </nav>
+          {headerControls}
           <div className="ml-auto">
             <HelpButton />
           </div>

@@ -3,14 +3,18 @@ import { LEADERBOARDS, type LeaderboardKey } from './types';
 import { lookupInscription } from '@/lib/inscriptionLookup';
 import { formatBtc, formatRelTime, truncateAddr } from '@/lib/format';
 import type { ApiHolder, ApiInscription } from '@/components/Activity/types';
+import type { ColorFilter } from '@/lib/types';
+import { appendColorParam } from '@/lib/colorFilter';
 
 type Props = {
   type: LeaderboardKey;
   showSeeAll?: boolean;
   items: ApiInscription[] | ApiHolder[];
+  /** Active color filter — preserved on the "see all →" link. */
+  color?: ColorFilter;
 };
 
-export default function Leaderboard({ type, items, showSeeAll }: Props) {
+export default function Leaderboard({ type, items, showSeeAll, color = 'all' }: Props) {
   const meta = LEADERBOARDS[type];
   const isHolders = type === 'top-holders';
 
@@ -21,7 +25,7 @@ export default function Leaderboard({ type, items, showSeeAll }: Props) {
           <h2 className="font-mono text-xs tracking-[0.12em] uppercase text-bone">{meta.title}</h2>
           {showSeeAll && type !== 'top-holders' && (
             <Link
-              href={`/explorer/${type}`}
+              href={appendColorParam(`/explorer/${type}`, color)}
               className="font-mono text-[10px] tracking-[0.12em] uppercase text-bone-dim hover:text-bone transition-colors"
             >
               see all →

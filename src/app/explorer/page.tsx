@@ -1,8 +1,10 @@
 import type { Metadata } from 'next';
 import SubpageShell from '@/components/SubpageShell';
+import HeaderColorSwatches from '@/components/HeaderColorSwatches';
 import Leaderboard from '@/components/Explorer/Leaderboard';
 import { getStmts, type GroupedHolderRow, type InscriptionRow } from '@/lib/db';
 import type { ApiHolder } from '@/components/Activity/types';
+import { colorParamForSql, parseColorParam } from '@/lib/colorFilter';
 
 export const metadata: Metadata = {
   title: 'Explorer · OMB Archive',
@@ -16,16 +18,41 @@ export const metadata: Metadata = {
 // for whatever else might hit them.
 export const dynamic = 'force-dynamic';
 
-export default function ExplorerPage() {
+export default async function ExplorerPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ color?: string }>;
+}) {
+  const sp = await searchParams;
+  const color = parseColorParam(sp.color);
+  const colorParam = colorParamForSql(color);
+
   const stmts = getStmts();
   const collection = 'omb';
-  const transfers = stmts.topByTransfers.all({ limit: 10, collection }) as InscriptionRow[];
-  const unmoved = stmts.topByLongestUnmoved.all({ limit: 10, collection }) as InscriptionRow[];
-  const volume = stmts.topByVolume.all({ limit: 10, collection }) as InscriptionRow[];
-  const highSale = stmts.topByHighestSale.all({ limit: 10, collection }) as InscriptionRow[];
+  const transfers = stmts.topByTransfers.all({
+    limit: 10,
+    collection,
+    color: colorParam,
+  }) as InscriptionRow[];
+  const unmoved = stmts.topByLongestUnmoved.all({
+    limit: 10,
+    collection,
+    color: colorParam,
+  }) as InscriptionRow[];
+  const volume = stmts.topByVolume.all({
+    limit: 10,
+    collection,
+    color: colorParam,
+  }) as InscriptionRow[];
+  const highSale = stmts.topByHighestSale.all({
+    limit: 10,
+    collection,
+    color: colorParam,
+  }) as InscriptionRow[];
   const holderRows = stmts.topHoldersGrouped.all({
     limit: 25,
     collection,
+    color: colorParam,
   }) as GroupedHolderRow[];
   const holders: ApiHolder[] = holderRows.map(r => ({
     group_key: r.group_key,
@@ -38,15 +65,15 @@ export default function ExplorerPage() {
   }));
 
   return (
-    <SubpageShell active="explorer">
+    <SubpageShell active="explorer" color={color} headerControls={<HeaderColorSwatches />}>
       <section className="px-4 sm:px-6 pb-16">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Leaderboard type="most-transferred" items={transfers} showSeeAll />
-          <Leaderboard type="longest-unmoved" items={unmoved} showSeeAll />
-          <Leaderboard type="top-volume" items={volume} showSeeAll />
-          <Leaderboard type="highest-sale" items={highSale} showSeeAll />
+          <Leaderboard type="most-transferred" items={transfers} showSeeAll color={color} />
+          <Leaderboard type="longest-unmoved" items={unmoved} showSeeAll color={color} />
+          <Leaderboard type="top-volume" items={volume} showSeeAll color={color} />
+          <Leaderboard type="highest-sale" items={highSale} showSeeAll color={color} />
           <div className="md:col-span-2">
-            <Leaderboard type="top-holders" items={holders} />
+            <Leaderboard type="top-holders" items={holders} color={color} />
           </div>
         </div>
       </section>

@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import { HelpDialog } from './HelpButton';
+import { useColorFilter } from '@/lib/useColorFilter';
+import { appendColorParam } from '@/lib/colorFilter';
 
 type NavItem = { key: 'gallery' | 'activity' | 'explorer'; label: string; href: string };
 
@@ -20,6 +22,7 @@ export default function MobileMenu() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const { color } = useColorFilter();
 
   useEffect(() => {
     setMounted(true);
@@ -54,7 +57,7 @@ export default function MobileMenu() {
           return (
             <Link
               key={item.key}
-              href={item.href}
+              href={appendColorParam(item.href, color)}
               role="menuitem"
               onClick={close}
               className={`flex items-center h-12 px-5 transition-colors ${

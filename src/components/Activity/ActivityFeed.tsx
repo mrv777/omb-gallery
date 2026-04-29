@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useActivityFeed, type FeedFilter, type InitialActivity } from './useActivityFeed';
 import ActivityRow from './ActivityRow';
 import { formatRelTime } from '@/lib/format';
+import { useColorFilter } from '@/lib/useColorFilter';
 
 const FILTERS: { key: FeedFilter; label: string }[] = [
   { key: 'all', label: 'all' },
@@ -17,8 +18,10 @@ type Props = {
 
 export default function ActivityFeed({ initial }: Props) {
   const [filter, setFilter] = useState<FeedFilter>('all');
+  const { color } = useColorFilter();
   const { events, totals, poll, matrica, loading, error, reachedEnd, loadMore } = useActivityFeed(
     filter,
+    color,
     initial
   );
   const sentinelRef = useRef<HTMLDivElement | null>(null);

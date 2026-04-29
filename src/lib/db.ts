@@ -8,7 +8,7 @@ import bravocadosInscriptions from '../data/collections/bravocados/inscriptions.
 import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 13;
 
 // OMB-shape entry: filename = "<inscription_number>.jpg|webp", per-color groups.
 type ImageEntry = { filename: string; description: string; tags: string[] };
@@ -91,6 +91,7 @@ function migrate(db: DB): void {
         upgradeV9ToV10(db);
         upgradeV10ToV11(db);
         upgradeV11ToV12(db);
+        upgradeV12ToV13(db);
       } else {
         initSchemaLatest(db);
       }
@@ -106,6 +107,7 @@ function migrate(db: DB): void {
       if (current < 10) upgradeV9ToV10(db);
       if (current < 11) upgradeV10ToV11(db);
       if (current < 12) upgradeV11ToV12(db);
+      if (current < 13) upgradeV12ToV13(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -149,6 +151,19 @@ function initSchemaLatest(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_insc_owner      ON inscriptions (current_owner);
     CREATE INDEX IF NOT EXISTS idx_insc_id         ON inscriptions (inscription_id);
     CREATE INDEX IF NOT EXISTS idx_insc_collection ON inscriptions (collection_slug, inscription_number);
+    -- Composite (collection, color, ...) indexes back the color-filtered
+    -- explorer leaderboards. With ~9k rows split across 5 colors, the planner
+    -- can do an index range scan in sort order instead of a full-table scan +
+    -- in-memory sort. Helps mostly when @color is bound; queries with
+    -- @color IS NULL fall back to the per-column indexes above.
+    CREATE INDEX IF NOT EXISTS idx_insc_color_xfer
+      ON inscriptions (collection_slug, color, transfer_count DESC);
+    CREATE INDEX IF NOT EXISTS idx_insc_color_volume
+      ON inscriptions (collection_slug, color, total_volume_sats DESC);
+    CREATE INDEX IF NOT EXISTS idx_insc_color_high_sale
+      ON inscriptions (collection_slug, color, highest_sale_sats DESC);
+    CREATE INDEX IF NOT EXISTS idx_insc_color_movement
+      ON inscriptions (collection_slug, color, last_movement_at);
 
     CREATE TABLE IF NOT EXISTS backfill_state (
       collection_slug      TEXT NOT NULL,
@@ -551,6 +566,24 @@ function upgradeV11ToV12(db: DB): void {
   `);
 }
 
+function upgradeV12ToV13(db: DB): void {
+  // Composite (collection, color, sort_col) indexes for color-filtered
+  // explorer leaderboards. The `color` column already exists and is seeded
+  // (since v0/v1) — this migration only adds index support so the new
+  // `?color=` filter on /activity and /explorer queries doesn't degrade to
+  // a full-table scan + sort on every request.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_insc_color_xfer
+      ON inscriptions (collection_slug, color, transfer_count DESC);
+    CREATE INDEX IF NOT EXISTS idx_insc_color_volume
+      ON inscriptions (collection_slug, color, total_volume_sats DESC);
+    CREATE INDEX IF NOT EXISTS idx_insc_color_high_sale
+      ON inscriptions (collection_slug, color, highest_sale_sats DESC);
+    CREATE INDEX IF NOT EXISTS idx_insc_color_movement
+      ON inscriptions (collection_slug, color, last_movement_at);
+  `);
+}
+
 function upgradeV4ToV5(db: DB): void {
   // Round-robin poll order: without this, runOrdTick always polls in
   // inscription_number ASC and breaks at the wallclock budget, so the back
@@ -933,10 +966,14 @@ export function getStmts(): Stmts {
     // older sales above newer ones for the same inscription. Cursor is the
     // (block_timestamp, id) of the last row from the previous page; SQLite
     // row-value comparison gives us a stable keyset across the composite key.
+    // The `(@color IS NULL OR i.color = @color)` predicate is the across-the-
+    // board pattern for color-filtered reads — pass null to query the whole
+    // collection, pass a concrete color to scope to that color cohort.
     getRecentEvents: db.prepare(`
       SELECT e.* FROM events e
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
       WHERE i.collection_slug = @collection
+        AND (@color IS NULL OR i.color = @color)
       ORDER BY e.block_timestamp DESC, e.id DESC
       LIMIT @limit
     `),
@@ -945,6 +982,7 @@ export function getStmts(): Stmts {
       SELECT e.* FROM events e
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
       WHERE i.collection_slug = @collection
+        AND (@color IS NULL OR i.color = @color)
         AND (e.block_timestamp, e.id) < (@cursor_ts, @cursor_id)
       ORDER BY e.block_timestamp DESC, e.id DESC
       LIMIT @limit
@@ -954,6 +992,7 @@ export function getStmts(): Stmts {
       SELECT e.* FROM events e
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
       WHERE e.event_type = @event_type AND i.collection_slug = @collection
+        AND (@color IS NULL OR i.color = @color)
       ORDER BY e.block_timestamp DESC, e.id DESC
       LIMIT @limit
     `),
@@ -962,6 +1001,7 @@ export function getStmts(): Stmts {
       SELECT e.* FROM events e
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
       WHERE e.event_type = @event_type AND i.collection_slug = @collection
+        AND (@color IS NULL OR i.color = @color)
         AND (e.block_timestamp, e.id) < (@cursor_ts, @cursor_id)
       ORDER BY e.block_timestamp DESC, e.id DESC
       LIMIT @limit
@@ -971,6 +1011,7 @@ export function getStmts(): Stmts {
       SELECT COUNT(*) AS n FROM events e
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
       WHERE i.collection_slug = @collection
+        AND (@color IS NULL OR i.color = @color)
     `),
 
     // Holders are derived from inscriptions.current_owner — count distinct non-null owners.
@@ -979,6 +1020,7 @@ export function getStmts(): Stmts {
       FROM inscriptions
       WHERE current_owner IS NOT NULL
         AND collection_slug = @collection
+        AND (@color IS NULL OR color = @color)
     `),
 
     getInscription: db.prepare(`
@@ -1052,6 +1094,7 @@ export function getStmts(): Stmts {
       SELECT * FROM inscriptions
       WHERE (transfer_count + sale_count) > 0
         AND collection_slug = @collection
+        AND (@color IS NULL OR color = @color)
       ORDER BY (transfer_count + sale_count) DESC, last_movement_at DESC
       LIMIT @limit
     `),
@@ -1060,6 +1103,7 @@ export function getStmts(): Stmts {
       SELECT * FROM inscriptions
       WHERE last_movement_at IS NOT NULL
         AND collection_slug = @collection
+        AND (@color IS NULL OR color = @color)
       ORDER BY last_movement_at ASC
       LIMIT @limit
     `),
@@ -1068,6 +1112,7 @@ export function getStmts(): Stmts {
       SELECT * FROM inscriptions
       WHERE total_volume_sats > 0
         AND collection_slug = @collection
+        AND (@color IS NULL OR color = @color)
       ORDER BY total_volume_sats DESC
       LIMIT @limit
     `),
@@ -1076,6 +1121,7 @@ export function getStmts(): Stmts {
       SELECT * FROM inscriptions
       WHERE highest_sale_sats > 0
         AND collection_slug = @collection
+        AND (@color IS NULL OR color = @color)
       ORDER BY highest_sale_sats DESC
       LIMIT @limit
     `),
@@ -1087,6 +1133,7 @@ export function getStmts(): Stmts {
       FROM inscriptions
       WHERE current_owner IS NOT NULL
         AND collection_slug = @collection
+        AND (@color IS NULL OR color = @color)
       GROUP BY current_owner
       ORDER BY inscription_count DESC, current_owner ASC
       LIMIT @limit
@@ -1235,6 +1282,7 @@ export function getStmts(): Stmts {
       LEFT JOIN matrica_users mu ON mu.user_id     = wl.matrica_user_id
       WHERE i.current_owner IS NOT NULL
         AND i.collection_slug = @collection
+        AND (@color IS NULL OR i.color = @color)
       GROUP BY group_key
       ORDER BY inscription_count DESC, group_key ASC
       LIMIT @limit
@@ -1249,6 +1297,7 @@ export function getStmts(): Stmts {
       LEFT JOIN wallet_links wl ON wl.wallet_addr = i.current_owner
       WHERE i.current_owner IS NOT NULL
         AND i.collection_slug = @collection
+        AND (@color IS NULL OR i.color = @color)
     `),
   };
   return stmts;

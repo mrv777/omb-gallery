@@ -3,7 +3,7 @@
 import { GalleryImage } from '@/lib/types';
 import VirtualizedZoomGrid from '@/components/VirtualizedZoomGrid';
 import ImagePreloader from '@/components/ImagePreloader';
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { loadImages } from '@/lib/imageLoader';
 
 // Cache version - increment this when the image set changes significantly
@@ -107,7 +107,11 @@ export default function Home() {
           initialVisibleCount={initialVisibleCount}
         />
       ) : (
-        <VirtualizedZoomGrid images={images} />
+        // Suspense satisfies Next's requirement for components that read
+        // search params (useColorFilter → useSearchParams in the grid).
+        <Suspense fallback={null}>
+          <VirtualizedZoomGrid images={images} />
+        </Suspense>
       )}
     </main>
   );
