@@ -9,11 +9,12 @@ const MAX_RETRIES = 5;
 
 // Matrica's documented rate limits are sparse, but probing showed /v1/user/*
 // 429s after ~3-4 calls and /v1/wallet/* tolerates ~3 req/s before the bucket
-// noticeably tightens. We pace at 1 req/s sustained — the matrica poller runs
-// once a day and probes hundreds of wallets per tick, so 1/s gives ~3600
-// wallets/hour of headroom while staying well under any realistic limit.
+// noticeably tightens. Pacing at 2 req/s — re-tested 2026-04-29 with a 90-wallet
+// sustained burst (0 × 429), giving us comfortable headroom under the ~3 req/s
+// ceiling. The matrica poller runs hourly and probes hundreds of wallets per
+// tick, so 2/s halves the wallclock vs. 1/s.
 // Same minimum-spacing token bucket as satflow.ts.
-const RATE_LIMIT_RPS = 1;
+const RATE_LIMIT_RPS = 2;
 const MIN_INTERVAL_MS = 1000 / RATE_LIMIT_RPS;
 let nextSlotAt = 0;
 

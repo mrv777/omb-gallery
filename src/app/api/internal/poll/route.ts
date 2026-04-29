@@ -40,16 +40,16 @@ const ORD_BOOTSTRAP_WAVE_DELAY_MS = 25;
 const ORD_ENRICHMENT_CONCURRENCY = 8;
 
 // Matrica wallet-linking. Per tick, probe N distinct OMB+bravocados owners
-// we haven't checked in MATRICA_STALENESS_SEC. With ~3-4k unique owners and
-// a daily cron, 200/tick drains a backlog in ~2 weeks; once steady-state,
-// only newly-seen owners (or ones whose row has aged out) get re-probed.
-// Pacing inside src/lib/matrica.ts is 1 req/s, so 200 calls ≈ 200s wallclock.
-const MATRICA_PER_TICK_LIMIT = 200;
-const MATRICA_STALENESS_SEC = 14 * 24 * 60 * 60; // 14 days
-// Matrica's 1 req/s sustained pacing means a 200-wallet tick takes ~3.5min.
-// Bump the wallclock budget for this mode only (the satflow/ord ticks stay
-// at TICK_WALLCLOCK_BUDGET_MS).
-const MATRICA_TICK_WALLCLOCK_BUDGET_MS = 5 * 60 * 1000;
+// we haven't checked in MATRICA_STALENESS_SEC. With ~6k unique owners and
+// an hourly cron at 2 req/s + 800/tick, the initial backlog drains in
+// ~8 ticks (~8 hours); steady-state only re-probes rows aged past 7 days.
+// Pacing inside src/lib/matrica.ts is 2 req/s, so 800 calls ≈ 7 min wallclock
+// (observed ~1.83 actual rps including HTTP latency).
+const MATRICA_PER_TICK_LIMIT = 800;
+const MATRICA_STALENESS_SEC = 7 * 24 * 60 * 60; // 7 days
+// 800 wallets at ~1.83 actual rps ≈ 7min. 8min budget leaves headroom for
+// transient slow responses; cron's curl -m 600 still has 2min of slack.
+const MATRICA_TICK_WALLCLOCK_BUDGET_MS = 8 * 60 * 1000;
 
 const SATFLOW_PAGE_SIZE = 100;
 const SATFLOW_INCREMENTAL_MAX_PAGES = 3;
@@ -1249,8 +1249,13 @@ async function runListingsTick(
  * `inscriptions.current_owner` we haven't checked in MATRICA_STALENESS_SEC,
  * batched at MATRICA_PER_TICK_LIMIT/tick. For each address:
  *   - 200 + user object → upsert matrica_users + wallet_links (linked).
- *   - 400 "Wallet not found" → upsert wallet_links with NULL user_id (so
- *     we don't re-probe before the staleness window elapses).
+ *     If the wallet was previously linked to a different user, the new
+ *     user_id wins (re-link override — fresh signature is real evidence
+ *     of new control).
+ *   - 400 "Wallet not found" on first check → write wallet_links with
+ *     NULL user_id (so we don't re-probe before staleness elapses).
+ *     On a re-probe of an already-linked wallet, the upsert keeps the
+ *     prior user_id (sticky — defeats unlink-to-hide gaming).
  *   - 5xx / network → log and stop the tick (fresh attempt next cron).
  *   - 403 "Invalid plan for enterprise call" → return immediately with
  *     `error` populated; this is an account-level issue, not a transient.
