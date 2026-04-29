@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import type { EventRow, InscriptionRow } from '@/lib/db';
 import { lookupInscription } from '@/lib/inscriptionLookup';
-import { addressLink, formatBtc, formatRelTime, ordinalsLink, truncateAddr } from '@/lib/format';
+import { formatBtc, formatRelTime, ordinalsLink, truncateAddr } from '@/lib/format';
 import EventTimelineRow from './EventTimelineRow';
 
 const COLOR_TILE_BG: Record<string, string> = {
@@ -93,15 +93,14 @@ export default function InscriptionDetail({
             <div className="flex flex-wrap items-baseline gap-x-2">
               <span>owner</span>
               {inscription.current_owner ? (
-                <a
-                  href={addressLink(inscription.current_owner)}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <Link
+                  href={`/holder/${inscription.current_owner}`}
+                  prefetch={false}
                   className="text-bone hover:text-accent-orange normal-case tracking-normal"
                   title={inscription.current_owner}
                 >
                   {truncateAddr(inscription.current_owner, 10, 8)}
-                </a>
+                </Link>
               ) : (
                 <span className="text-bone-dim">—</span>
               )}
@@ -189,15 +188,14 @@ export default function InscriptionDetail({
         <div className="mt-10">
           <div className="font-mono text-[11px] tracking-[0.08em] uppercase text-bone-dim mb-3">
             also held by{' '}
-            <a
-              href={addressLink(inscription.current_owner)}
-              target="_blank"
-              rel="noopener noreferrer"
+            <Link
+              href={`/holder/${inscription.current_owner}`}
+              prefetch={false}
               className="text-bone hover:text-accent-orange normal-case tracking-normal"
               title={inscription.current_owner}
             >
               {truncateAddr(inscription.current_owner, 8, 6)}
-            </a>
+            </Link>
           </div>
           <div className="flex flex-wrap gap-2 items-center">
             {ownerOthers.map(n => {

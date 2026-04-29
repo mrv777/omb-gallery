@@ -5,7 +5,6 @@ import Link from 'next/link';
 import type { ApiEvent } from './types';
 import { lookupInscription } from '@/lib/inscriptionLookup';
 import {
-  addressLink,
   formatBtc,
   formatRelTime,
   marketplaceLabel,
@@ -112,29 +111,27 @@ const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev }: Props)
       {/* Owners */}
       <div className="hidden sm:flex items-center gap-1.5 font-mono text-[11px] text-bone-dim min-w-0">
         {event.old_owner ? (
-          <a
-            href={addressLink(event.old_owner)}
-            target="_blank"
-            rel="noopener noreferrer"
+          <Link
+            href={`/holder/${event.old_owner}`}
+            prefetch={false}
             className="hover:text-accent-orange truncate"
             title={event.old_owner}
           >
             {truncateAddr(event.old_owner)}
-          </a>
+          </Link>
         ) : (
           <span>—</span>
         )}
         <span className="text-bone-dim/60 shrink-0">→</span>
         {event.new_owner ? (
-          <a
-            href={addressLink(event.new_owner)}
-            target="_blank"
-            rel="noopener noreferrer"
+          <Link
+            href={`/holder/${event.new_owner}`}
+            prefetch={false}
             className="hover:text-accent-orange truncate"
             title={event.new_owner}
           >
             {truncateAddr(event.new_owner)}
-          </a>
+          </Link>
         ) : (
           <span>—</span>
         )}

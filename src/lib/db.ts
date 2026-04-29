@@ -8,7 +8,7 @@ import bravocadosInscriptions from '../data/collections/bravocados/inscriptions.
 import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
 
 // OMB-shape entry: filename = "<inscription_number>.jpg|webp", per-color groups.
 type ImageEntry = { filename: string; description: string; tags: string[] };
@@ -89,6 +89,7 @@ function migrate(db: DB): void {
         upgradeV7ToV8(db);
         upgradeV8ToV9(db);
         upgradeV9ToV10(db);
+        upgradeV10ToV11(db);
       } else {
         initSchemaLatest(db);
       }
@@ -102,6 +103,7 @@ function migrate(db: DB): void {
       if (current < 8) upgradeV7ToV8(db);
       if (current < 9) upgradeV8ToV9(db);
       if (current < 10) upgradeV9ToV10(db);
+      if (current < 11) upgradeV10ToV11(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -184,6 +186,10 @@ function initSchemaLatest(db: DB): void {
     -- Covers the typed activity feed: WHERE event_type=? ORDER BY (block_timestamp, id) DESC.
     -- Without this the planner uses idx_events_type_id and sorts in memory.
     CREATE INDEX IF NOT EXISTS idx_events_type_ts_id      ON events (event_type, block_timestamp DESC, id DESC);
+    -- Covers the holder page activity query, which fans out into two indexed
+    -- lookups (UNION'd in SQL): one keyed by new_owner, one by old_owner.
+    CREATE INDEX IF NOT EXISTS idx_events_new_owner_ts_id ON events (new_owner, block_timestamp DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_old_owner_ts_id ON events (old_owner, block_timestamp DESC, id DESC);
 
     -- Composite-PK shape (Phase 4). Per-collection rows for per-collection
     -- streams (satflow, satflow_listings); ord uses a single 'omb' row since
@@ -468,6 +474,17 @@ function upgradeV9ToV10(db: DB): void {
   `);
 }
 
+function upgradeV10ToV11(db: DB): void {
+  // Per-address indexes for /holder/[address]: the page lists events where
+  // the address appears as either side of a transfer/sale, sorted (block_timestamp, id) DESC.
+  // Two single-column composite indexes + UNION ALL beats a single OR predicate
+  // because the planner can't pick one index for a disjunction.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_events_new_owner_ts_id ON events (new_owner, block_timestamp DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_old_owner_ts_id ON events (old_owner, block_timestamp DESC, id DESC);
+  `);
+}
+
 function upgradeV4ToV5(db: DB): void {
   // Round-robin poll order: without this, runOrdTick always polls in
   // inscription_number ASC and breaks at the wallclock budget, so the back
@@ -619,6 +636,9 @@ type Stmts = {
   getInscriptionEvents: ReturnType<DB['prepare']>;
   getAllInscriptionEvents: ReturnType<DB['prepare']>;
   otherInscriptionsByOwner: ReturnType<DB['prepare']>;
+  getInscriptionsByOwner: ReturnType<DB['prepare']>;
+  getEventsByAddress: ReturnType<DB['prepare']>;
+  countEventsByAddress: ReturnType<DB['prepare']>;
   // leaderboards
   topByTransfers: ReturnType<DB['prepare']>;
   topByLongestUnmoved: ReturnType<DB['prepare']>;
@@ -915,6 +935,42 @@ export function getStmts(): Stmts {
         AND collection_slug = @collection
       ORDER BY inscription_number
       LIMIT @limit
+    `),
+
+    // Holder profile: every inscription this address currently owns in a given
+    // collection. Walks idx_insc_owner; the per-collection filter narrows the
+    // result via idx_insc_collection. Returns inscription_number ASC for stable
+    // grid ordering across reloads.
+    getInscriptionsByOwner: db.prepare(`
+      SELECT * FROM inscriptions
+      WHERE current_owner = @owner
+        AND collection_slug = @collection
+      ORDER BY inscription_number ASC
+    `),
+
+    // Holder profile: events where the address shows up on either side of a
+    // transfer/sale, sorted (block_timestamp, id) DESC. UNION ALL'd two indexed
+    // lookups (one per owner side) since SQLite won't pick a single index for
+    // the disjunction `new_owner=? OR old_owner=?`. Outer ORDER BY does the
+    // merge — at the LIMIT we use here (50) the cost is negligible.
+    getEventsByAddress: db.prepare(`
+      SELECT * FROM (
+        SELECT * FROM events WHERE new_owner = @owner
+        UNION ALL
+        SELECT * FROM events WHERE old_owner = @owner AND old_owner != COALESCE(new_owner, '')
+      )
+      ORDER BY block_timestamp DESC, id DESC
+      LIMIT @limit
+    `),
+
+    // Total event count for a holder (powers the "N events" stat). Same shape
+    // as getEventsByAddress but COUNT-only — keeps the page from doing the
+    // count client-side over a capped events list.
+    countEventsByAddress: db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM events WHERE new_owner = @owner)
+        + (SELECT COUNT(*) FROM events WHERE old_owner = @owner AND old_owner != COALESCE(new_owner, ''))
+        AS n
     `),
 
     topByTransfers: db.prepare(`

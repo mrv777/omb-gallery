@@ -33,11 +33,11 @@ afterEach(() => {
   }
 });
 
-describe('schema v10 — collections + backfill_state + poll_state composite PK + typed-feed index', () => {
-  it('reaches user_version 10', () => {
+describe('schema v11 — collections + backfill_state + poll_state composite PK + typed-feed index + holder-page indexes', () => {
+  it('reaches user_version 11', () => {
     const db = dbModule.getDb();
     const ver = db.pragma('user_version', { simple: true });
-    expect(ver).toBe(10);
+    expect(ver).toBe(11);
   });
 
   it('creates idx_events_type_ts_id covering the typed activity feed sort', () => {
@@ -48,6 +48,108 @@ describe('schema v10 — collections + backfill_state + poll_state composite PK 
       )
       .get();
     expect(idx).toBeDefined();
+  });
+
+  it('creates idx_events_new_owner_ts_id + idx_events_old_owner_ts_id for the holder page', () => {
+    const db = dbModule.getDb();
+    const rows = db
+      .prepare(
+        `SELECT name FROM sqlite_master
+         WHERE type='index'
+           AND name IN ('idx_events_new_owner_ts_id', 'idx_events_old_owner_ts_id')
+         ORDER BY name`
+      )
+      .all() as Array<{ name: string }>;
+    expect(rows.map(r => r.name)).toEqual([
+      'idx_events_new_owner_ts_id',
+      'idx_events_old_owner_ts_id',
+    ]);
+  });
+
+  it('getInscriptionsByOwner returns only that collection', () => {
+    const db = dbModule.getDb();
+    const stmts = dbModule.getStmts();
+    // Pick an arbitrary OMB row + Bravocados row, assign them the same fake owner.
+    const omb = db
+      .prepare(
+        `SELECT inscription_number FROM inscriptions WHERE collection_slug='omb' LIMIT 1`
+      )
+      .get() as { inscription_number: number };
+    const bra = db
+      .prepare(
+        `SELECT inscription_number FROM inscriptions WHERE collection_slug='bravocados' LIMIT 1`
+      )
+      .get() as { inscription_number: number };
+    const owner = 'bc1qtestholderxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
+    db.prepare(`UPDATE inscriptions SET current_owner=? WHERE inscription_number=?`).run(
+      owner,
+      omb.inscription_number
+    );
+    db.prepare(`UPDATE inscriptions SET current_owner=? WHERE inscription_number=?`).run(
+      owner,
+      bra.inscription_number
+    );
+
+    const ombRows = stmts.getInscriptionsByOwner.all({ owner, collection: 'omb' }) as Array<{
+      inscription_number: number;
+      collection_slug: string;
+    }>;
+    const braRows = stmts.getInscriptionsByOwner.all({
+      owner,
+      collection: 'bravocados',
+    }) as Array<{ inscription_number: number; collection_slug: string }>;
+
+    expect(ombRows.map(r => r.inscription_number)).toEqual([omb.inscription_number]);
+    expect(braRows.map(r => r.inscription_number)).toEqual([bra.inscription_number]);
+    expect(ombRows.every(r => r.collection_slug === 'omb')).toBe(true);
+    expect(braRows.every(r => r.collection_slug === 'bravocados')).toBe(true);
+  });
+
+  it('getEventsByAddress returns events on either side without double-counting self-transfers', () => {
+    const db = dbModule.getDb();
+    const stmts = dbModule.getStmts();
+    const insc = db
+      .prepare(
+        `SELECT inscription_number, inscription_id FROM inscriptions WHERE collection_slug='omb' LIMIT 1`
+      )
+      .get() as { inscription_number: number; inscription_id: string | null };
+    const wallet = 'bc1qaliceeventtestxxxxxxxxxxxxxxxxxxxxxxxx';
+    const counterparty = 'bc1qbobxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
+
+    // Backfill an inscription_id if one isn't seeded yet (UNIQUE constraint
+    // requires non-null txid + inscription_id on events).
+    const inscriptionId = insc.inscription_id ?? `seed-${insc.inscription_number}i0`;
+    if (!insc.inscription_id) {
+      db.prepare(`UPDATE inscriptions SET inscription_id=? WHERE inscription_number=?`).run(
+        inscriptionId,
+        insc.inscription_number
+      );
+    }
+
+    const insertEvent = db.prepare(`
+      INSERT INTO events (
+        inscription_id, inscription_number, event_type,
+        block_height, block_timestamp, txid, old_owner, new_owner
+      )
+      VALUES (?, ?, 'transferred', 100, ?, ?, ?, ?)
+    `);
+    // Outgoing: wallet → counterparty
+    insertEvent.run(inscriptionId, insc.inscription_number, 1000, 'tx-out', wallet, counterparty);
+    // Incoming: counterparty → wallet
+    insertEvent.run(inscriptionId, insc.inscription_number, 2000, 'tx-in', counterparty, wallet);
+    // Self-transfer (rare but possible): wallet → wallet — must appear once, not twice.
+    insertEvent.run(inscriptionId, insc.inscription_number, 3000, 'tx-self', wallet, wallet);
+
+    const rows = stmts.getEventsByAddress.all({ owner: wallet, limit: 50 }) as Array<{
+      txid: string;
+      block_timestamp: number;
+    }>;
+    const txids = rows.map(r => r.txid);
+    expect(txids).toEqual(['tx-self', 'tx-in', 'tx-out']); // sorted DESC by block_timestamp
+    expect(txids.length).toBe(new Set(txids).size); // no duplicates
+
+    const total = (stmts.countEventsByAddress.get({ owner: wallet }) as { n: number }).n;
+    expect(total).toBe(3);
   });
 
   it('seeds poll_state with composite (stream, collection_slug) rows', () => {

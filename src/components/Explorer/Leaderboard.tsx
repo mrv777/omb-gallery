@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { LEADERBOARDS, type LeaderboardKey } from './types';
 import { lookupInscription } from '@/lib/inscriptionLookup';
-import { addressLink, formatBtc, formatRelTime, truncateAddr } from '@/lib/format';
+import { formatBtc, formatRelTime, truncateAddr } from '@/lib/format';
 import type { ApiHolder, ApiInscription } from '@/components/Activity/types';
 
 type Props = {
@@ -93,20 +93,23 @@ function InscriptionRow({
 
 function HolderRow({ row, rank }: { row: ApiHolder; rank: number }) {
   return (
-    <li className="grid grid-cols-[1.5rem_1fr_auto] items-center gap-3 px-4 py-2">
-      <span className="font-mono text-[11px] text-bone-dim tabular-nums">{rank}</span>
-      <a
-        href={addressLink(row.wallet_addr)}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="font-mono text-xs text-bone truncate hover:text-accent-orange"
-        title={row.wallet_addr}
+    <li>
+      <Link
+        href={`/holder/${row.wallet_addr}`}
+        prefetch={false}
+        className="grid grid-cols-[1.5rem_1fr_auto] items-center gap-3 px-4 py-2 hover:bg-ink-2 transition-colors"
       >
-        {truncateAddr(row.wallet_addr, 8, 6)}
-      </a>
-      <span className="font-mono text-xs text-bone tabular-nums whitespace-nowrap">
-        {row.inscription_count.toLocaleString()}
-      </span>
+        <span className="font-mono text-[11px] text-bone-dim tabular-nums">{rank}</span>
+        <span
+          className="font-mono text-xs text-bone truncate"
+          title={row.wallet_addr}
+        >
+          {truncateAddr(row.wallet_addr, 8, 6)}
+        </span>
+        <span className="font-mono text-xs text-bone tabular-nums whitespace-nowrap">
+          {row.inscription_count.toLocaleString()}
+        </span>
+      </Link>
     </li>
   );
 }

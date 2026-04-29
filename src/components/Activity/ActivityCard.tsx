@@ -1,10 +1,10 @@
 'use client';
 
 import { memo } from 'react';
+import Link from 'next/link';
 import type { ApiEvent } from './types';
 import { lookupInscription } from '@/lib/inscriptionLookup';
 import {
-  addressLink,
   formatBtc,
   formatRelTime,
   marketplaceLabel,
@@ -90,29 +90,27 @@ const ActivityCard = memo(function ActivityCard({ event }: Props) {
       {showOwners && (
         <div className="px-3 pb-3 font-mono text-[10px] tracking-normal text-bone-dim normal-case truncate">
           {event.old_owner ? (
-            <a
-              href={addressLink(event.old_owner)}
-              target="_blank"
-              rel="noopener noreferrer"
+            <Link
+              href={`/holder/${event.old_owner}`}
+              prefetch={false}
               className="hover:text-accent-orange"
               title={event.old_owner}
             >
               {truncateAddr(event.old_owner)}
-            </a>
+            </Link>
           ) : (
             <span>—</span>
           )}
           <span> → </span>
           {event.new_owner ? (
-            <a
-              href={addressLink(event.new_owner)}
-              target="_blank"
-              rel="noopener noreferrer"
+            <Link
+              href={`/holder/${event.new_owner}`}
+              prefetch={false}
               className="hover:text-accent-orange"
               title={event.new_owner}
             >
               {truncateAddr(event.new_owner)}
-            </a>
+            </Link>
           ) : (
             <span>—</span>
           )}
