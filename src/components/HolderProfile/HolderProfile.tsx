@@ -54,9 +54,7 @@ export default function HolderProfile({
   const ombHidden = ombHoldings.length - ombShown.length;
   const bravoShown = bravoHoldings.slice(0, BRAVO_TILE_CAP);
   const bravoHidden = bravoHoldings.length - bravoShown.length;
-  const isAggregated = wallets.length > 1;
-  // Sibling wallets — every linked wallet other than the URL address.
-  const otherWallets = wallets.filter(w => w !== address);
+  const linked = !!username;
 
   return (
     <section className="px-4 sm:px-6 pb-16 max-w-6xl mx-auto">
@@ -68,87 +66,72 @@ export default function HolderProfile({
       </Link>
 
       <div className="border border-ink-2 bg-ink-1 px-4 sm:px-5 py-4 mb-8 font-mono">
-        {/* Matrica identity header — shown when a username is known. */}
-        {username && (
-          <div className="flex items-center gap-3 mb-3">
-            {avatarUrl && (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img
-                src={avatarUrl}
-                alt=""
-                loading="lazy"
-                className="w-10 h-10 rounded-sm bg-ink-2 object-cover"
-              />
-            )}
-            <div className="min-w-0">
-              <h1 className="text-base sm:text-lg text-bone normal-case tracking-normal truncate">
-                {username}
-              </h1>
-              <div className="text-[10px] text-bone-dim tracking-[0.08em] uppercase">
-                via matrica · {wallets.length} wallet{wallets.length === 1 ? '' : 's'}
+        {linked ? (
+          // ── User-centric header. Address is incidental (we got here via
+          // one of N wallets); the wallets list below treats them all as peers.
+          <>
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div className="flex items-center gap-3 min-w-0">
+                {avatarUrl && (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={avatarUrl}
+                    alt=""
+                    loading="lazy"
+                    className="w-10 h-10 rounded-sm bg-ink-2 object-cover shrink-0"
+                  />
+                )}
+                <div className="min-w-0">
+                  <h1 className="text-base sm:text-lg text-bone normal-case tracking-normal truncate">
+                    {username}
+                  </h1>
+                  <div className="text-[10px] text-bone-dim tracking-[0.08em] uppercase">
+                    via matrica
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        )}
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2">
-          <h1
-            className={`tabular-nums text-bone ${
-              username ? 'text-sm text-bone-dim' : 'text-lg sm:text-xl'
-            }`}
-          >
-            {truncateAddr(address, 10, 8)}
-          </h1>
-        </div>
-        <div className="text-[10px] tracking-normal text-bone-dim break-all mb-4 normal-case select-all">
-          {address}
-        </div>
-        {/* Linked wallets disclosure. Only renders when the user has more
-            than one wallet linked. Each is a deep-link to its own /holder
-            page, which renders the same aggregated view (we lookup user
-            from any wallet in the set). */}
-        {isAggregated && otherWallets.length > 0 && (
-          <div className="mb-4">
-            <div className="text-[10px] tracking-[0.12em] uppercase text-bone-dim mb-1.5">
-              also linked
+            <dl className="grid grid-cols-3 gap-x-4 text-[11px] tracking-[0.08em] uppercase text-bone-dim mb-4">
+              <Stat label="OMB" value={ombHoldings.length.toLocaleString()} />
+              <Stat label="bravocados" value={bravoHoldings.length.toLocaleString()} />
+              <Stat label="events" value={eventTotal.toLocaleString()} />
+            </dl>
+            <WalletsList wallets={wallets} current={address} />
+          </>
+        ) : (
+          // ── Wallet-centric header (no Matrica profile). Today's layout.
+          <>
+            <h1 className="tabular-nums text-bone text-lg sm:text-xl mb-2">
+              {truncateAddr(address, 10, 8)}
+            </h1>
+            <div className="text-[10px] tracking-normal text-bone-dim break-all mb-4 normal-case select-all">
+              {address}
             </div>
-            <div className="flex flex-wrap gap-2">
-              {otherWallets.map(w => (
-                <Link
-                  key={w}
-                  href={`/holder/${w}`}
-                  prefetch={false}
-                  className="inline-block border border-ink-2 hover:border-bone-dim px-2 py-1 text-[10px] text-bone-dim hover:text-bone tabular-nums normal-case tracking-normal"
-                  title={w}
-                >
-                  {truncateAddr(w, 8, 6)}
-                </Link>
-              ))}
+            <dl className="grid grid-cols-3 gap-x-4 text-[11px] tracking-[0.08em] uppercase text-bone-dim mb-4">
+              <Stat label="OMB" value={ombHoldings.length.toLocaleString()} />
+              <Stat label="bravocados" value={bravoHoldings.length.toLocaleString()} />
+              <Stat label="events" value={eventTotal.toLocaleString()} />
+            </dl>
+            <div className="flex flex-wrap gap-2 text-[10px] tracking-[0.12em] uppercase">
+              <a
+                href={ordNetWalletLink(address)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
+              >
+                ord.net ↗
+              </a>
+              <a
+                href={addressLink(address)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
+              >
+                ord.io ↗
+              </a>
             </div>
-          </div>
+          </>
         )}
-        <dl className="grid grid-cols-3 gap-x-4 text-[11px] tracking-[0.08em] uppercase text-bone-dim mb-4">
-          <Stat label="OMB" value={ombHoldings.length.toLocaleString()} />
-          <Stat label="bravocados" value={bravoHoldings.length.toLocaleString()} />
-          <Stat label="events" value={eventTotal.toLocaleString()} />
-        </dl>
-        <div className="flex flex-wrap gap-2 text-[10px] tracking-[0.12em] uppercase">
-          <a
-            href={ordNetWalletLink(address)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
-          >
-            ord.net ↗
-          </a>
-          <a
-            href={addressLink(address)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
-          >
-            ord.io ↗
-          </a>
-        </div>
       </div>
 
       {/* OMB holdings — primary surface */}
@@ -452,6 +435,79 @@ function Stat({ label, value }: { label: string; value: string }) {
     <div>
       <dt className="text-bone-dim">{label}</dt>
       <dd className="text-bone normal-case tracking-normal tabular-nums mt-0.5">{value}</dd>
+    </div>
+  );
+}
+
+/**
+ * Wallet list for a Matrica-linked user. One row per wallet, all peers —
+ * the URL-current wallet is just visually marked, not given a different
+ * treatment. Each row has its own ord.net / ord.io action buttons since
+ * those external explorers are wallet-scoped.
+ *
+ * The address itself is rendered as a Link to that wallet's `/holder`
+ * page; clicking a sibling navigates there (and that page renders the
+ * same aggregated user view, with the new wallet as "current").
+ */
+function WalletsList({ wallets, current }: { wallets: string[]; current: string }) {
+  return (
+    <div>
+      <div className="text-[10px] tracking-[0.12em] uppercase text-bone-dim mb-2">
+        wallets · {wallets.length}
+      </div>
+      <ul className="divide-y divide-ink-2 border border-ink-2">
+        {wallets.map(w => {
+          const isCurrent = w === current;
+          return (
+            <li
+              key={w}
+              className={`flex items-center gap-2 sm:gap-3 px-3 py-2 ${
+                isCurrent ? 'bg-ink-2/40' : ''
+              }`}
+            >
+              {/* Leading dot marks the URL-current wallet. Rendered for
+                  every row so columns align. */}
+              <span
+                aria-hidden
+                className={`block w-1.5 h-1.5 rounded-full shrink-0 ${
+                  isCurrent ? 'bg-accent-orange' : 'bg-transparent'
+                }`}
+              />
+              <Link
+                href={`/holder/${w}`}
+                prefetch={false}
+                className="font-mono text-xs text-bone hover:text-accent-orange tabular-nums truncate min-w-0"
+                title={w}
+              >
+                {truncateAddr(w, 10, 8)}
+              </Link>
+              {isCurrent && (
+                <span className="hidden sm:inline font-mono text-[9px] tracking-[0.12em] uppercase text-bone-dim shrink-0">
+                  viewing
+                </span>
+              )}
+              <span className="ml-auto flex items-center gap-1.5 shrink-0">
+                <a
+                  href={ordNetWalletLink(w)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="border border-ink-2 hover:border-bone-dim px-1.5 py-0.5 text-[9px] tracking-[0.12em] uppercase text-bone-dim hover:text-bone"
+                >
+                  ord.net ↗
+                </a>
+                <a
+                  href={addressLink(w)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="border border-ink-2 hover:border-bone-dim px-1.5 py-0.5 text-[9px] tracking-[0.12em] uppercase text-bone-dim hover:text-bone"
+                >
+                  ord.io ↗
+                </a>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
