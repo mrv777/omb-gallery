@@ -59,6 +59,7 @@ const SlideshowControls = memo(function SlideshowControls({
 
   return (
     <div
+      data-slideshow-chrome=""
       className={`absolute bottom-0 left-0 right-0 transition-opacity duration-300 px-3 pb-4 pt-10 bg-gradient-to-t from-ink-0 via-ink-0/70 to-transparent ${
         visible ? 'opacity-100' : 'opacity-0 pointer-events-none'
       }`}

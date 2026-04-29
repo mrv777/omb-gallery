@@ -163,13 +163,19 @@ const VirtualRow = memo(
         if (!touchStart.current) return;
         if (e.touches.length > 1) {
           cancelLongPress();
+          touchStart.current = null;
           return;
         }
         const t = e.touches[0];
         if (!t) return;
         const dx = t.clientX - touchStart.current.x;
         const dy = t.clientY - touchStart.current.y;
-        if (Math.hypot(dx, dy) > MOVE_CANCEL_PX) cancelLongPress();
+        if (Math.hypot(dx, dy) > MOVE_CANCEL_PX) {
+          cancelLongPress();
+          // Clearing touchStart here ensures a fast scroll-then-release within
+          // TAP_MAX_MS doesn't fall into the tap branch in handleTouchEnd.
+          touchStart.current = null;
+        }
       },
       [cancelLongPress]
     );

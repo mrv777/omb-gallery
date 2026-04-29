@@ -22,6 +22,7 @@ export default function SaveToFavoritesButton({ srcs, visible }: Props) {
 
   return (
     <div
+      data-slideshow-chrome=""
       className={`absolute top-14 right-4 sm:top-16 sm:right-6 transition-opacity duration-300 ${
         visible ? 'opacity-100' : 'opacity-0 pointer-events-none'
       }`}

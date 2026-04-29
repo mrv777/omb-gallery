@@ -286,6 +286,16 @@ export default function Slideshow({
   // Touch swipe
   const touchStart = useRef<{ x: number; y: number; controlsWereVisible: boolean } | null>(null);
   const onTouchStart = (e: React.TouchEvent) => {
+    // Touches that originate inside interactive chrome (controls bar, share
+    // dialog, top-chrome links, save-to-favorites) shouldn't drive the
+    // root-level swipe / tap-toggle handler — those elements have their own
+    // click/tap UX and the synthetic click would otherwise toggle play as a
+    // side effect.
+    const target = e.target as HTMLElement | null;
+    if (target?.closest('[data-slideshow-chrome]')) {
+      touchStart.current = null;
+      return;
+    }
     const t = e.touches[0];
     touchStart.current = {
       x: t.clientX,
@@ -369,6 +379,7 @@ export default function Slideshow({
 
       {/* Top chrome — title + position */}
       <div
+        data-slideshow-chrome=""
         className={`absolute top-0 left-0 right-0 px-4 sm:px-6 py-3 font-mono text-[11px] tracking-[0.12em] uppercase flex items-center gap-3 bg-gradient-to-b from-ink-0/80 to-transparent transition-opacity duration-300 ${
           controlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}

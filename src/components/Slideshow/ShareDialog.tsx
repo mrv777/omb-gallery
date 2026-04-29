@@ -176,6 +176,7 @@ export default function ShareDialog({ ids, defaultTitle, onClose }: Props) {
 
   return (
     <div
+      data-slideshow-chrome=""
       className="fixed inset-0 z-[2000] bg-ink-0/80 backdrop-blur-sm flex items-center justify-center px-4"
       onClick={onClose}
     >
