@@ -9,7 +9,11 @@ const MAX_LIMIT = 100;
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-  const limit = clamp(parseInt(url.searchParams.get('limit') ?? '', 10) || DEFAULT_LIMIT, 1, MAX_LIMIT);
+  const limit = clamp(
+    parseInt(url.searchParams.get('limit') ?? '', 10) || DEFAULT_LIMIT,
+    1,
+    MAX_LIMIT
+  );
   // Cursor format: "<block_timestamp>:<id>" (composite keyset). Older single-int
   // cursors (legacy clients) are silently dropped — they'd order by id and
   // produce wrong results against the new (block_timestamp, id) ordering.

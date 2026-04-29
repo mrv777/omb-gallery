@@ -301,7 +301,7 @@ function upgradeV2ToV3(db: DB): void {
   // to write phantom transfers from stale satpoints.
   // Idempotent: skip if column already exists (defensive against partial runs).
   const cols = db.pragma('table_info(poll_state)') as Array<{ name: string }>;
-  if (!cols.some((c) => c.name === 'last_known_height')) {
+  if (!cols.some(c => c.name === 'last_known_height')) {
     db.exec(`ALTER TABLE poll_state ADD COLUMN last_known_height INTEGER`);
   }
 }
@@ -362,8 +362,10 @@ function upgradeV6ToV7(db: DB): void {
   // is_backfilling flag clears before ord bootstrap could rescue it.
   // Idempotent: skip if column already exists.
   const cols = db.pragma('table_info(poll_state)') as Array<{ name: string }>;
-  if (!cols.some((c) => c.name === 'backfill_unresolved_seen')) {
-    db.exec(`ALTER TABLE poll_state ADD COLUMN backfill_unresolved_seen INTEGER NOT NULL DEFAULT 0`);
+  if (!cols.some(c => c.name === 'backfill_unresolved_seen')) {
+    db.exec(
+      `ALTER TABLE poll_state ADD COLUMN backfill_unresolved_seen INTEGER NOT NULL DEFAULT 0`
+    );
   }
 }
 
@@ -386,14 +388,18 @@ function upgradeV7ToV8(db: DB): void {
   `);
 
   const cols = db.pragma('table_info(inscriptions)') as Array<{ name: string }>;
-  if (!cols.some((c) => c.name === 'collection_slug')) {
-    db.exec(`ALTER TABLE inscriptions ADD COLUMN collection_slug TEXT REFERENCES collections (slug)`);
+  if (!cols.some(c => c.name === 'collection_slug')) {
+    db.exec(
+      `ALTER TABLE inscriptions ADD COLUMN collection_slug TEXT REFERENCES collections (slug)`
+    );
   }
   // Backfill the column for every existing row. Every inscription in the DB
   // today is an OMB by definition (collections/omb/inscriptions.json is the
   // only seed source pre-Phase 4).
   db.exec(`UPDATE inscriptions SET collection_slug = 'omb' WHERE collection_slug IS NULL`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_insc_collection ON inscriptions (collection_slug, inscription_number)`);
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_insc_collection ON inscriptions (collection_slug, inscription_number)`
+  );
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS backfill_state (
@@ -456,7 +462,7 @@ function upgradeV4ToV5(db: DB): void {
   // catches up over a few ticks even when one tick doesn't fit them all.
   // Idempotent: skip if column already exists.
   const cols = db.pragma('table_info(inscriptions)') as Array<{ name: string }>;
-  if (!cols.some((c) => c.name === 'last_polled_at')) {
+  if (!cols.some(c => c.name === 'last_polled_at')) {
     db.exec(`ALTER TABLE inscriptions ADD COLUMN last_polled_at INTEGER NOT NULL DEFAULT 0`);
   }
 }
@@ -506,9 +512,10 @@ function seedInscriptions(db: DB): void {
   // matches the registry total — that's the hot path on every server boot.
   let candidateCount = 0;
   for (const c of COLLECTIONS) {
-    candidateCount += c.manifest.shape === 'flat'
-      ? (c.data as FlatEntry[]).length
-      : Object.values(c.data as ImagesByColor).reduce((n, list) => n + list.length, 0);
+    candidateCount +=
+      c.manifest.shape === 'flat'
+        ? (c.data as FlatEntry[]).length
+        : Object.values(c.data as ImagesByColor).reduce((n, list) => n + list.length, 0);
   }
   const existing = db.prepare('SELECT COUNT(*) AS n FROM inscriptions').get() as { n: number };
   if (existing.n >= candidateCount) return;
@@ -534,7 +541,6 @@ function seedInscriptions(db: DB): void {
   `);
   const tx = db.transaction(() => {
     for (const { manifest, data } of COLLECTIONS) {
-
       if (manifest.shape === 'flat') {
         for (const entry of data as FlatEntry[]) {
           if (entry.inscription_number == null) continue; // skip rows we couldn't number

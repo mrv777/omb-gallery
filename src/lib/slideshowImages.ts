@@ -8,9 +8,10 @@ export type SlideshowImage = {
   caption: string;
 };
 
-export function resolveSlideshowImages(
-  ids: string[],
-): { images: SlideshowImage[]; missing: number } {
+export function resolveSlideshowImages(ids: string[]): {
+  images: SlideshowImage[];
+  missing: number;
+} {
   const images: SlideshowImage[] = [];
   let missing = 0;
   for (const idStr of ids) {

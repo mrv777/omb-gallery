@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { GalleryImage } from '@/lib/types';
 import VirtualizedZoomGrid from '@/components/VirtualizedZoomGrid';
@@ -79,7 +79,7 @@ export default function Home() {
 
   const handlePreloadComplete = () => {
     setPreloading(false);
-    
+
     // Save preload status to localStorage
     try {
       localStorage.setItem(PRELOAD_CACHE_KEY, 'completed');
@@ -87,7 +87,7 @@ export default function Home() {
       console.warn('Could not save to localStorage:', error);
     }
   };
-  
+
   // Show nothing while checking cache (prevents flash)
   if (preloading === null) {
     return (
@@ -111,4 +111,4 @@ export default function Home() {
       )}
     </main>
   );
-} 
+}

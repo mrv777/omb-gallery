@@ -9,11 +9,7 @@
  * — that gives us coverage of the entire pipeline, not just the pickX helpers.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  fetchListingsPage,
-  fetchSalesPage,
-  _resetRateLimitForTest,
-} from '../src/lib/satflow';
+import { fetchListingsPage, fetchSalesPage, _resetRateLimitForTest } from '../src/lib/satflow';
 
 type FetchStub = (...args: Parameters<typeof fetch>) => Promise<Response>;
 const originalFetch = globalThis.fetch;
@@ -61,9 +57,7 @@ describe('fetchSalesPage', () => {
   };
 
   it('parses a typical ask-orderType sale', async () => {
-    stubFetch(async () =>
-      jsonResponse({ data: { sales: [baseAsk], total: 1, _meta: { ms: 1 } } })
-    );
+    stubFetch(async () => jsonResponse({ data: { sales: [baseAsk], total: 1, _meta: { ms: 1 } } }));
     const res = await fetchSalesPage({ collectionSlug: 'omb' });
     expect(res.items).toHaveLength(1);
     const s = res.items[0];
@@ -147,9 +141,7 @@ describe('fetchSalesPage', () => {
   });
 
   it('reports hasMore correctly when last page is partial', async () => {
-    stubFetch(async () =>
-      jsonResponse({ data: { sales: Array(10).fill(baseAsk), total: 30 } })
-    );
+    stubFetch(async () => jsonResponse({ data: { sales: Array(10).fill(baseAsk), total: 30 } }));
     const res = await fetchSalesPage({ collectionSlug: 'omb', page: 1, pageSize: 100 });
     expect(res.hasMore).toBe(false); // got 10 < pageSize=100
   });
@@ -200,9 +192,7 @@ describe('fetchListingsPage', () => {
   };
 
   it('parses an active listing', async () => {
-    stubFetch(async () =>
-      jsonResponse({ data: { listings: [baseListing], total: 1 } })
-    );
+    stubFetch(async () => jsonResponse({ data: { listings: [baseListing], total: 1 } }));
     const res = await fetchListingsPage({ collectionSlug: 'omb' });
     expect(res.items).toHaveLength(1);
     const l = res.items[0];
@@ -215,9 +205,7 @@ describe('fetchListingsPage', () => {
 
   it('skips listings that have already been cancelled', async () => {
     const cancelled = { ...baseListing, cancelledAt: '2026-04-27T16:00:00.000Z' };
-    stubFetch(async () =>
-      jsonResponse({ data: { listings: [cancelled], total: 1 } })
-    );
+    stubFetch(async () => jsonResponse({ data: { listings: [cancelled], total: 1 } }));
     const res = await fetchListingsPage({ collectionSlug: 'omb' });
     expect(res.items).toHaveLength(0);
   });
@@ -225,27 +213,26 @@ describe('fetchListingsPage', () => {
   it('skips listings already filled or pending fill', async () => {
     const filled = { ...baseListing, fillCompletedAt: '2026-04-27T16:00:00.000Z' };
     const pending = { ...baseListing, id: 'pending', fillPendingAt: '2026-04-27T16:00:00.000Z' };
-    stubFetch(async () =>
-      jsonResponse({ data: { listings: [filled, pending], total: 2 } })
-    );
+    stubFetch(async () => jsonResponse({ data: { listings: [filled, pending], total: 2 } }));
     const res = await fetchListingsPage({ collectionSlug: 'omb' });
     expect(res.items).toHaveLength(0);
   });
 
   it('skips listings flagged invalid (UTXO spent)', async () => {
     const invalid = { ...baseListing, invalidAt: '2026-04-27T15:31:00.000Z' };
-    stubFetch(async () =>
-      jsonResponse({ data: { listings: [invalid], total: 1 } })
-    );
+    stubFetch(async () => jsonResponse({ data: { listings: [invalid], total: 1 } }));
     const res = await fetchListingsPage({ collectionSlug: 'omb' });
     expect(res.items).toHaveLength(0);
   });
 
   it('skips bid-orderType records (they are buy offers, not listings)', async () => {
-    const bid = { ...baseListing, orderType: 'bid', ask: undefined, bid: { inscriptionId: 'x', price: 1, sellerOrdAddress: 'y' } };
-    stubFetch(async () =>
-      jsonResponse({ data: { listings: [bid], total: 1 } })
-    );
+    const bid = {
+      ...baseListing,
+      orderType: 'bid',
+      ask: undefined,
+      bid: { inscriptionId: 'x', price: 1, sellerOrdAddress: 'y' },
+    };
+    stubFetch(async () => jsonResponse({ data: { listings: [bid], total: 1 } }));
     const res = await fetchListingsPage({ collectionSlug: 'omb' });
     expect(res.items).toHaveLength(0);
   });

@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -47,15 +47,8 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
   const { isFavorite } = useFavorites();
 
   // Zoom state
-  const {
-    columnCount,
-    maxColumnCount,
-    handleZoomGesture,
-    zoomIn,
-    zoomOut,
-    canZoomIn,
-    canZoomOut,
-  } = useZoomLevel();
+  const { columnCount, maxColumnCount, handleZoomGesture, zoomIn, zoomOut, canZoomIn, canZoomOut } =
+    useZoomLevel();
 
   // Container ref and dimensions
   const parentRef = useRef<HTMLDivElement>(null);
@@ -86,14 +79,11 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
   // branch. Toggling a heart with no filters active keeps filteredImages
   // referentially equal, letting VirtualRow.memo skip re-renders.
   const baseFiltered = useMemo(() => {
-    let filtered =
-      colorFilter === 'all'
-        ? images
-        : images.filter((img) => img.color === colorFilter);
+    let filtered = colorFilter === 'all' ? images : images.filter(img => img.color === colorFilter);
 
     if (debouncedSearchQuery.trim() !== '') {
       const q = debouncedSearchQuery.toLowerCase();
-      filtered = filtered.filter((img) => img.searchText.includes(q));
+      filtered = filtered.filter(img => img.searchText.includes(q));
     }
 
     return filtered;
@@ -101,7 +91,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
 
   const filteredImages = useMemo(() => {
     if (!showFavoritesOnly) return baseFiltered;
-    return baseFiltered.filter((img) => isFavorite(img.src));
+    return baseFiltered.filter(img => isFavorite(img.src));
   }, [baseFiltered, showFavoritesOnly, isFavorite]);
 
   const playHref = useMemo<string | null>(() => {
@@ -166,17 +156,15 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
   }, []);
 
   const handleToggleFavoritesOnly = useCallback(() => {
-    setShowFavoritesOnly((prev) => !prev);
+    setShowFavoritesOnly(prev => !prev);
   }, []);
 
   const handleMovePrev = useCallback(() => {
-    setCurrentImage((prev) =>
-      (prev - 1 + filteredImages.length) % filteredImages.length
-    );
+    setCurrentImage(prev => (prev - 1 + filteredImages.length) % filteredImages.length);
   }, [filteredImages.length]);
 
   const handleMoveNext = useCallback(() => {
-    setCurrentImage((prev) => (prev + 1) % filteredImages.length);
+    setCurrentImage(prev => (prev + 1) % filteredImages.length);
   }, [filteredImages.length]);
 
   // Reset current image if filtered images change and current image is out of bounds.
@@ -214,9 +202,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
       const target = e.target as HTMLElement | null;
       const typing =
         target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.isContentEditable);
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
 
       if (e.key === '/' && !typing) {
         e.preventDefault();
@@ -323,7 +309,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
               position: 'relative',
             }}
           >
-            {rowVirtualizer.getVirtualItems().map((virtualRow) => (
+            {rowVirtualizer.getVirtualItems().map(virtualRow => (
               <VirtualRow
                 key={virtualRow.key}
                 rowIndex={virtualRow.index}

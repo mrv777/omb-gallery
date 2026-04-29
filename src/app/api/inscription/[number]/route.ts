@@ -1,18 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  getStmts,
-  type EventRow,
-  type InscriptionRow,
-  type ActiveListingRow,
-} from '@/lib/db';
+import { getStmts, type EventRow, type InscriptionRow, type ActiveListingRow } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function GET(
-  req: NextRequest,
-  ctx: { params: Promise<{ number: string }> }
-) {
+export async function GET(req: NextRequest, ctx: { params: Promise<{ number: string }> }) {
   const { number: numStr } = await ctx.params;
   const num = parseInt(numStr, 10);
   if (!Number.isFinite(num)) {

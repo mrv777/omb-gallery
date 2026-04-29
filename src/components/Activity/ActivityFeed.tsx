@@ -21,7 +21,7 @@ export default function ActivityFeed() {
     const el = sentinelRef.current;
     if (!el) return;
     const observer = new IntersectionObserver(
-      (entries) => {
+      entries => {
         for (const entry of entries) {
           if (entry.isIntersecting) loadMore();
         }
@@ -70,7 +70,9 @@ export default function ActivityFeed() {
           {poll?.is_backfilling && (
             <span className="text-accent-orange">· backfilling history</span>
           )}
-          {poll && poll.last_status && poll.last_status !== 'ok' && (
+          {poll &&
+            poll.last_status &&
+            poll.last_status !== 'ok' &&
             (() => {
               // 404 on a specific inscription means ord hasn't reached its
               // reveal block yet — expected during IBD, not an error.
@@ -86,8 +88,7 @@ export default function ActivityFeed() {
                     : `poll error: ${poll.last_status.slice(0, 80)}`}
                 </span>
               );
-            })()
-          )}
+            })()}
         </div>
 
         <div
@@ -95,7 +96,7 @@ export default function ActivityFeed() {
           aria-label="Filter activity"
           className="flex items-center gap-1 font-mono text-[11px] tracking-[0.12em] uppercase"
         >
-          {FILTERS.map((f) => {
+          {FILTERS.map(f => {
             const active = filter === f.key;
             return (
               <button

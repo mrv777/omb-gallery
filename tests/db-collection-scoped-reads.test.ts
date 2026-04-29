@@ -15,7 +15,10 @@ import path from 'node:path';
 import os from 'node:os';
 
 let dbModule: typeof import('../src/lib/db');
-const tempDir = path.join(os.tmpdir(), `omb-test-${process.pid}-${Math.random().toString(36).slice(2)}`);
+const tempDir = path.join(
+  os.tmpdir(),
+  `omb-test-${process.pid}-${Math.random().toString(36).slice(2)}`
+);
 
 beforeEach(async () => {
   fs.mkdirSync(tempDir, { recursive: true });
@@ -43,7 +46,9 @@ function seedFixtureRows(db: ReturnType<typeof dbModule.getDb>) {
     .prepare(`SELECT inscription_number FROM inscriptions WHERE collection_slug = 'omb' LIMIT 1`)
     .get() as { inscription_number: number };
   const bra = db
-    .prepare(`SELECT inscription_number FROM inscriptions WHERE collection_slug = 'bravocados' LIMIT 1`)
+    .prepare(
+      `SELECT inscription_number FROM inscriptions WHERE collection_slug = 'bravocados' LIMIT 1`
+    )
     .get() as { inscription_number: number };
 
   const insertEvent = db.prepare(`
@@ -81,8 +86,8 @@ describe('reader stmts scope to @collection', () => {
       inscription_id: string;
     }>;
 
-    expect(omb.every((e) => e.inscription_id === 'omb-id-1')).toBe(true);
-    expect(bra.every((e) => e.inscription_id === 'bra-id-1')).toBe(true);
+    expect(omb.every(e => e.inscription_id === 'omb-id-1')).toBe(true);
+    expect(bra.every(e => e.inscription_id === 'bra-id-1')).toBe(true);
     expect(omb.length).toBe(1);
     expect(bra.length).toBe(1);
   });
@@ -117,7 +122,7 @@ describe('reader stmts scope to @collection', () => {
     const ombHolders = stmts.topHolders.all({ limit: 10, collection: 'omb' }) as Array<{
       wallet_addr: string;
     }>;
-    expect(ombHolders.map((h) => h.wallet_addr)).toEqual(['owner-omb']);
+    expect(ombHolders.map(h => h.wallet_addr)).toEqual(['owner-omb']);
   });
 
   it('getInscription returns null when collection mismatches', () => {

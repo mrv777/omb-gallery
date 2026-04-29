@@ -20,7 +20,7 @@ export default function SubpageShell({ active, children }: Props) {
         <div className="flex h-12 items-center gap-4 sm:gap-6 px-4 sm:px-6 font-mono text-xs tracking-[0.08em] uppercase">
           <div className="text-bone shrink-0">OMB</div>
           <nav className="flex items-center gap-3 sm:gap-5">
-            {NAV.map((item) => {
+            {NAV.map(item => {
               const isActive = item.key === active;
               return (
                 <Link
@@ -30,7 +30,9 @@ export default function SubpageShell({ active, children }: Props) {
                     isActive ? 'text-bone' : 'text-bone-dim hover:text-bone'
                   }`}
                 >
-                  <span className={`border px-1.5 py-0.5 ${isActive ? 'border-bone' : 'border-transparent'}`}>
+                  <span
+                    className={`border px-1.5 py-0.5 ${isActive ? 'border-bone' : 'border-transparent'}`}
+                  >
                     {item.label}
                   </span>
                 </Link>

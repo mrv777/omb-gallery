@@ -21,7 +21,7 @@ export function useGridDimensions(containerRef: RefObject<HTMLDivElement | null>
     updateDimensions();
 
     // Use ResizeObserver for responsive updates
-    const observer = new ResizeObserver((entries) => {
+    const observer = new ResizeObserver(entries => {
       const entry = entries[0];
       if (entry) {
         const { width, height } = entry.contentRect;

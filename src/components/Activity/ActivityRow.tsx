@@ -30,7 +30,7 @@ type Props = {
 const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev }: Props) {
   const hit = lookupInscription(event.inscription_number);
   const inscriptionLink = `/inscription/${event.inscription_number}`;
-  const tileBg = hit && hit.color ? COLOR_TILE_BG[hit.color] ?? 'bg-ink-2' : 'bg-ink-2';
+  const tileBg = hit && hit.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
 
   const isSold = event.event_type === 'sold';
   const isTransferred = event.event_type === 'transferred';
@@ -153,7 +153,10 @@ const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev }: Props)
             tx
           </a>
         )}
-        <span className="font-mono text-[10px] text-bone-dim tracking-normal whitespace-nowrap" title={new Date(event.block_timestamp * 1000).toISOString()}>
+        <span
+          className="font-mono text-[10px] text-bone-dim tracking-normal whitespace-nowrap"
+          title={new Date(event.block_timestamp * 1000).toISOString()}
+        >
           {formatRelTime(event.block_timestamp)}
         </span>
       </div>

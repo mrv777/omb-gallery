@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { useCallback, useState } from 'react';
 import { useFavorites } from '@/lib/FavoritesContext';
@@ -12,7 +12,7 @@ export default function SaveToFavoritesButton({ srcs, visible }: Props) {
   const { addManyFavorites, favorites } = useFavorites();
   const [flash, setFlash] = useState<'idle' | 'saved'>('idle');
 
-  const allSaved = srcs.every((s) => favorites.has(s));
+  const allSaved = srcs.every(s => favorites.has(s));
 
   const onClick = useCallback(() => {
     addManyFavorites(srcs);
@@ -25,7 +25,7 @@ export default function SaveToFavoritesButton({ srcs, visible }: Props) {
       className={`absolute top-14 right-4 sm:top-16 sm:right-6 transition-opacity duration-300 ${
         visible ? 'opacity-100' : 'opacity-0 pointer-events-none'
       }`}
-      onClick={(e) => e.stopPropagation()}
+      onClick={e => e.stopPropagation()}
     >
       <button
         type="button"

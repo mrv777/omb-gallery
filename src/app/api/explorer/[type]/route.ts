@@ -10,10 +10,7 @@ const MAX_LIMIT = 100;
 const TYPES = ['most-transferred', 'longest-unmoved', 'top-volume', 'highest-sale'] as const;
 type LeaderboardType = (typeof TYPES)[number];
 
-export async function GET(
-  req: NextRequest,
-  ctx: { params: Promise<{ type: string }> }
-) {
+export async function GET(req: NextRequest, ctx: { params: Promise<{ type: string }> }) {
   const { type: typeRaw } = await ctx.params;
   if (!TYPES.includes(typeRaw as LeaderboardType)) {
     return NextResponse.json({ error: `unknown leaderboard type: ${typeRaw}` }, { status: 404 });

@@ -37,10 +37,11 @@ if (!ARGS.parent || !ARGS.slug) {
   process.exit(1);
 }
 
-const ORD_BASE = (ARGS['ord-base-url'] ?? process.env.ORD_BASE_URL ?? 'https://ordinals.com').replace(
-  /\/+$/,
-  ''
-);
+const ORD_BASE = (
+  ARGS['ord-base-url'] ??
+  process.env.ORD_BASE_URL ??
+  'https://ordinals.com'
+).replace(/\/+$/, '');
 const PARENT = ARGS.parent;
 const SLUG = ARGS.slug;
 const NAME = ARGS.name ?? SLUG;
@@ -107,7 +108,9 @@ async function main() {
   );
   fs.writeFileSync(path.join(OUT_DIR, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 
-  console.log(`[children] DONE — wrote ${inscriptions.length} children to ${path.relative(REPO_ROOT, OUT_DIR)}/`);
+  console.log(
+    `[children] DONE — wrote ${inscriptions.length} children to ${path.relative(REPO_ROOT, OUT_DIR)}/`
+  );
 }
 
 function pickString(item, keys) {
@@ -151,7 +154,7 @@ async function fetchJson(url) {
 }
 
 function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
+  return new Promise(r => setTimeout(r, ms));
 }
 
 function parseArgs(argv) {
@@ -166,7 +169,7 @@ function parseArgs(argv) {
   return out;
 }
 
-main().catch((e) => {
+main().catch(e => {
   console.error('[children] FATAL:', e);
   process.exit(1);
 });

@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 
@@ -57,9 +57,12 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const isFavorite = useCallback((src: string) => {
-    return favorites.has(src);
-  }, [favorites]);
+  const isFavorite = useCallback(
+    (src: string) => {
+      return favorites.has(src);
+    },
+    [favorites]
+  );
 
   const addManyFavorites = useCallback((srcs: string[]) => {
     setFavorites(prev => {
@@ -75,18 +78,17 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const contextValue = useMemo(() => ({
-    favorites,
-    toggleFavorite,
-    isFavorite,
-    addManyFavorites,
-  }), [favorites, toggleFavorite, isFavorite, addManyFavorites]);
-
-  return (
-    <FavoritesContext.Provider value={contextValue}>
-      {children}
-    </FavoritesContext.Provider>
+  const contextValue = useMemo(
+    () => ({
+      favorites,
+      toggleFavorite,
+      isFavorite,
+      addManyFavorites,
+    }),
+    [favorites, toggleFavorite, isFavorite, addManyFavorites]
   );
+
+  return <FavoritesContext.Provider value={contextValue}>{children}</FavoritesContext.Provider>;
 }
 
 export function useFavorites() {

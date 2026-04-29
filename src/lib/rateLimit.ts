@@ -4,9 +4,7 @@ import 'server-only';
 // so a per-instance Map is adequate. On restart the buckets reset; that's fine
 // — worst case is a brief window of no rate limiting right after a deploy.
 
-export type RateCheck =
-  | { ok: true }
-  | { ok: false; retryAfterSec: number };
+export type RateCheck = { ok: true } | { ok: false; retryAfterSec: number };
 
 const perIp = new Map<string, number[]>();
 let globalEvents: number[] = [];
@@ -34,11 +32,7 @@ function sweepExpired(now: number): void {
   });
 }
 
-export function checkAndConsumePerIp(
-  ipKey: string,
-  perMin: number,
-  perDay: number,
-): RateCheck {
+export function checkAndConsumePerIp(ipKey: string, perMin: number, perDay: number): RateCheck {
   const now = Date.now();
   sweepExpired(now);
 
@@ -63,7 +57,10 @@ export function checkAndConsumePerIp(
   if (minuteCount >= perMin) {
     if (pruned.length === 0) perIp.delete(ipKey);
     else perIp.set(ipKey, pruned);
-    return { ok: false, retryAfterSec: Math.max(1, Math.ceil((oldestInMinute + MINUTE_MS - now) / 1000)) };
+    return {
+      ok: false,
+      retryAfterSec: Math.max(1, Math.ceil((oldestInMinute + MINUTE_MS - now) / 1000)),
+    };
   }
   if (pruned.length >= perDay) {
     perIp.set(ipKey, pruned);
@@ -79,7 +76,10 @@ export function checkAndConsumeGlobal(windowMs: number, limit: number): RateChec
   const cutoff = now - windowMs;
   globalEvents = prune(globalEvents, cutoff);
   if (globalEvents.length >= limit) {
-    return { ok: false, retryAfterSec: Math.max(1, Math.ceil((globalEvents[0] + windowMs - now) / 1000)) };
+    return {
+      ok: false,
+      retryAfterSec: Math.max(1, Math.ceil((globalEvents[0] + windowMs - now) / 1000)),
+    };
   }
   globalEvents.push(now);
   return { ok: true };

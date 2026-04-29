@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { memo, useEffect, useState } from 'react';
 import { MAX_SPEED, MIN_SPEED, clampSpeed, type Order, type Speed } from './Slideshow';
@@ -62,7 +62,7 @@ const SlideshowControls = memo(function SlideshowControls({
       className={`absolute bottom-0 left-0 right-0 transition-opacity duration-300 px-3 pb-4 pt-10 bg-gradient-to-t from-ink-0 via-ink-0/70 to-transparent ${
         visible ? 'opacity-100' : 'opacity-0 pointer-events-none'
       }`}
-      onClick={(e) => e.stopPropagation()}
+      onClick={e => e.stopPropagation()}
     >
       <div className="mx-auto max-w-5xl flex flex-wrap items-center justify-center gap-2 sm:gap-4 px-3 sm:px-4 py-3 font-mono text-[11px] tracking-[0.12em] uppercase bg-ink-0/90 backdrop-blur-md border border-ink-2 shadow-[0_4px_20px_rgba(0,0,0,0.6)]">
         {/* Transport */}
@@ -102,7 +102,7 @@ const SlideshowControls = memo(function SlideshowControls({
             max={MAX_SPEED}
             step={1}
             value={speed}
-            onChange={(e) => onSpeedChange(clampSpeed(Number(e.target.value)))}
+            onChange={e => onSpeedChange(clampSpeed(Number(e.target.value)))}
             aria-label={`Speed ${speed} seconds`}
             className="omb-speed-slider w-20 sm:w-32 accent-bone"
           />
@@ -120,7 +120,9 @@ const SlideshowControls = memo(function SlideshowControls({
             aria-label="Toggle shuffle"
             aria-pressed={order === 'random'}
           >
-            <span className={`border px-1.5 py-0.5 ${order === 'random' ? 'border-bone' : 'border-transparent'}`}>
+            <span
+              className={`border px-1.5 py-0.5 ${order === 'random' ? 'border-bone' : 'border-transparent'}`}
+            >
               shuffle
             </span>
           </button>
@@ -149,7 +151,9 @@ const SlideshowControls = memo(function SlideshowControls({
               aria-label={isFs ? 'Exit fullscreen' : 'Enter fullscreen'}
               aria-pressed={isFs}
             >
-              <span className={`border px-1.5 py-0.5 ${isFs ? 'border-bone' : 'border-transparent'}`}>
+              <span
+                className={`border px-1.5 py-0.5 ${isFs ? 'border-bone' : 'border-transparent'}`}
+              >
                 full
               </span>
             </button>

@@ -34,16 +34,13 @@ export function useActivityFeed(filter: FeedFilter = 'all') {
   // when the filter has changed underneath it.
   const reqGenRef = useRef(0);
 
-  const buildUrl = useCallback(
-    (cursor: string | null) => {
-      const url = new URL('/api/activity', window.location.origin);
-      url.searchParams.set('limit', String(PAGE_SIZE));
-      if (cursor != null) url.searchParams.set('cursor', cursor);
-      if (filterRef.current !== 'all') url.searchParams.set('type', filterRef.current);
-      return url.toString();
-    },
-    []
-  );
+  const buildUrl = useCallback((cursor: string | null) => {
+    const url = new URL('/api/activity', window.location.origin);
+    url.searchParams.set('limit', String(PAGE_SIZE));
+    if (cursor != null) url.searchParams.set('cursor', cursor);
+    if (filterRef.current !== 'all') url.searchParams.set('type', filterRef.current);
+    return url.toString();
+  }, []);
 
   const loadMore = useCallback(async () => {
     if (loadingRef.current) return;
@@ -57,10 +54,10 @@ export function useActivityFeed(filter: FeedFilter = 'all') {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: ApiActivityResponse = await res.json();
       if (myGen !== reqGenRef.current) return;
-      const fresh = data.events.filter((e) => !seenIdsRef.current.has(e.id));
+      const fresh = data.events.filter(e => !seenIdsRef.current.has(e.id));
       for (const e of fresh) seenIdsRef.current.add(e.id);
       cursorRef.current = data.next_cursor;
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         events: [...prev.events, ...fresh],
         // The API only returns totals on first-page requests; preserve the last
@@ -73,7 +70,7 @@ export function useActivityFeed(filter: FeedFilter = 'all') {
       }));
     } catch (err) {
       if (myGen !== reqGenRef.current) return;
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         loading: false,
         error: err instanceof Error ? err.message : String(err),
@@ -98,13 +95,13 @@ export function useActivityFeed(filter: FeedFilter = 'all') {
       if (!res.ok) return;
       const data: ApiActivityResponse = await res.json();
       if (myGen !== reqGenRef.current) return;
-      const newOnes = data.events.filter((e) => !seenIdsRef.current.has(e.id));
+      const newOnes = data.events.filter(e => !seenIdsRef.current.has(e.id));
       if (newOnes.length === 0) {
-        setState((prev) => ({ ...prev, totals: data.totals, poll: data.poll }));
+        setState(prev => ({ ...prev, totals: data.totals, poll: data.poll }));
         return;
       }
       for (const e of newOnes) seenIdsRef.current.add(e.id);
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         events: [...newOnes, ...prev.events],
         totals: data.totals,

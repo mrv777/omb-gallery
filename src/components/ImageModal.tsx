@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import React, { memo, useEffect, useRef } from 'react';
 import Image from 'next/image';
@@ -45,10 +45,7 @@ const ImageModal = memo(function ImageModal({
   useEffect(() => {
     if (images.length < 2 || currentImage < 0 || currentImage >= images.length) return;
     const len = images.length;
-    const neighbors = [
-      images[(currentImage - 1 + len) % len],
-      images[(currentImage + 1) % len],
-    ];
+    const neighbors = [images[(currentImage - 1 + len) % len], images[(currentImage + 1) % len]];
     const loaders: HTMLImageElement[] = [];
     for (const neighbor of neighbors) {
       if (!neighbor || neighbor === images[currentImage]) continue;
@@ -92,14 +89,11 @@ const ImageModal = memo(function ImageModal({
   };
 
   return (
-    <div
-      className="fixed inset-0 bg-ink-0 z-[1500] flex flex-col"
-      onClick={onClose}
-    >
+    <div className="fixed inset-0 bg-ink-0 z-[1500] flex flex-col" onClick={onClose}>
       {/* Top chrome: inscription / color / close */}
       <div
         className="flex items-center justify-between pl-4 sm:pl-6 pr-1 sm:pr-2 py-1 font-mono text-xs tracking-[0.12em] uppercase text-bone-dim shrink-0"
-        onClick={(e) => e.stopPropagation()}
+        onClick={e => e.stopPropagation()}
       >
         <div className="text-bone">
           <a
@@ -114,7 +108,9 @@ const ImageModal = memo(function ImageModal({
           <span className="mx-2 text-bone-dim">·</span>
           <span>{colorLabel}</span>
           <span className="mx-2 text-bone-dim hidden sm:inline">·</span>
-          <span className="text-bone-dim hidden sm:inline">{currentImage + 1}/{images.length}</span>
+          <span className="text-bone-dim hidden sm:inline">
+            {currentImage + 1}/{images.length}
+          </span>
         </div>
         <div className="flex items-center">
           <a
@@ -165,7 +161,7 @@ const ImageModal = memo(function ImageModal({
       {/* Image + side nav */}
       <div
         className="flex-1 flex items-center justify-center min-h-0 px-4 sm:px-12 relative"
-        onClick={(e) => e.stopPropagation()}
+        onClick={e => e.stopPropagation()}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
@@ -184,7 +180,12 @@ const ImageModal = memo(function ImageModal({
           className="object-contain select-none"
           width={1200}
           height={1200}
-          style={{ maxWidth: 'min(92vw, 1200px)', maxHeight: '100%', width: 'auto', height: 'auto' }}
+          style={{
+            maxWidth: 'min(92vw, 1200px)',
+            maxHeight: '100%',
+            width: 'auto',
+            height: 'auto',
+          }}
           priority
         />
 
@@ -201,7 +202,7 @@ const ImageModal = memo(function ImageModal({
       {/* Wall label — fixed height so the image doesn't shift between pieces */}
       <div
         className="px-4 sm:px-6 py-4 font-mono text-[11px] tracking-[0.08em] leading-relaxed text-bone-dim shrink-0"
-        onClick={(e) => e.stopPropagation()}
+        onClick={e => e.stopPropagation()}
       >
         <div
           className="text-bone uppercase max-w-3xl line-clamp-2"

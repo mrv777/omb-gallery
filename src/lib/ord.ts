@@ -70,9 +70,7 @@ export async function fetchInscriptionDetail(
  * Returns one entry per requested ID. If an ID is missing from the response,
  * we omit it from the result (caller should treat as "no change this tick").
  */
-export async function fetchInscriptionsBatch(
-  ids: string[]
-): Promise<OrdInscriptionState[]> {
+export async function fetchInscriptionsBatch(ids: string[]): Promise<OrdInscriptionState[]> {
   if (ids.length === 0) return [];
   const json = (await postJson(`${ensureBase()}/inscriptions`, ids)) as unknown;
   const list = extractList(json);
@@ -114,14 +112,14 @@ export async function fetchBlockTimestamp(height: number): Promise<number | null
 
 function extractList(json: unknown): Record<string, unknown>[] {
   if (Array.isArray(json)) {
-    return json.filter((x) => x && typeof x === 'object') as Record<string, unknown>[];
+    return json.filter(x => x && typeof x === 'object') as Record<string, unknown>[];
   }
   if (json && typeof json === 'object') {
     const obj = json as Record<string, unknown>;
     // Some ord versions wrap responses (e.g. {inscriptions: [...]}, {data: [...]})
     const candidate = obj.inscriptions ?? obj.data ?? obj.items ?? obj.results;
     if (Array.isArray(candidate)) {
-      return candidate.filter((x) => x && typeof x === 'object') as Record<string, unknown>[];
+      return candidate.filter(x => x && typeof x === 'object') as Record<string, unknown>[];
     }
   }
   return [];
@@ -152,7 +150,12 @@ function normalizeInscriptionDetail(item: Record<string, unknown>): OrdInscripti
     output: output ?? (satpoint ? outputFromSatpoint(satpoint) : null),
     address: pickString(item, ['address', 'owner']),
     block_height: pickInt(item, ['height', 'genesis_height', 'block_height']),
-    block_timestamp: pickInt(item, ['timestamp', 'block_timestamp', 'block_time', 'genesis_timestamp']),
+    block_timestamp: pickInt(item, [
+      'timestamp',
+      'block_timestamp',
+      'block_time',
+      'genesis_timestamp',
+    ]),
     satpoint: satpoint ?? null,
   };
 }
@@ -269,7 +272,7 @@ async function safeText(res: Response): Promise<string> {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+  return new Promise(r => setTimeout(r, ms));
 }
 
 // ---------------- field helpers ----------------

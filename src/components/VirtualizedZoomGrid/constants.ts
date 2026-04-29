@@ -15,7 +15,7 @@ export const ZOOM_LEVELS = [
 ] as const;
 
 export const DEFAULT_ZOOM_INDEX = 4; // 10 columns
-export const MIN_ZOOM_INDEX = 0;     // 2 columns (most zoomed in)
+export const MIN_ZOOM_INDEX = 0; // 2 columns (most zoomed in)
 export const MAX_ZOOM_INDEX = ZOOM_LEVELS.length - 1; // 50 columns (most zoomed out)
 
 // Threshold for continuous zoom gestures (prevents over-sensitivity)

@@ -1,6 +1,11 @@
 import type { ApiHolder, ApiInscription } from '@/components/Activity/types';
 
-export type LeaderboardKey = 'most-transferred' | 'longest-unmoved' | 'top-volume' | 'highest-sale' | 'top-holders';
+export type LeaderboardKey =
+  | 'most-transferred'
+  | 'longest-unmoved'
+  | 'top-volume'
+  | 'highest-sale'
+  | 'top-holders';
 
 export type LeaderboardMeta = {
   key: LeaderboardKey;
@@ -19,7 +24,8 @@ export const LEADERBOARDS: Record<LeaderboardKey, LeaderboardMeta> = {
   'longest-unmoved': {
     key: 'longest-unmoved',
     title: 'Longest Unmoved',
-    blurb: 'Inscriptions that have moved at least once and whose last movement was longest ago. Never-distributed pieces are excluded.',
+    blurb:
+      'Inscriptions that have moved at least once and whose last movement was longest ago. Never-distributed pieces are excluded.',
     metricLabel: 'last moved',
   },
   'top-volume': {

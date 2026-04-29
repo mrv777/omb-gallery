@@ -2,7 +2,12 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { bumpSlideshowView, getSlideshow } from '@/lib/slideshowStore';
 import { resolveSlideshowImages } from '@/lib/slideshowImages';
-import Slideshow, { DEFAULT_SPEED, clampSpeed, type Order, type Speed } from '@/components/Slideshow/Slideshow';
+import Slideshow, {
+  DEFAULT_SPEED,
+  clampSpeed,
+  type Order,
+  type Speed,
+} from '@/components/Slideshow/Slideshow';
 
 function parseSpeed(raw: string | undefined): Speed {
   if (!raw) return DEFAULT_SPEED;
@@ -25,9 +30,11 @@ function firstValue(raw: string | string[] | undefined): string | undefined {
   return raw;
 }
 
-export async function generateMetadata(
-  { params }: { params: Promise<{ slug: string }> },
-): Promise<Metadata> {
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
   const { slug } = await params;
   const row = getSlideshow(slug);
   if (!row) return { title: 'Slideshow · OMB Archive' };

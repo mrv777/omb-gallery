@@ -10,7 +10,10 @@ import path from 'node:path';
 import os from 'node:os';
 
 let dbModule: typeof import('../src/lib/db');
-const tempDir = path.join(os.tmpdir(), `omb-test-${process.pid}-${Math.random().toString(36).slice(2)}`);
+const tempDir = path.join(
+  os.tmpdir(),
+  `omb-test-${process.pid}-${Math.random().toString(36).slice(2)}`
+);
 
 beforeEach(async () => {
   fs.mkdirSync(tempDir, { recursive: true });
@@ -57,18 +60,14 @@ describe('schema v9 — collections + backfill_state + poll_state composite PK',
   it('rejects duplicate (stream, collection_slug) inserts via composite PK', () => {
     const db = dbModule.getDb();
     expect(() =>
-      db
-        .prepare(
-          `INSERT INTO poll_state (stream, collection_slug) VALUES ('satflow', 'omb')`
-        )
-        .run()
+      db.prepare(`INSERT INTO poll_state (stream, collection_slug) VALUES ('satflow', 'omb')`).run()
     ).toThrow();
   });
 
   it('listEnabledCollections returns rows sorted by slug', () => {
     const stmts = dbModule.getStmts();
     const rows = stmts.listEnabledCollections.all([]) as Array<{ slug: string }>;
-    expect(rows.map((r) => r.slug)).toEqual(['bravocados', 'omb']);
+    expect(rows.map(r => r.slug)).toEqual(['bravocados', 'omb']);
   });
 
   it('deleteStaleListings only deletes rows for the requested collection', () => {
@@ -107,15 +106,14 @@ describe('schema v9 — collections + backfill_state + poll_state composite PK',
     });
     expect((stmts.countActiveListings.get([]) as { n: number }).n).toBe(2);
     stmts.deleteStaleListings.run({ cutoff: 100, collection: 'omb' });
-    const remaining = db
-      .prepare(`SELECT inscription_number FROM active_listings`)
-      .all() as Array<{ inscription_number: number }>;
+    const remaining = db.prepare(`SELECT inscription_number FROM active_listings`).all() as Array<{
+      inscription_number: number;
+    }>;
     expect(remaining).toEqual([{ inscription_number: bra.inscription_number }]);
   });
 });
 
 describe('schema v8 — collections + backfill_state', () => {
-
   it('seeds the OMB collection row', () => {
     const db = dbModule.getDb();
     const row = db
@@ -151,7 +149,7 @@ describe('schema v8 — collections + backfill_state', () => {
   it('creates backfill_state with the expected shape', () => {
     const db = dbModule.getDb();
     const cols = db.pragma('table_info(backfill_state)') as Array<{ name: string }>;
-    const names = cols.map((c) => c.name).sort();
+    const names = cols.map(c => c.name).sort();
     expect(names).toEqual(
       [
         'collection_slug',
@@ -179,7 +177,9 @@ describe('schema v8 — collections + backfill_state', () => {
   it('idx_insc_collection exists for collection-scoped reads', () => {
     const db = dbModule.getDb();
     const idx = db
-      .prepare(`SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_insc_collection'`)
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_insc_collection'`
+      )
       .get();
     expect(idx).toBeTruthy();
   });
@@ -187,7 +187,9 @@ describe('schema v8 — collections + backfill_state', () => {
   it('seeds the Bitcoin Bravocados collection row', () => {
     const db = dbModule.getDb();
     const row = db
-      .prepare(`SELECT slug, name, satflow_slug, enabled FROM collections WHERE slug = 'bravocados'`)
+      .prepare(
+        `SELECT slug, name, satflow_slug, enabled FROM collections WHERE slug = 'bravocados'`
+      )
       .get() as { slug: string; name: string; satflow_slug: string; enabled: number };
     expect(row).toMatchObject({
       slug: 'bravocados',
@@ -219,7 +221,9 @@ describe('schema v8 — collections + backfill_state', () => {
   it('does not cross-contaminate color between OMB and Bravocados rows', () => {
     const db = dbModule.getDb();
     const ombMissingColor = db
-      .prepare(`SELECT COUNT(*) AS n FROM inscriptions WHERE collection_slug = 'omb' AND color IS NULL`)
+      .prepare(
+        `SELECT COUNT(*) AS n FROM inscriptions WHERE collection_slug = 'omb' AND color IS NULL`
+      )
       .get() as { n: number };
     expect(ombMissingColor.n).toBe(0);
   });

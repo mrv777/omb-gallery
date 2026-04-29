@@ -6,7 +6,10 @@ export function formatBtc(sats: number | null | undefined): string {
   return `${btc.toFixed(6)} ₿`;
 }
 
-export function formatRelTime(unixSeconds: number | null | undefined, nowMs: number = Date.now()): string {
+export function formatRelTime(
+  unixSeconds: number | null | undefined,
+  nowMs: number = Date.now()
+): string {
   if (!unixSeconds) return '';
   const diff = Math.max(0, Math.floor(nowMs / 1000 - unixSeconds));
   if (diff < 60) return `${diff}s ago`;
@@ -44,7 +47,10 @@ export function marketplaceLabel(key: string | null | undefined): string {
   return MARKETPLACE_LABELS[k] ?? key;
 }
 
-export function ordinalsLink(inscriptionId: string | null | undefined, inscriptionNumber?: number): string {
+export function ordinalsLink(
+  inscriptionId: string | null | undefined,
+  inscriptionNumber?: number
+): string {
   if (inscriptionId && !inscriptionId.startsWith('unknown-')) {
     return `https://ordinals.com/inscription/${inscriptionId}`;
   }

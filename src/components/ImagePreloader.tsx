@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { useState, useEffect, useMemo } from 'react';
 import { GalleryImage } from '@/lib/types';
@@ -47,7 +47,7 @@ export default function ImagePreloader({
     }, 1000);
 
     const preloadImage = (src: string) => {
-      return new Promise<void>((resolve) => {
+      return new Promise<void>(resolve => {
         const img = new Image();
         const finish = () => {
           img.onload = null;
@@ -82,7 +82,7 @@ export default function ImagePreloader({
       const size = Math.max(1, batchSize);
       for (let i = 0; i < initial.length && !cancelled; i += size) {
         const slice = initial.slice(i, i + size);
-        await Promise.all(slice.map((image) => preloadImage(image.thumbnail)));
+        await Promise.all(slice.map(image => preloadImage(image.thumbnail)));
       }
 
       if (!cancelled) {

@@ -53,15 +53,22 @@ async function main() {
 
   const total = db.prepare('SELECT COUNT(*) AS n FROM inscriptions').get().n;
   if (total === 0) {
-    console.error('[bootstrap] inscriptions table is empty — start the app once to seed from images.json, then re-run');
+    console.error(
+      '[bootstrap] inscriptions table is empty — start the app once to seed from images.json, then re-run'
+    );
     process.exit(1);
   }
 
-  const missing = db.prepare(
-    'SELECT inscription_number FROM inscriptions WHERE inscription_id IS NULL ORDER BY inscription_number'
-  ).all().map(r => r.inscription_number);
+  const missing = db
+    .prepare(
+      'SELECT inscription_number FROM inscriptions WHERE inscription_id IS NULL ORDER BY inscription_number'
+    )
+    .all()
+    .map(r => r.inscription_number);
 
-  console.log(`[bootstrap] ord=${ORD_BASE} db=${DB_PATH} missing=${missing.length} concurrency=${CONCURRENCY}`);
+  console.log(
+    `[bootstrap] ord=${ORD_BASE} db=${DB_PATH} missing=${missing.length} concurrency=${CONCURRENCY}`
+  );
   if (missing.length === 0) {
     console.log('[bootstrap] nothing to do');
     return;
@@ -74,7 +81,7 @@ async function main() {
         current_owner  = COALESCE(?, current_owner)
     WHERE inscription_number = ?
   `);
-  const flush = db.transaction((rows) => {
+  const flush = db.transaction(rows => {
     for (const r of rows) {
       if (r.error || !r.id) continue;
       update.run(r.id, r.output, r.address, r.num);
@@ -104,7 +111,9 @@ async function main() {
         const elapsed = (Date.now() - startedAt) / 1000;
         const rate = done / elapsed;
         const eta = Math.round((missing.length - done) / rate);
-        console.log(`[bootstrap] ${done}/${missing.length} ok=${ok} err=${err} ${rate.toFixed(1)}/s eta=${eta}s`);
+        console.log(
+          `[bootstrap] ${done}/${missing.length} ok=${ok} err=${err} ${rate.toFixed(1)}/s eta=${eta}s`
+        );
       }
     }
   }
@@ -116,16 +125,23 @@ async function main() {
   console.log(`[bootstrap] DONE in ${elapsed}s — ok=${ok} err=${err}`);
 
   // Final sanity counts
-  const counts = db.prepare(`
+  const counts = db
+    .prepare(
+      `
     SELECT
       (SELECT COUNT(*) FROM inscriptions)                                  AS total,
       (SELECT COUNT(*) FROM inscriptions WHERE inscription_id IS NOT NULL) AS with_id,
       (SELECT COUNT(*) FROM inscriptions WHERE current_output IS NOT NULL) AS with_output,
       (SELECT COUNT(*) FROM inscriptions WHERE current_owner IS NOT NULL)  AS with_owner
-  `).get();
+  `
+    )
+    .get();
   console.log('[bootstrap] counts:', counts);
 
   db.close();
 }
 
-main().catch(e => { console.error('[bootstrap] FATAL:', e); process.exit(1); });
+main().catch(e => {
+  console.error('[bootstrap] FATAL:', e);
+  process.exit(1);
+});

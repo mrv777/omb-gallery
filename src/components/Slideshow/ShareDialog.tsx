@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -86,7 +86,7 @@ export default function ShareDialog({ ids, defaultTitle, onClose }: Props) {
           sitekey: siteKey,
           size: 'flexible',
           theme: 'dark',
-          callback: (t) => setToken(t),
+          callback: t => setToken(t),
           'error-callback': () => setToken(''),
           'expired-callback': () => setToken(''),
         });
@@ -103,7 +103,8 @@ export default function ShareDialog({ ids, defaultTitle, onClose }: Props) {
     };
   }, [siteKey]);
 
-  const shareUrl = state.kind === 'success' ? `${window.location.origin}/slideshow/${state.slug}` : '';
+  const shareUrl =
+    state.kind === 'success' ? `${window.location.origin}/slideshow/${state.slug}` : '';
 
   const submit = useCallback(async () => {
     if (state.kind === 'submitting') return;
@@ -183,7 +184,7 @@ export default function ShareDialog({ ids, defaultTitle, onClose }: Props) {
         aria-modal="true"
         aria-label="Share slideshow"
         className="w-full max-w-md bg-ink-1 border border-ink-2 p-6 font-mono text-xs tracking-[0.08em] uppercase"
-        onClick={(e) => e.stopPropagation()}
+        onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-bone">Share slideshow</h2>
@@ -206,7 +207,7 @@ export default function ShareDialog({ ids, defaultTitle, onClose }: Props) {
               id="slideshow-title"
               type="text"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={e => setTitle(e.target.value)}
               maxLength={60}
               placeholder="my favorite reds"
               className="w-full bg-transparent border-0 border-b border-ink-2 focus:border-bone outline-none h-10 px-0 text-sm font-mono tracking-[0.06em] text-bone placeholder:text-bone-dim placeholder:normal-case placeholder:tracking-[0.04em] mb-4"
@@ -253,7 +254,7 @@ export default function ShareDialog({ ids, defaultTitle, onClose }: Props) {
               <input
                 readOnly
                 value={shareUrl}
-                onClick={(e) => e.currentTarget.select()}
+                onClick={e => e.currentTarget.select()}
                 className="flex-1 bg-ink-0 border border-ink-2 h-10 px-2 text-sm font-mono tracking-normal text-bone"
               />
               <button

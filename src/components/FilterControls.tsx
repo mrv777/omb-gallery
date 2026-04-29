@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import React, { memo, useCallback } from 'react';
 import Link from 'next/link';
@@ -156,7 +156,9 @@ const FilterControls = memo(function FilterControls({
         onClick={onZoomOut}
         disabled={!canZoomOut}
         className={`h-10 w-8 flex items-center justify-center text-base leading-none transition-colors ${
-          canZoomOut ? 'text-bone-dim hover:text-bone' : 'text-bone-dim opacity-30 cursor-not-allowed'
+          canZoomOut
+            ? 'text-bone-dim hover:text-bone'
+            : 'text-bone-dim opacity-30 cursor-not-allowed'
         }`}
         aria-label="Zoom out (more columns)"
       >
@@ -170,7 +172,9 @@ const FilterControls = memo(function FilterControls({
         onClick={onZoomIn}
         disabled={!canZoomIn}
         className={`h-10 w-8 flex items-center justify-center text-base leading-none transition-colors ${
-          canZoomIn ? 'text-bone-dim hover:text-bone' : 'text-bone-dim opacity-30 cursor-not-allowed'
+          canZoomIn
+            ? 'text-bone-dim hover:text-bone'
+            : 'text-bone-dim opacity-30 cursor-not-allowed'
         }`}
         aria-label="Zoom in (fewer columns)"
       >
@@ -192,16 +196,10 @@ const FilterControls = memo(function FilterControls({
           <span className="text-bone">
             <span className="border border-bone px-1.5 py-0.5">gallery</span>
           </span>
-          <Link
-            href="/activity"
-            className="text-bone-dim hover:text-bone transition-colors"
-          >
+          <Link href="/activity" className="text-bone-dim hover:text-bone transition-colors">
             <span className="border border-transparent px-1.5 py-0.5">activity</span>
           </Link>
-          <Link
-            href="/explorer"
-            className="text-bone-dim hover:text-bone transition-colors"
-          >
+          <Link href="/explorer" className="text-bone-dim hover:text-bone transition-colors">
             <span className="border border-transparent px-1.5 py-0.5">explorer</span>
           </Link>
         </nav>

@@ -1,11 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  getDb,
-  getStmts,
-  walCheckpoint,
-  type CollectionRow,
-  type PollStateRow,
-} from '@/lib/db';
+import { getDb, getStmts, walCheckpoint, type CollectionRow, type PollStateRow } from '@/lib/db';
 import {
   fetchBlockHeight,
   fetchBlockTimestamp,
@@ -181,13 +175,16 @@ function installSatflowCallCounter(): void {
  * resolved (env override > manifest), so downstream code doesn't have to
  * know about the override path.
  */
-function resolveSatflowCollections(only: string | null): Array<{ slug: string; satflow_slug: string }> {
+function resolveSatflowCollections(
+  only: string | null
+): Array<{ slug: string; satflow_slug: string }> {
   const stmts = getStmts();
   const all = stmts.listEnabledCollections.all([]) as CollectionRow[];
-  const filtered = only ? all.filter((c) => c.slug === only) : all;
+  const filtered = only ? all.filter(c => c.slug === only) : all;
   const out: Array<{ slug: string; satflow_slug: string }> = [];
   for (const c of filtered) {
-    const apiSlug = c.slug === 'omb' && SATFLOW_OMB_OVERRIDE ? SATFLOW_OMB_OVERRIDE : c.satflow_slug;
+    const apiSlug =
+      c.slug === 'omb' && SATFLOW_OMB_OVERRIDE ? SATFLOW_OMB_OVERRIDE : c.satflow_slug;
     if (!apiSlug) continue;
     out.push({ slug: c.slug, satflow_slug: apiSlug });
   }
@@ -298,8 +295,7 @@ async function runOrdTick(): Promise<TickResult> {
       error: reason,
     };
   }
-  const newKnownHeight =
-    priorHeight != null ? Math.max(priorHeight, blockHeight) : blockHeight;
+  const newKnownHeight = priorHeight != null ? Math.max(priorHeight, blockHeight) : blockHeight;
 
   // Bootstrap inscription_ids for any rows that only have a number (seeded from images.json).
   // Capped per tick to avoid blowing the wallclock on first run.
@@ -419,7 +415,7 @@ async function bootstrapInscriptionIds(): Promise<number> {
     if (Date.now() - startedAt > TICK_WALLCLOCK_BUDGET_MS / 2) break;
     const wave = missing.slice(i, i + ORD_BOOTSTRAP_CONCURRENCY);
     const results = await Promise.allSettled(
-      wave.map((row) => fetchInscriptionDetail(row.inscription_number))
+      wave.map(row => fetchInscriptionDetail(row.inscription_number))
     );
     // Hold onto the first hard error so we still process every fulfilled
     // result in this wave before bailing — otherwise a single 5xx in the
@@ -620,10 +616,7 @@ function collectTransferSatpoints(
  * silently dropped — the caller falls back to chain-tip + now-time so we
  * still emit the transfer event, just with imprecise time.
  */
-async function enrichTransfers(
-  satpoints: string[],
-  ordTip: number | null
-): Promise<EnrichmentMap> {
+async function enrichTransfers(satpoints: string[], ordTip: number | null): Promise<EnrichmentMap> {
   const map: EnrichmentMap = new Map();
   if (satpoints.length === 0 || ordTip == null) return map;
   const unique = Array.from(new Set(satpoints));
@@ -632,9 +625,7 @@ async function enrichTransfers(
   const heights = new Map<string, number>();
   for (let i = 0; i < unique.length; i += ORD_ENRICHMENT_CONCURRENCY) {
     const wave = unique.slice(i, i + ORD_ENRICHMENT_CONCURRENCY);
-    const results = await Promise.allSettled(
-      wave.map((sp) => fetchOutputConfirmations(sp))
-    );
+    const results = await Promise.allSettled(wave.map(sp => fetchOutputConfirmations(sp)));
     for (let j = 0; j < results.length; j++) {
       const r = results[j];
       if (r.status !== 'fulfilled' || r.value == null || r.value < 1) continue;
@@ -649,7 +640,7 @@ async function enrichTransfers(
   const heightToTs = new Map<number, number>();
   for (let i = 0; i < uniqueHeights.length; i += ORD_ENRICHMENT_CONCURRENCY) {
     const wave = uniqueHeights.slice(i, i + ORD_ENRICHMENT_CONCURRENCY);
-    const results = await Promise.allSettled(wave.map((h) => fetchBlockTimestamp(h)));
+    const results = await Promise.allSettled(wave.map(h => fetchBlockTimestamp(h)));
     for (let j = 0; j < results.length; j++) {
       const r = results[j];
       if (r.status !== 'fulfilled' || r.value == null) continue;
@@ -708,13 +699,15 @@ async function runSatflowTick(
   }) as PollStateRow;
   const backfilling =
     opts.force === 'backfill' || (opts.force !== 'incremental' && state.is_backfilling === 1);
-  const maxPages = backfilling ? SATFLOW_BACKFILL_MAX_PAGES_PER_TICK : SATFLOW_INCREMENTAL_MAX_PAGES;
+  const maxPages = backfilling
+    ? SATFLOW_BACKFILL_MAX_PAGES_PER_TICK
+    : SATFLOW_INCREMENTAL_MAX_PAGES;
   // Cross-tick sticky counter: any unresolved sale seen during this backfill
   // walk (across multiple ticks) keeps us from declaring "done" until we
   // restart at page 1 and confirm everything resolves. Without this, an
   // unresolved sale on an early page is permanently skipped after the cursor
   // advances past it.
-  const priorUnresolvedSeen = backfilling ? state.backfill_unresolved_seen ?? 0 : 0;
+  const priorUnresolvedSeen = backfilling ? (state.backfill_unresolved_seen ?? 0) : 0;
 
   // Pagination model:
   //   incremental: walk page 1 → N with sortDirection=desc (newest first),
@@ -1135,9 +1128,10 @@ async function runListingsTick(
     | { window_start: number; call_count: number }
     | undefined;
   const budgetPct = budget ? budget.call_count / SATFLOW_MONTHLY_BUDGET : 0;
-  const budgetWarning = budgetPct >= SATFLOW_BUDGET_WARN_PCT
-    ? `monthly call budget at ${(budgetPct * 100).toFixed(0)}%`
-    : undefined;
+  const budgetWarning =
+    budgetPct >= SATFLOW_BUDGET_WARN_PCT
+      ? `monthly call budget at ${(budgetPct * 100).toFixed(0)}%`
+      : undefined;
 
   const writtenCount = stmts.countActiveListings.get([]) as { n: number } | undefined;
 
@@ -1174,7 +1168,7 @@ function errorMessage(err: unknown): string {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+  return new Promise(r => setTimeout(r, ms));
 }
 
 function json(body: unknown, status: number): NextResponse {

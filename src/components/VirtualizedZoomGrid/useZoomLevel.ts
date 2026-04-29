@@ -4,7 +4,7 @@ import {
   DEFAULT_ZOOM_INDEX,
   MIN_ZOOM_INDEX,
   MAX_ZOOM_INDEX,
-  ZOOM_DELTA_THRESHOLD
+  ZOOM_DELTA_THRESHOLD,
 } from './constants';
 
 // Phones (and similar narrow viewports) start at 5 columns instead of 10 so
@@ -26,9 +26,8 @@ export function useZoomLevel() {
       setZoomIndex(prev => {
         // Positive delta = zoom in (fewer columns)
         // Negative delta = zoom out (more columns)
-        const next = delta > 0
-          ? Math.max(MIN_ZOOM_INDEX, prev - 1)
-          : Math.min(MAX_ZOOM_INDEX, prev + 1);
+        const next =
+          delta > 0 ? Math.max(MIN_ZOOM_INDEX, prev - 1) : Math.min(MAX_ZOOM_INDEX, prev + 1);
         return next;
       });
     } else {

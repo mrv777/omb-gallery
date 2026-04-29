@@ -26,10 +26,14 @@ const ActivityCard = memo(function ActivityCard({ event }: Props) {
   const hit = lookupInscription(event.inscription_number);
   const inGallery = !!hit;
   const link = inGallery ? hit.full : ordinalsLink(event.inscription_id, event.inscription_number);
-  const tileBg = inGallery && hit.color ? COLOR_TILE_BG[hit.color] ?? 'bg-ink-2' : 'bg-ink-2';
+  const tileBg = inGallery && hit.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
 
   const eventLabel =
-    event.event_type === 'sold' ? 'SOLD' : event.event_type === 'transferred' ? 'TRANSFERRED' : 'INSCRIBED';
+    event.event_type === 'sold'
+      ? 'SOLD'
+      : event.event_type === 'transferred'
+        ? 'TRANSFERRED'
+        : 'INSCRIBED';
   const eventColor =
     event.event_type === 'sold'
       ? 'text-accent-green'
@@ -40,8 +44,7 @@ const ActivityCard = memo(function ActivityCard({ event }: Props) {
   const priceStr = event.event_type === 'sold' ? formatBtc(event.sale_price_sats) : '';
   const market = event.event_type === 'sold' ? marketplaceLabel(event.marketplace) : '';
 
-  const showOwners =
-    event.event_type === 'transferred' && (event.old_owner || event.new_owner);
+  const showOwners = event.event_type === 'transferred' && (event.old_owner || event.new_owner);
 
   return (
     <div className="group block border border-ink-2 hover:border-bone-dim transition-colors bg-ink-1">

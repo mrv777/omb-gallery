@@ -31,9 +31,7 @@ describe('rate limiter', () => {
     // 1-second window contains more than 4.
     const start = Date.now();
     await Promise.all(
-      Array.from({ length: 12 }, () =>
-        fetchSalesPage({ collectionSlug: 'omb', pageSize: 1 })
-      )
+      Array.from({ length: 12 }, () => fetchSalesPage({ collectionSlug: 'omb', pageSize: 1 }))
     );
     const elapsed = Date.now() - start;
 
@@ -48,7 +46,7 @@ describe('rate limiter', () => {
     // 5 sustained is well within budget.)
     for (let i = 0; i < callTimes.length; i++) {
       const windowEnd = callTimes[i] + 1000;
-      const inWindow = callTimes.filter((t) => t >= callTimes[i] && t < windowEnd).length;
+      const inWindow = callTimes.filter(t => t >= callTimes[i] && t < windowEnd).length;
       expect(inWindow).toBeLessThanOrEqual(5);
     }
   }, 20_000);

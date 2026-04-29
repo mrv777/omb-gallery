@@ -79,10 +79,7 @@ export async function POST(req: NextRequest) {
   // 4. Turnstile verification.
   const verify = await verifyTurnstileToken(token, ip !== 'unknown' ? ip : undefined);
   if (!verify.ok) {
-    return NextResponse.json(
-      { error: 'turnstile-failed', codes: verify.errors },
-      { status: 403 },
-    );
+    return NextResponse.json({ error: 'turnstile-failed', codes: verify.errors }, { status: 403 });
   }
 
   // 5. DB write.

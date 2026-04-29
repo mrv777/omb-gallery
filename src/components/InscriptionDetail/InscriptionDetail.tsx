@@ -1,13 +1,7 @@
 import Link from 'next/link';
 import type { EventRow, InscriptionRow } from '@/lib/db';
 import { lookupInscription } from '@/lib/inscriptionLookup';
-import {
-  addressLink,
-  formatBtc,
-  formatRelTime,
-  ordinalsLink,
-  truncateAddr,
-} from '@/lib/format';
+import { addressLink, formatBtc, formatRelTime, ordinalsLink, truncateAddr } from '@/lib/format';
 import EventTimelineRow from './EventTimelineRow';
 
 const COLOR_TILE_BG: Record<string, string> = {
@@ -37,7 +31,7 @@ export default function InscriptionDetail({
   ownerOthersHasMore,
 }: Props) {
   const hit = lookupInscription(inscription.inscription_number);
-  const tileBg = hit?.color ? COLOR_TILE_BG[hit.color] ?? 'bg-ink-2' : 'bg-ink-2';
+  const tileBg = hit?.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
   const ordLink = ordinalsLink(inscription.inscription_id, inscription.inscription_number);
   const currentTxid = inscription.current_output ? inscription.current_output.split(':')[0] : null;
   const totalEvents = events.length;
@@ -91,14 +85,8 @@ export default function InscriptionDetail({
           <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3 text-[11px] tracking-[0.08em] uppercase text-bone-dim mb-5">
             <Stat label="transfers" value={transferCount.toLocaleString()} />
             <Stat label="sales" value={saleCount.toLocaleString()} />
-            <Stat
-              label="volume"
-              value={formatBtc(inscription.total_volume_sats) || '—'}
-            />
-            <Stat
-              label="highest"
-              value={formatBtc(inscription.highest_sale_sats) || '—'}
-            />
+            <Stat label="volume" value={formatBtc(inscription.total_volume_sats) || '—'} />
+            <Stat label="highest" value={formatBtc(inscription.highest_sale_sats) || '—'} />
           </dl>
 
           <div className="text-[11px] tracking-[0.08em] uppercase text-bone-dim space-y-1.5 mb-5">
@@ -118,7 +106,10 @@ export default function InscriptionDetail({
                 <span className="text-bone-dim">—</span>
               )}
               {heldSince != null && inscription.current_owner && (
-                <span className="text-bone-dim normal-case tracking-normal" title={new Date(heldSince * 1000).toISOString()}>
+                <span
+                  className="text-bone-dim normal-case tracking-normal"
+                  title={new Date(heldSince * 1000).toISOString()}
+                >
                   · held {formatRelTime(heldSince)}
                 </span>
               )}
@@ -177,8 +168,7 @@ export default function InscriptionDetail({
       {/* Activity timeline */}
       <div>
         <div className="font-mono text-[11px] tracking-[0.08em] uppercase text-bone-dim mb-3">
-          activity{' '}
-          <span className="text-bone tabular-nums">{totalEvents.toLocaleString()}</span>{' '}
+          activity <span className="text-bone tabular-nums">{totalEvents.toLocaleString()}</span>{' '}
           {totalEvents === 1 ? 'event' : 'events'}
         </div>
 
@@ -188,7 +178,7 @@ export default function InscriptionDetail({
           </div>
         ) : (
           <div className="border border-ink-2 bg-ink-0">
-            {events.map((ev) => (
+            {events.map(ev => (
               <EventTimelineRow key={ev.id} event={ev} />
             ))}
           </div>
@@ -210,10 +200,11 @@ export default function InscriptionDetail({
             </a>
           </div>
           <div className="flex flex-wrap gap-2 items-center">
-            {ownerOthers.map((n) => {
+            {ownerOthers.map(n => {
               const otherHit = lookupInscription(n);
-              const otherTileBg =
-                otherHit?.color ? COLOR_TILE_BG[otherHit.color] ?? 'bg-ink-2' : 'bg-ink-2';
+              const otherTileBg = otherHit?.color
+                ? (COLOR_TILE_BG[otherHit.color] ?? 'bg-ink-2')
+                : 'bg-ink-2';
               return (
                 <Link
                   key={n}

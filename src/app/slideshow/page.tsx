@@ -1,7 +1,12 @@
 import type { Metadata } from 'next';
 import { decodeIds } from '@/lib/slideshowCodec';
 import { resolveSlideshowImages } from '@/lib/slideshowImages';
-import Slideshow, { DEFAULT_SPEED, clampSpeed, type Order, type Speed } from '@/components/Slideshow/Slideshow';
+import Slideshow, {
+  DEFAULT_SPEED,
+  clampSpeed,
+  type Order,
+  type Speed,
+} from '@/components/Slideshow/Slideshow';
 
 export const metadata: Metadata = {
   title: 'Slideshow · OMB Archive',

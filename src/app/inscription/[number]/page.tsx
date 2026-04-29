@@ -7,9 +7,7 @@ import InscriptionDetail from '@/components/InscriptionDetail/InscriptionDetail'
 
 type Params = { number: string };
 
-export async function generateMetadata(
-  { params }: { params: Promise<Params> }
-): Promise<Metadata> {
+export async function generateMetadata({ params }: { params: Promise<Params> }): Promise<Metadata> {
   const { number } = await params;
   const num = parseInt(number, 10);
   if (!Number.isFinite(num)) return { title: 'Inscription · OMB Archive' };
@@ -22,9 +20,7 @@ export async function generateMetadata(
   };
 }
 
-export default async function InscriptionPage(
-  { params }: { params: Promise<Params> }
-) {
+export default async function InscriptionPage({ params }: { params: Promise<Params> }) {
   const { number } = await params;
   const num = parseInt(number, 10);
   if (!Number.isFinite(num) || num < 0) notFound();
@@ -52,13 +48,12 @@ export default async function InscriptionPage(
         collection: 'omb',
       }) as { inscription_number: number }[])
     : [];
-  const ownerOthers = rawOwnerOthers.slice(0, OWNER_OTHERS_DISPLAY).map((r) => r.inscription_number);
+  const ownerOthers = rawOwnerOthers.slice(0, OWNER_OTHERS_DISPLAY).map(r => r.inscription_number);
   const ownerOthersHasMore = rawOwnerOthers.length > OWNER_OTHERS_DISPLAY;
 
   // "Held since": prefer the most recent move (events[0]); fall back to the
   // inscription's mint timestamp for OMBs that have never moved.
-  const heldSince =
-    events.length > 0 ? events[0].block_timestamp : inscription.inscribe_at;
+  const heldSince = events.length > 0 ? events[0].block_timestamp : inscription.inscribe_at;
 
   return (
     <SubpageShell active="activity">

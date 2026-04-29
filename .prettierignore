@@ -16,7 +16,11 @@ coverage/
 
 # Package files
 package-lock.json
-yarn.lock 
+yarn.lock
+pnpm-lock.yaml
 
 # Public folder
 public/
+
+# Data files (large, hand-curated layout)
+src/data/collections/*/inscriptions.json

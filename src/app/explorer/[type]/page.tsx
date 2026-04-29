@@ -11,9 +11,11 @@ const VALID: LeaderboardKey[] = [
   'highest-sale',
 ];
 
-export async function generateMetadata(
-  { params }: { params: Promise<{ type: string }> }
-): Promise<Metadata> {
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ type: string }>;
+}): Promise<Metadata> {
   const { type } = await params;
   const meta = LEADERBOARDS[type as LeaderboardKey];
   if (!meta) return { title: 'Explorer · OMB Archive' };

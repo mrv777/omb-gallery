@@ -51,11 +51,13 @@ export default function Leaderboard({ type, limit, showSeeAll }: Props) {
             no data yet
           </li>
         )}
-        {data && data.kind === 'inscriptions' &&
+        {data &&
+          data.kind === 'inscriptions' &&
           data.items.map((row, i) => (
             <InscriptionRow key={row.inscription_number} row={row} rank={i + 1} type={type} />
           ))}
-        {data && data.kind === 'holders' &&
+        {data &&
+          data.kind === 'holders' &&
           data.items.map((row, i) => <HolderRow key={row.wallet_addr} row={row} rank={i + 1} />)}
       </ol>
     </div>

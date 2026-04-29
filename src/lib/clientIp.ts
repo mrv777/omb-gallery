@@ -22,7 +22,12 @@ function normalizeIpv6To64(raw: string): string | null {
   for (const p of parts) {
     if (!/^[0-9a-fA-F]{1,4}$/.test(p)) return null;
   }
-  return parts.slice(0, 4).map((p) => p.toLowerCase().padStart(4, '0')).join(':') + '::/64';
+  return (
+    parts
+      .slice(0, 4)
+      .map(p => p.toLowerCase().padStart(4, '0'))
+      .join(':') + '::/64'
+  );
 }
 
 // Build the rate-limit key for this request's client IP.

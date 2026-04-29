@@ -15,32 +15,32 @@ if (!fs.existsSync(OUTPUT_DIR)) {
 // Process all color folders
 async function processImages() {
   console.log('Starting image optimization...');
-  
+
   // Get all color folders
   const colorFolders = fs.readdirSync(SOURCE_DIR).filter(item => {
     const itemPath = path.join(SOURCE_DIR, item);
     return fs.statSync(itemPath).isDirectory() && !item.startsWith('.');
   });
-  
+
   console.log(`Found ${colorFolders.length} color folders: ${colorFolders.join(', ')}`);
-  
+
   // Process each color folder
   for (const color of colorFolders) {
     const colorSourceDir = path.join(SOURCE_DIR, color);
     const colorOutputDir = path.join(OUTPUT_DIR, color);
-    
+
     // Create color output directory
     if (!fs.existsSync(colorOutputDir)) {
       fs.mkdirSync(colorOutputDir, { recursive: true });
     }
-    
+
     // Get all image files in the color folder
     const imageFiles = fs.readdirSync(colorSourceDir).filter(file => {
       return file.match(/\.(jpg|jpeg|png|webp)$/i);
     });
-    
+
     console.log(`Processing ${imageFiles.length} images in ${color} folder...`);
-    
+
     // Process each image
     let skipped = 0;
     for (const imageFile of imageFiles) {
@@ -53,10 +53,7 @@ async function processImages() {
       try {
         // Create thumbnails
         for (const size of THUMBNAIL_SIZES) {
-          const thumbnailPath = path.join(
-            colorOutputDir,
-            `${outputFilename}_${size}${outputExt}`
-          );
+          const thumbnailPath = path.join(colorOutputDir, `${outputFilename}_${size}${outputExt}`);
 
           // Skip if thumb already exists and is newer than the source.
           if (fs.existsSync(thumbnailPath)) {
@@ -81,7 +78,7 @@ async function processImages() {
       console.log(`  (skipped ${skipped} up-to-date thumbnails)`);
     }
   }
-  
+
   console.log('Image optimization complete!');
 }
 

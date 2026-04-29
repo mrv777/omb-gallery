@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -83,7 +83,7 @@ export default function Slideshow({
     if (!playing || playOrder.length <= 1) return;
     const ms = speed * 1000;
     const t = window.setTimeout(() => {
-      setPos((p) => {
+      setPos(p => {
         const cur = p < playOrder.length ? p : 0;
         const next = cur + 1;
         if (next < playOrder.length) return next;
@@ -145,7 +145,7 @@ export default function Slideshow({
   }, []);
 
   const goPrev = useCallback(() => {
-    setPos((p) => {
+    setPos(p => {
       const len = playOrder.length;
       if (len === 0) return 0;
       const cur = p < len ? p : 0;
@@ -155,7 +155,7 @@ export default function Slideshow({
   }, [playOrder.length, nudgeControls]);
 
   const goNext = useCallback(() => {
-    setPos((p) => {
+    setPos(p => {
       const len = playOrder.length;
       if (len === 0) return 0;
       const cur = p < len ? p : 0;
@@ -165,24 +165,27 @@ export default function Slideshow({
   }, [playOrder.length, nudgeControls]);
 
   const togglePlaying = useCallback(() => {
-    setPlaying((p) => !p);
+    setPlaying(p => !p);
     nudgeControls();
   }, [nudgeControls]);
 
   const toggleOrder = useCallback(() => {
-    setOrder((o) => {
+    setOrder(o => {
       const next = o === 'seq' ? 'random' : 'seq';
-      if (next === 'random') setSeqSalt((s) => s + 1);
+      if (next === 'random') setSeqSalt(s => s + 1);
       return next;
     });
     setPos(0);
     nudgeControls();
   }, [nudgeControls]);
 
-  const stepSpeed = useCallback((dir: 1 | -1) => {
-    setSpeed((s) => clampSpeed(s + dir));
-    nudgeControls();
-  }, [nudgeControls]);
+  const stepSpeed = useCallback(
+    (dir: 1 | -1) => {
+      setSpeed(s => clampSpeed(s + dir));
+      nudgeControls();
+    },
+    [nudgeControls]
+  );
 
   // Fullscreen
   useEffect(() => {
@@ -221,9 +224,7 @@ export default function Slideshow({
       const target = e.target as HTMLElement | null;
       const typing =
         target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.isContentEditable);
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
       if (typing) return;
       switch (e.key) {
         case ' ':
@@ -251,7 +252,7 @@ export default function Slideshow({
         case 'l':
         case 'L':
           e.preventDefault();
-          setLoop((v) => !v);
+          setLoop(v => !v);
           nudgeControls();
           break;
         case '[':
@@ -270,7 +271,17 @@ export default function Slideshow({
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [shareOpen, togglePlaying, goPrev, goNext, toggleFullscreen, toggleOrder, stepSpeed, nudgeControls, exit]);
+  }, [
+    shareOpen,
+    togglePlaying,
+    goPrev,
+    goNext,
+    toggleFullscreen,
+    toggleOrder,
+    stepSpeed,
+    nudgeControls,
+    exit,
+  ]);
 
   // Touch swipe
   const touchStart = useRef<{ x: number; y: number; controlsWereVisible: boolean } | null>(null);
@@ -362,16 +373,14 @@ export default function Slideshow({
           controlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
-        <span className="text-bone truncate">
-          {title ? `"${title}"` : 'OMB Slideshow'}
-        </span>
+        <span className="text-bone truncate">{title ? `"${title}"` : 'OMB Slideshow'}</span>
         <span className="text-bone-dim">·</span>
         <a
           href={`https://ordinals.com/inscription/${idNum}`}
           target="_blank"
           rel="noopener noreferrer"
           className="text-bone hover:underline underline-offset-4 decoration-bone-dim"
-          onClick={(e) => e.stopPropagation()}
+          onClick={e => e.stopPropagation()}
         >
           #{idNum}
         </a>
@@ -379,9 +388,7 @@ export default function Slideshow({
         <span className="text-bone-dim">{colorLabel}</span>
         <span className="ml-auto text-bone-dim tabular-nums">
           {safePos + 1}/{playOrder.length}
-          {missing > 0 && (
-            <span className="ml-3 text-bone-dim">· {missing} unavailable</span>
-          )}
+          {missing > 0 && <span className="ml-3 text-bone-dim">· {missing} unavailable</span>}
         </span>
       </div>
 
@@ -413,13 +420,13 @@ export default function Slideshow({
         onPlayPause={togglePlaying}
         onPrev={goPrev}
         onNext={goNext}
-        onSpeedChange={(s) => {
+        onSpeedChange={s => {
           setSpeed(s);
           nudgeControls();
         }}
         onToggleOrder={toggleOrder}
         onToggleLoop={() => {
-          setLoop((v) => !v);
+          setLoop(v => !v);
           nudgeControls();
         }}
         onToggleFullscreen={toggleFullscreen}
@@ -428,15 +435,12 @@ export default function Slideshow({
       />
 
       {shareSlug && (
-        <SaveToFavoritesButton
-          srcs={images.map((i) => i.src)}
-          visible={controlsVisible}
-        />
+        <SaveToFavoritesButton srcs={images.map(i => i.src)} visible={controlsVisible} />
       )}
 
       {shareOpen && (
         <ShareDialog
-          ids={images.map((i) => i.id)}
+          ids={images.map(i => i.id)}
           defaultTitle={title ?? ''}
           onClose={() => setShareOpen(false)}
         />
@@ -444,11 +448,17 @@ export default function Slideshow({
 
       <style jsx>{`
         @keyframes omb-progress {
-          from { width: 0%; }
-          to { width: 100%; }
+          from {
+            width: 0%;
+          }
+          to {
+            width: 100%;
+          }
         }
         @media (prefers-reduced-motion: reduce) {
-          div :global(.object-contain) { transition: none !important; }
+          div :global(.object-contain) {
+            transition: none !important;
+          }
         }
       `}</style>
     </div>

@@ -11,7 +11,10 @@ import path from 'node:path';
 import os from 'node:os';
 
 let dbModule: typeof import('../src/lib/db');
-const tempDir = path.join(os.tmpdir(), `omb-test-${process.pid}-${Math.random().toString(36).slice(2)}`);
+const tempDir = path.join(
+  os.tmpdir(),
+  `omb-test-${process.pid}-${Math.random().toString(36).slice(2)}`
+);
 
 beforeEach(async () => {
   fs.mkdirSync(tempDir, { recursive: true });

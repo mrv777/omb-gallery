@@ -44,11 +44,15 @@ if (!ARGS.slug) {
   process.exit(1);
 }
 
-const SATFLOW_BASE = (process.env.SATFLOW_BASE_URL ?? 'https://api.satflow.com').replace(/\/+$/, '');
-const ORD_BASE = (ARGS['ord-base-url'] ?? process.env.ORD_BASE_URL ?? 'https://ordinals.com').replace(
+const SATFLOW_BASE = (process.env.SATFLOW_BASE_URL ?? 'https://api.satflow.com').replace(
   /\/+$/,
   ''
 );
+const ORD_BASE = (
+  ARGS['ord-base-url'] ??
+  process.env.ORD_BASE_URL ??
+  'https://ordinals.com'
+).replace(/\/+$/, '');
 const API_KEY = process.env.SATFLOW_API_KEY ?? null;
 if (!API_KEY) {
   console.error('[seed] SATFLOW_API_KEY env is required.');
@@ -86,8 +90,8 @@ async function main() {
   const numbers = await resolveNumbersViaOrd(ids);
 
   const inscriptions = ids
-    .filter((id) => numbers.has(id))
-    .map((inscription_id) => ({
+    .filter(id => numbers.has(id))
+    .map(inscription_id => ({
       inscription_id,
       inscription_number: numbers.get(inscription_id),
     }))
@@ -123,7 +127,9 @@ async function main() {
 // drops those entries from the output. Other errors abort the script.
 async function resolveNumbersViaOrd(ids) {
   if (ids.length === 0) return new Map();
-  console.log(`[seed] resolving ${ids.length} inscription_numbers via ord (concurrency=${ORD_CONCURRENCY})`);
+  console.log(
+    `[seed] resolving ${ids.length} inscription_numbers via ord (concurrency=${ORD_CONCURRENCY})`
+  );
   const out = new Map();
   let done = 0;
   let missing = 0;
@@ -176,7 +182,10 @@ async function fetchOrdNumber(id) {
     const json = await res.json();
     const number = typeof json?.number === 'number' ? Math.trunc(json.number) : null;
     if (number == null || !Number.isFinite(number)) {
-      return { status: 'error', error: `unexpected ord shape (no number): ${JSON.stringify(json).slice(0, 200)}` };
+      return {
+        status: 'error',
+        error: `unexpected ord shape (no number): ${JSON.stringify(json).slice(0, 200)}`,
+      };
     }
     return { status: 'ok', number };
   } catch (e) {
@@ -232,7 +241,7 @@ function extractItems(json, label) {
   // observed wrappers. Probe in order.
   const candidate = data[label] ?? data.items ?? data.listings ?? data.sales ?? data.results;
   if (!Array.isArray(candidate)) return [];
-  return candidate.filter((x) => x && typeof x === 'object');
+  return candidate.filter(x => x && typeof x === 'object');
 }
 
 function pickInscriptionId(item) {
@@ -290,7 +299,7 @@ async function fetchJson(url) {
 }
 
 function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
+  return new Promise(r => setTimeout(r, ms));
 }
 
 function parseArgs(argv) {
@@ -305,7 +314,7 @@ function parseArgs(argv) {
   return out;
 }
 
-main().catch((e) => {
+main().catch(e => {
   console.error('[seed] FATAL:', e);
   process.exit(1);
 });

@@ -1,6 +1,9 @@
 import 'server-only';
 
-const SATFLOW_BASE = (process.env.SATFLOW_BASE_URL ?? 'https://api.satflow.com').replace(/\/+$/, '');
+const SATFLOW_BASE = (process.env.SATFLOW_BASE_URL ?? 'https://api.satflow.com').replace(
+  /\/+$/,
+  ''
+);
 const REQUEST_TIMEOUT_MS = 20_000;
 const MAX_RETRIES = 5;
 
@@ -186,7 +189,7 @@ function extractSales(json: unknown): Record<string, unknown>[] {
   if (!data || typeof data !== 'object') return [];
   const sales = (data as Record<string, unknown>).sales;
   if (!Array.isArray(sales)) return [];
-  return sales.filter((x) => x && typeof x === 'object') as Record<string, unknown>[];
+  return sales.filter(x => x && typeof x === 'object') as Record<string, unknown>[];
 }
 
 function extractTotal(json: unknown): number {
@@ -277,7 +280,7 @@ function extractListings(json: unknown): Record<string, unknown>[] {
   if (!data || typeof data !== 'object') return [];
   const listings = (data as Record<string, unknown>).listings;
   if (!Array.isArray(listings)) return [];
-  return listings.filter((x) => x && typeof x === 'object') as Record<string, unknown>[];
+  return listings.filter(x => x && typeof x === 'object') as Record<string, unknown>[];
 }
 
 function normalizeListing(item: Record<string, unknown>): NormalizedListing | null {
@@ -342,7 +345,7 @@ async function getWithRetry(url: string, apiKey?: string | null): Promise<unknow
       if (!(err instanceof SatflowError) || !err.retryable) throw err;
       lastError = err;
       const baseMs =
-        err.status === 429 ? extractRetryAfterMs(err) ?? 60_000 : 1000 * 2 ** attempt;
+        err.status === 429 ? (extractRetryAfterMs(err) ?? 60_000) : 1000 * 2 ** attempt;
       const jitter = baseMs * (0.75 + Math.random() * 0.5);
       await sleep(Math.min(jitter, 60_000));
     }
@@ -417,7 +420,7 @@ async function safeText(res: Response): Promise<string> {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+  return new Promise(r => setTimeout(r, ms));
 }
 
 /**

@@ -8,7 +8,7 @@ export type VerifyResult = { ok: boolean; errors?: string[] };
 // network error / missing secret / non-success response rejects the request.
 export async function verifyTurnstileToken(
   token: string,
-  remoteIp?: string,
+  remoteIp?: string
 ): Promise<VerifyResult> {
   const secret = process.env.TURNSTILE_SECRET;
   if (!secret) {

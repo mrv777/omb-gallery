@@ -39,11 +39,9 @@ function getStmts(): Stmts {
     `),
     selectBySlug: db.prepare(
       `SELECT slug, ids, title, image_count, created_at, view_count
-       FROM slideshows WHERE slug = ?`,
+       FROM slideshows WHERE slug = ?`
     ),
-    bumpView: db.prepare(
-      `UPDATE slideshows SET view_count = view_count + 1 WHERE slug = ?`,
-    ),
+    bumpView: db.prepare(`UPDATE slideshows SET view_count = view_count + 1 WHERE slug = ?`),
   };
   return stmts;
 }

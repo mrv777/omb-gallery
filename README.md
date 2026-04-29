@@ -29,22 +29,26 @@ A zoomable gallery for showcasing OMB images, built with Next.js 15, Next.js Ima
 ### Setup
 
 1. Clone the repository:
+
    ```bash
    git clone https://github.com/yourusername/omb-gallery.git
    cd omb-gallery
    ```
 
 2. Install dependencies:
+
    ```bash
    npm install
    ```
 
 3. Generate optimized thumbnails from `public/images/`:
+
    ```bash
    pnpm run optimize-images
    ```
 
 4. Run the development server:
+
    ```bash
    pnpm dev
    ```
@@ -103,4 +107,4 @@ npm run start
 
 ## License
 
-MIT License 
+MIT License

@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { GalleryImage } from '@/lib/types';
@@ -237,9 +237,7 @@ const VirtualRow = memo(
           // On touch the heart is gone — show a red ring on favorited cells so
           // users can still tell what they've saved at a glance.
           const cellBoxShadow =
-            coarsePointer && favorited
-              ? 'inset 0 0 0 2px var(--accent-red)'
-              : cellShadow;
+            coarsePointer && favorited ? 'inset 0 0 0 2px var(--accent-red)' : cellShadow;
           return (
             <div
               key={globalIndex}
@@ -265,9 +263,9 @@ const VirtualRow = memo(
                   data-fav-btn=""
                   data-fav={favorited ? 'true' : undefined}
                   className="grid-cell-fav"
-                  onClick={(e) => handleFavClick(e, image.src)}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onMouseUp={(e) => e.stopPropagation()}
+                  onClick={e => handleFavClick(e, image.src)}
+                  onMouseDown={e => e.stopPropagation()}
+                  onMouseUp={e => e.stopPropagation()}
                   aria-label={favorited ? 'Remove from favorites' : 'Add to favorites'}
                   aria-pressed={favorited}
                 >

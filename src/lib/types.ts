@@ -10,4 +10,4 @@ export interface GalleryImage {
   searchText: string;
 }
 
-export type ColorFilter = 'all' | 'red' | 'blue' | 'green' | 'orange' | 'black'; 
+export type ColorFilter = 'all' | 'red' | 'blue' | 'green' | 'orange' | 'black';

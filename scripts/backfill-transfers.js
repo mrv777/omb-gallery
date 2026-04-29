@@ -68,7 +68,8 @@ function parseArgs(argv) {
   const out = { smoke: false, inscriptionId: null, inscriptionNumber: null };
   for (const a of argv) {
     if (a === '--smoke') out.smoke = true;
-    else if (a.startsWith('--inscription-id=')) out.inscriptionId = a.slice('--inscription-id='.length);
+    else if (a.startsWith('--inscription-id='))
+      out.inscriptionId = a.slice('--inscription-id='.length);
     else if (a.startsWith('--inscription-number=')) {
       const n = parseInt(a.slice('--inscription-number='.length), 10);
       if (Number.isFinite(n)) out.inscriptionNumber = n;
@@ -210,7 +211,7 @@ async function walkInscription({ inscription_id, inscription_number, satpoint, h
     if (!tx || !Array.isArray(tx.vin) || !Array.isArray(tx.vout)) {
       return { events, reason: 'bad-tx' };
     }
-    if (tx.vin.some((i) => i && i.coinbase)) {
+    if (tx.vin.some(i => i && i.coinbase)) {
       return { events, reason: 'coinbase' };
     }
 
@@ -305,7 +306,7 @@ async function main() {
     WHERE inscription_number = @inscription_number
   `);
 
-  const flush = db.transaction((rows) => {
+  const flush = db.transaction(rows => {
     let inserted = 0;
     for (const r of rows) {
       const res = insertEvent.run(r);
@@ -333,7 +334,8 @@ async function main() {
     process.exit(1);
   }
   if (!ORD_BASE) {
-    console.error('[backfill] ord base URL missing'); process.exit(1);
+    console.error('[backfill] ord base URL missing');
+    process.exit(1);
   }
 
   const where = ['inscription_id IS NOT NULL', 'current_output IS NOT NULL'];
@@ -352,7 +354,9 @@ async function main() {
     `[backfill] db=${DB_PATH} targets=${targets.length} concurrency=${CONCURRENCY} max_hops=${MAX_HOPS}`
   );
   if (targets.length === 0) {
-    console.log('[backfill] nothing to do'); db.close(); return;
+    console.log('[backfill] nothing to do');
+    db.close();
+    return;
   }
 
   let next = 0;
@@ -409,7 +413,9 @@ async function main() {
   await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
-  console.log(`[backfill] DONE in ${elapsed}s — inserted=${totalInserted} hops=${totalHops} err=${errors}`);
+  console.log(
+    `[backfill] DONE in ${elapsed}s — inserted=${totalInserted} hops=${totalHops} err=${errors}`
+  );
   console.log('[backfill] reasons:', reasons);
 
   const counts = db
@@ -513,10 +519,13 @@ async function smoke() {
 }
 
 if (ARGS.smoke) {
-  smoke().catch((e) => {
+  smoke().catch(e => {
     console.error('[smoke] FATAL:', e);
     process.exit(1);
   });
 } else {
-  main().catch((e) => { console.error('[backfill] FATAL:', e); process.exit(1); });
+  main().catch(e => {
+    console.error('[backfill] FATAL:', e);
+    process.exit(1);
+  });
 }
