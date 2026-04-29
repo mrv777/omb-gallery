@@ -18,6 +18,7 @@ import {
   type NormalizedSale,
   type NormalizedListing,
 } from '@/lib/satflow';
+import { log } from '@/lib/log';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -109,6 +110,8 @@ async function handle(req: NextRequest): Promise<NextResponse> {
   // ignores this param.)
   const onlyCollection = url.searchParams.get('collection');
 
+  const tickStartedAt = Date.now();
+  log.info('poll', 'tick start', { mode, collection: onlyCollection ?? undefined });
   try {
     let result: TickResult | TickResult[];
     switch (mode) {
@@ -137,9 +140,20 @@ async function handle(req: NextRequest): Promise<NextResponse> {
       }
     }
     walCheckpoint();
+    log.info('poll', 'tick complete', {
+      mode,
+      dur_ms: Date.now() - tickStartedAt,
+      streams: Array.isArray(result) ? result.length : 1,
+    });
     return json(result, 200);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    log.error('poll', 'tick failed', {
+      mode,
+      dur_ms: Date.now() - tickStartedAt,
+      error: msg,
+      stack: err instanceof Error ? err.stack : undefined,
+    });
     return json({ error: msg }, 500);
   }
 }
@@ -345,9 +359,14 @@ async function runOrdTick(): Promise<TickResult> {
       // Other error classes (5xx, network, malformed) keep the old
       // behavior of breaking out so we retry on the next tick.
       if (err instanceof OrdError && err.status === 404) {
+        log.warn('poll/ord', 'batch 404 — skipping chunk', {
+          chunk_size: chunk.length,
+          first_id: chunk[0],
+        });
         markChunkPolled(chunk);
         continue;
       }
+      log.error('poll/ord', 'batch fetch failed', { chunk_size: chunk.length, error: errMsg });
       break;
     }
 
@@ -383,6 +402,17 @@ async function runOrdTick(): Promise<TickResult> {
       height: newKnownHeight,
     });
   }
+
+  log.info('poll/ord', errMsg ? 'tick complete (with error)' : 'tick complete', {
+    block_height: blockHeight,
+    bootstrapped,
+    checked,
+    changed,
+    inserted,
+    initialized,
+    dur_ms: Date.now() - startedAt,
+    error: errMsg ?? undefined,
+  });
 
   return {
     mode: 'ord',
@@ -829,6 +859,19 @@ async function runSatflowTick(
     stmts.setBackfilling.run({ stream: 'satflow', collection: collection.slug, flag: 0 });
   }
 
+  log.info('poll/satflow', errMsg ? 'tick complete (with error)' : 'tick complete', {
+    collection: collection.slug,
+    backfilling,
+    pages: pagesUsed,
+    inserted,
+    upgraded,
+    unresolved,
+    last_page: lastPageReached,
+    drained,
+    dur_ms: Date.now() - startedAt,
+    error: errMsg ?? undefined,
+  });
+
   return {
     mode: backfilling ? 'satflow-backfill' : 'satflow',
     collection: collection.slug,
@@ -1049,6 +1092,12 @@ async function runListingsTick(
       event_count: 0,
       cursor: null,
     });
+    log.warn('poll/listings', 'tick failed', {
+      collection: collection.slug,
+      pages: pagesUsed,
+      dur_ms: Date.now() - startedAt,
+      error: errMsg,
+    });
     return { mode: 'listings', collection: collection.slug, pages: pagesUsed, error: errMsg };
   }
 
@@ -1141,6 +1190,15 @@ async function runListingsTick(
     status: 'ok',
     event_count: ready.length,
     cursor: null,
+  });
+
+  log.info('poll/listings', 'tick complete', {
+    collection: collection.slug,
+    pages: pagesUsed,
+    written: ready.length,
+    unresolved,
+    total_reported: totalReported,
+    dur_ms: Date.now() - startedAt,
   });
 
   return {
