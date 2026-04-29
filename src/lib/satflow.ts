@@ -245,13 +245,14 @@ function normalizeSale(item: Record<string, unknown>): NormalizedSale | null {
     parseIsoToUnix(pickString(item, ['timestamp', 'updatedAt']));
   if (block_timestamp == null) return null;
 
-  // Seller is the maker on an ask, the bid-acceptor on a bid; both surface
-  // their ord (taproot) address as `sellerOrdAddress` on the order body.
-  const seller = pickString(order.body, ['sellerOrdAddress', 'sellerReceiveAddress']);
+  // Seller / buyer roles invert by order kind:
+  //   - ask order: maker = seller (on order body), taker = buyer (top-level fill fields).
+  //   - bid order: maker = buyer / bidder (on order body), taker = seller (top-level fill fields).
+  const seller =
+    order.kind === 'ask'
+      ? pickString(order.body, ['sellerOrdAddress', 'sellerReceiveAddress'])
+      : pickString(item, ['fillOrdAddress', 'fillAddress']);
 
-  // Buyer differs by order kind:
-  //   - ask order: the taker is the buyer; their address is on the top-level fill fields.
-  //   - bid order: the bidder is the buyer; their receive address is on the bid body.
   const buyer =
     order.kind === 'ask'
       ? pickString(item, ['fillOrdAddress', 'fillAddress'])
