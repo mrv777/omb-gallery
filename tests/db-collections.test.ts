@@ -33,11 +33,21 @@ afterEach(() => {
   }
 });
 
-describe('schema v9 — collections + backfill_state + poll_state composite PK', () => {
-  it('reaches user_version 9', () => {
+describe('schema v10 — collections + backfill_state + poll_state composite PK + typed-feed index', () => {
+  it('reaches user_version 10', () => {
     const db = dbModule.getDb();
     const ver = db.pragma('user_version', { simple: true });
-    expect(ver).toBe(9);
+    expect(ver).toBe(10);
+  });
+
+  it('creates idx_events_type_ts_id covering the typed activity feed sort', () => {
+    const db = dbModule.getDb();
+    const idx = db
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type='index' AND name='idx_events_type_ts_id'`
+      )
+      .get();
+    expect(idx).toBeDefined();
   });
 
   it('seeds poll_state with composite (stream, collection_slug) rows', () => {

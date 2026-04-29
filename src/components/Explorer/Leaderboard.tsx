@@ -1,7 +1,4 @@
-'use client';
-
 import Link from 'next/link';
-import { useLeaderboard } from './useLeaderboard';
 import { LEADERBOARDS, type LeaderboardKey } from './types';
 import { lookupInscription } from '@/lib/inscriptionLookup';
 import { addressLink, formatBtc, formatRelTime, truncateAddr } from '@/lib/format';
@@ -9,13 +6,13 @@ import type { ApiHolder, ApiInscription } from '@/components/Activity/types';
 
 type Props = {
   type: LeaderboardKey;
-  limit: number;
   showSeeAll?: boolean;
+  items: ApiInscription[] | ApiHolder[];
 };
 
-export default function Leaderboard({ type, limit, showSeeAll }: Props) {
+export default function Leaderboard({ type, items, showSeeAll }: Props) {
   const meta = LEADERBOARDS[type];
-  const { data, loading, error } = useLeaderboard(type, limit);
+  const isHolders = type === 'top-holders';
 
   return (
     <div className="border border-ink-2 bg-ink-1">
@@ -36,29 +33,19 @@ export default function Leaderboard({ type, limit, showSeeAll }: Props) {
         </p>
       </div>
       <ol className="divide-y divide-ink-2">
-        {loading && (
-          <li className="px-4 py-3 font-mono text-[11px] uppercase tracking-[0.08em] text-bone-dim">
-            loading…
-          </li>
-        )}
-        {error && (
-          <li className="px-4 py-3 font-mono text-[11px] uppercase tracking-[0.08em] text-accent-red">
-            {error}
-          </li>
-        )}
-        {!loading && data && data.items.length === 0 && (
+        {items.length === 0 && (
           <li className="px-4 py-3 font-mono text-[11px] uppercase tracking-[0.08em] text-bone-dim">
             no data yet
           </li>
         )}
-        {data &&
-          data.kind === 'inscriptions' &&
-          data.items.map((row, i) => (
+        {!isHolders &&
+          (items as ApiInscription[]).map((row, i) => (
             <InscriptionRow key={row.inscription_number} row={row} rank={i + 1} type={type} />
           ))}
-        {data &&
-          data.kind === 'holders' &&
-          data.items.map((row, i) => <HolderRow key={row.wallet_addr} row={row} rank={i + 1} />)}
+        {isHolders &&
+          (items as ApiHolder[]).map((row, i) => (
+            <HolderRow key={row.wallet_addr} row={row} rank={i + 1} />
+          ))}
       </ol>
     </div>
   );

@@ -20,7 +20,10 @@ export async function GET(req: NextRequest) {
   const items = stmts.topHolders.all({ limit, collection }) as HolderRow[];
   const total = (stmts.countHolders.get({ collection }) as { n: number }).n;
 
-  return NextResponse.json({ items, total });
+  return NextResponse.json(
+    { items, total },
+    { headers: { 'Cache-Control': 'public, max-age=30, stale-while-revalidate=300' } }
+  );
 }
 
 function clamp(n: number, lo: number, hi: number): number {

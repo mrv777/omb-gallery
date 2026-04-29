@@ -17,22 +17,35 @@ export type FeedState = {
   reachedEnd: boolean;
 };
 
-export function useActivityFeed(filter: FeedFilter = 'all') {
-  const [state, setState] = useState<FeedState>({
-    events: [],
-    totals: null,
-    poll: null,
-    loading: true,
+// Server-rendered first-page payload. The page passes this in so the feed
+// hydrates already populated and there's no loading flash on initial mount or
+// on re-mount after navigation.
+export type InitialActivity = {
+  events: ApiEvent[];
+  next_cursor: string | null;
+  totals: { events: number; holders: number } | null;
+  poll: ApiActivityResponse['poll'];
+};
+
+export function useActivityFeed(filter: FeedFilter = 'all', initial?: InitialActivity) {
+  const [state, setState] = useState<FeedState>(() => ({
+    events: initial?.events ?? [],
+    totals: initial?.totals ?? null,
+    poll: initial?.poll ?? null,
+    loading: !initial,
     error: null,
-    reachedEnd: false,
-  });
-  const cursorRef = useRef<string | null>(null);
+    reachedEnd: initial != null && initial.next_cursor == null,
+  }));
+  const cursorRef = useRef<string | null>(initial?.next_cursor ?? null);
   const loadingRef = useRef<boolean>(false);
-  const seenIdsRef = useRef<Set<number>>(new Set());
+  const seenIdsRef = useRef<Set<number>>(new Set(initial?.events.map(e => e.id) ?? []));
   const filterRef = useRef<FeedFilter>(filter);
   // Bumped on filter reset so an in-flight fetch's response can be discarded
   // when the filter has changed underneath it.
   const reqGenRef = useRef(0);
+  // Skip the very first reset-and-fetch when the server already provided data
+  // for the default filter; subsequent filter changes still reset normally.
+  const skipInitialReset = useRef<boolean>(initial != null);
 
   const buildUrl = useCallback((cursor: string | null) => {
     const url = new URL('/api/activity', window.location.origin);
@@ -112,8 +125,16 @@ export function useActivityFeed(filter: FeedFilter = 'all') {
     }
   }, [buildUrl]);
 
-  // Reset on filter change so a new fetch starts from the top.
+  // Reset on filter change so a new fetch starts from the top. Skip once on
+  // initial mount when we already have server-rendered data for the default
+  // filter — otherwise we'd immediately blow away the SSR-provided list and
+  // re-fetch, defeating the whole point of passing initial data in.
   useEffect(() => {
+    if (skipInitialReset.current) {
+      skipInitialReset.current = false;
+      filterRef.current = filter;
+      return;
+    }
     filterRef.current = filter;
     cursorRef.current = null;
     seenIdsRef.current = new Set();

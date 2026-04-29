@@ -75,19 +75,31 @@ export async function GET(req: NextRequest) {
     collection: 'omb',
   }) as PollStateRow | undefined;
 
-  return NextResponse.json({
-    events,
-    next_cursor,
-    totals,
-    poll: poll
-      ? {
-          last_run_at: poll.last_run_at,
-          last_status: poll.last_status,
-          last_event_count: poll.last_event_count,
-          is_backfilling: poll.is_backfilling === 1,
-        }
-      : null,
-  });
+  // Only the first-page (cursor==null) response is worth caching — every
+  // cursor is unique, so caching paginated pages just bloats CF storage.
+  // 30s + SWR matches the cron cadence (data only changes every 5 min) and
+  // the 60s client refreshHead window.
+  const headers =
+    cursor == null
+      ? { 'Cache-Control': 'public, max-age=30, stale-while-revalidate=300' }
+      : undefined;
+
+  return NextResponse.json(
+    {
+      events,
+      next_cursor,
+      totals,
+      poll: poll
+        ? {
+            last_run_at: poll.last_run_at,
+            last_status: poll.last_status,
+            last_event_count: poll.last_event_count,
+            is_backfilling: poll.is_backfilling === 1,
+          }
+        : null,
+    },
+    headers ? { headers } : undefined
+  );
 }
 
 function clamp(n: number, lo: number, hi: number): number {

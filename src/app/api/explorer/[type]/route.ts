@@ -42,7 +42,13 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ type: strin
       break;
   }
 
-  return NextResponse.json({ type, items: rows });
+  // Underlying data only changes on the 5-min poll cron, so a 30s edge cache
+  // with SWR keeps origin load bounded regardless of user count. No
+  // per-user data on this route, so `public` is safe.
+  return NextResponse.json(
+    { type, items: rows },
+    { headers: { 'Cache-Control': 'public, max-age=30, stale-while-revalidate=300' } }
+  );
 }
 
 function clamp(n: number, lo: number, hi: number): number {

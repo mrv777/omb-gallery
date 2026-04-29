@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useActivityFeed, type FeedFilter } from './useActivityFeed';
+import { useActivityFeed, type FeedFilter, type InitialActivity } from './useActivityFeed';
 import ActivityRow from './ActivityRow';
 import { formatRelTime } from '@/lib/format';
 
@@ -11,9 +11,16 @@ const FILTERS: { key: FeedFilter; label: string }[] = [
   { key: 'transfers', label: 'transfers' },
 ];
 
-export default function ActivityFeed() {
+type Props = {
+  initial?: InitialActivity;
+};
+
+export default function ActivityFeed({ initial }: Props) {
   const [filter, setFilter] = useState<FeedFilter>('all');
-  const { events, totals, poll, loading, error, reachedEnd, loadMore } = useActivityFeed(filter);
+  const { events, totals, poll, loading, error, reachedEnd, loadMore } = useActivityFeed(
+    filter,
+    initial
+  );
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   // Infinite scroll

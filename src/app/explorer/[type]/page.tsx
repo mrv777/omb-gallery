@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import SubpageShell from '@/components/SubpageShell';
 import Leaderboard from '@/components/Explorer/Leaderboard';
 import { LEADERBOARDS, type LeaderboardKey } from '@/components/Explorer/types';
+import { getStmts, type InscriptionRow } from '@/lib/db';
 
 const VALID: LeaderboardKey[] = [
   'most-transferred',
@@ -10,6 +11,8 @@ const VALID: LeaderboardKey[] = [
   'top-volume',
   'highest-sale',
 ];
+
+export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({
   params,
@@ -33,11 +36,30 @@ export default async function LeaderboardDetailPage({
   const { type: typeRaw } = await params;
   if (!VALID.includes(typeRaw as LeaderboardKey)) notFound();
   const type = typeRaw as LeaderboardKey;
+
+  const stmts = getStmts();
+  const collection = 'omb';
+  const limit = 100;
+  const items = (() => {
+    switch (type) {
+      case 'most-transferred':
+        return stmts.topByTransfers.all({ limit, collection }) as InscriptionRow[];
+      case 'longest-unmoved':
+        return stmts.topByLongestUnmoved.all({ limit, collection }) as InscriptionRow[];
+      case 'top-volume':
+        return stmts.topByVolume.all({ limit, collection }) as InscriptionRow[];
+      case 'highest-sale':
+        return stmts.topByHighestSale.all({ limit, collection }) as InscriptionRow[];
+      default:
+        return [] as InscriptionRow[];
+    }
+  })();
+
   return (
     <SubpageShell active="explorer">
       <section className="px-4 sm:px-6 pb-16">
         <div className="max-w-2xl">
-          <Leaderboard type={type} limit={100} />
+          <Leaderboard type={type} items={items} />
         </div>
       </section>
     </SubpageShell>

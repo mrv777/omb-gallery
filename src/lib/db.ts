@@ -8,7 +8,7 @@ import bravocadosInscriptions from '../data/collections/bravocados/inscriptions.
 import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 // OMB-shape entry: filename = "<inscription_number>.jpg|webp", per-color groups.
 type ImageEntry = { filename: string; description: string; tags: string[] };
@@ -88,6 +88,7 @@ function migrate(db: DB): void {
         upgradeV6ToV7(db);
         upgradeV7ToV8(db);
         upgradeV8ToV9(db);
+        upgradeV9ToV10(db);
       } else {
         initSchemaLatest(db);
       }
@@ -100,6 +101,7 @@ function migrate(db: DB): void {
       if (current < 7) upgradeV6ToV7(db);
       if (current < 8) upgradeV7ToV8(db);
       if (current < 9) upgradeV8ToV9(db);
+      if (current < 10) upgradeV9ToV10(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -179,6 +181,9 @@ function initSchemaLatest(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_events_inscription_num ON events (inscription_number, block_timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_events_id_desc         ON events (id DESC);
     CREATE INDEX IF NOT EXISTS idx_events_type_id         ON events (event_type, id DESC);
+    -- Covers the typed activity feed: WHERE event_type=? ORDER BY (block_timestamp, id) DESC.
+    -- Without this the planner uses idx_events_type_id and sorts in memory.
+    CREATE INDEX IF NOT EXISTS idx_events_type_ts_id      ON events (event_type, block_timestamp DESC, id DESC);
 
     -- Composite-PK shape (Phase 4). Per-collection rows for per-collection
     -- streams (satflow, satflow_listings); ord uses a single 'omb' row since
@@ -450,6 +455,16 @@ function upgradeV8ToV9(db: DB): void {
     FROM poll_state;
     DROP TABLE poll_state;
     ALTER TABLE poll_state_v9 RENAME TO poll_state;
+  `);
+}
+
+function upgradeV9ToV10(db: DB): void {
+  // Composite index for the typed activity feed: WHERE event_type=?
+  // ORDER BY (block_timestamp, id) DESC. The pre-existing idx_events_type_id
+  // is keyed by (event_type, id DESC), which forces an in-memory sort once
+  // the typed result set grows beyond a page.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_events_type_ts_id ON events (event_type, block_timestamp DESC, id DESC)
   `);
 }
 
