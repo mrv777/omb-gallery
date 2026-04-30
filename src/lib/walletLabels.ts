@@ -3,8 +3,10 @@
 // source of truth for owners we want to suppress from aggregate views
 // (leaderboards, charts, activity) so they don't drown out community data.
 
-export const TREASURY_ADDRESS =
+export const ORANGE_MINT_ADDRESS =
   'bc1p4a29gzwlear4csc9sz6ll97j9yl7877tasy75evq8wm6r3admtqq3m72k0';
+export const TREASURY_ADDRESS =
+  'bc1pd6l0a8zg58wgvn30ef46mqmyrtdhwkeqz78kwhe52rk3nl48txhq05ke8f';
 
 export type WalletLabel = {
   name: string;
@@ -13,6 +15,7 @@ export type WalletLabel = {
 };
 
 export const WALLET_LABELS: Record<string, WalletLabel> = {
+  [ORANGE_MINT_ADDRESS]: { name: 'OMB Orange Mint' },
   [TREASURY_ADDRESS]: { name: 'OMB Treasury' },
 };
 
@@ -24,9 +27,9 @@ export function lookupWalletLabel(addr: string | null | undefined): WalletLabel 
 // Owners whose current holdings & related events are filtered out of every
 // aggregate view (leaderboards, distribution/duration histograms, transfer
 // sparkline, activity feed, total counts). Top Holders deliberately keeps
-// them — that's the only place the treasury should surface, since it's by
-// definition the largest holder.
-export const EXCLUDED_OWNERS: readonly string[] = [TREASURY_ADDRESS];
+// them — that's the only place these protocol wallets should surface, since
+// they're by definition among the largest holders.
+export const EXCLUDED_OWNERS: readonly string[] = [ORANGE_MINT_ADDRESS, TREASURY_ADDRESS];
 
 // SQL fragment for inline interpolation into prepared statements. Values
 // are hardcoded constants we control, so there's no injection vector — but
