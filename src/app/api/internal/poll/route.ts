@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb, getStmts, walCheckpoint, type CollectionRow, type PollStateRow } from '@/lib/db';
 import {
+  getDb,
+  getStmts,
+  walCheckpoint,
+  getOrdState,
+  setOrdState,
+  type CollectionRow,
+  type PollStateRow,
+} from '@/lib/db';
+import {
+  fetchBitcoindTip,
   fetchBlockHeight,
   fetchBlockTimestamp,
   fetchInscriptionDetail,
@@ -144,6 +153,9 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         break;
       case 'ord':
         result = await runOrdTick();
+        break;
+      case 'heal-heights':
+        result = await runHealHeightsTick();
         break;
       case 'satflow':
         result = await iterateSatflowCollections(onlyCollection, {});
@@ -328,6 +340,7 @@ async function runOrdTick(): Promise<TickResult> {
   let inserted = 0;
   let initialized = 0;
   let blockHeight: number | null = null;
+  let bitcoindTip: number | null = null;
   let errMsg: string | null = null;
 
   try {
@@ -337,6 +350,30 @@ async function runOrdTick(): Promise<TickResult> {
     setOrdResult(errMsg, 0);
     return { mode: 'ord', error: errMsg };
   }
+
+  // Derive bitcoind's chain tip via ord. ord's `confirmations` field on
+  // /output and /r/blockinfo is bitcoind-tip-relative, NOT ord-index-tip-
+  // relative. When ord lags bitcoind (post-deploy resync, busy reorg, slow
+  // disk), `ordTip - confirmations + 1` is wrong by exactly the lag —
+  // historically silently corrupted every transfer event's block_height.
+  // Abort the entire tick if we can't derive the bitcoind tip, rather than
+  // falling back to ordTip and writing more bad data.
+  try {
+    bitcoindTip = await fetchBitcoindTip(blockHeight);
+  } catch (err) {
+    errMsg = `bitcoind tip derivation failed: ${errorMessage(err)}`;
+    log.warn('poll/ord', errMsg, { ord_tip: blockHeight });
+    setOrdResult(errMsg, 0);
+    return { mode: 'ord', error: errMsg, blockHeight };
+  }
+  if (bitcoindTip == null) {
+    errMsg = 'bitcoind tip derivation returned null (malformed /r/blockinfo)';
+    log.warn('poll/ord', errMsg, { ord_tip: blockHeight });
+    setOrdResult(errMsg, 0);
+    return { mode: 'ord', error: errMsg, blockHeight };
+  }
+  // Persist for the health endpoint and heal mode.
+  setOrdState({ bitcoindTip });
 
   // Stale-index guard: if ord's reported tip has dropped meaningfully below
   // the highest height we've successfully ingested, ord is likely re-indexing
@@ -430,9 +467,9 @@ async function runOrdTick(): Promise<TickResult> {
     // satpoint, not when the move happened; without enrichment every
     // event would carry the poll-time as its timestamp.
     const transferSatpoints = collectTransferSatpoints(states, indexed);
-    const enrichmentMap = await enrichTransfers(transferSatpoints, blockHeight);
+    const enrichmentMap = await enrichTransfers(transferSatpoints, bitcoindTip);
 
-    const tickResult = applyOrdStates(states, indexed, blockHeight, enrichmentMap);
+    const tickResult = applyOrdStates(states, indexed, enrichmentMap);
     changed += tickResult.changed;
     inserted += tickResult.inserted;
     initialized += tickResult.initialized;
@@ -469,6 +506,8 @@ async function runOrdTick(): Promise<TickResult> {
   return {
     mode: 'ord',
     blockHeight,
+    bitcoindTip,
+    ordLagBlocks: bitcoindTip - blockHeight,
     lastKnownHeight: newKnownHeight,
     bootstrapped,
     checked,
@@ -551,7 +590,6 @@ function applyOrdStates(
     string,
     { inscription_number: number; current_output: string | null; current_owner: string | null }
   >,
-  blockHeight: number | null,
   enrichmentMap: EnrichmentMap
 ): { changed: number; inserted: number; initialized: number } {
   if (states.length === 0) return { changed: 0, inserted: 0, initialized: 0 };
@@ -601,17 +639,18 @@ function applyOrdStates(
         continue;
       }
       changed++;
-      // Prefer real on-chain block_height/timestamp from enrichment; fall
-      // back to chain-tip + now-time only if enrichment failed (ord 404,
-      // mempool tx with confirmations=0, network blip). Fallback events
-      // can be detected via block_height === blockHeight and re-enriched
-      // by a future ?mode=enrich pass if we ever add one.
+      // Prefer real on-chain block_height/timestamp from enrichment. On
+      // per-event enrichment failure (single /output 404, mempool tx with
+      // confirmations=0, network blip) write block_height=NULL with
+      // now-time — honest "we don't know which block" — instead of using
+      // the chain tip as a misleading fallback. The heal-heights cron
+      // re-enriches NULL rows on a later pass once ord knows the output.
       const enriched = enrichmentMap.get(newOutput);
       const ev = {
         inscription_id: s.inscription_id,
         inscription_number: known.inscription_number,
         event_type: 'transferred' as const,
-        block_height: enriched?.block_height ?? blockHeight,
+        block_height: enriched?.block_height ?? null,
         block_timestamp: enriched?.block_timestamp ?? nowTs,
         new_satpoint: newOutput,
         old_owner: known.current_owner,
@@ -696,13 +735,20 @@ function collectTransferSatpoints(
  * Two ord calls per unique satpoint; runs in parallel waves of N to keep
  * burst latency bounded without overloading ord.
  *
+ * MUST be passed bitcoind's chain tip (not ord's index height). ord's
+ * `confirmations` field is bitcoind-tip-relative, so using ord_index_tip
+ * here is wrong by exactly the index lag (the original bug).
+ *
  * Failures (404, malformed, timeout, mempool tx with confirmations=0) are
- * silently dropped — the caller falls back to chain-tip + now-time so we
- * still emit the transfer event, just with imprecise time.
+ * silently dropped — the caller writes block_height=NULL for the event so
+ * the heal-heights cron can re-enrich on a later pass.
  */
-async function enrichTransfers(satpoints: string[], ordTip: number | null): Promise<EnrichmentMap> {
+async function enrichTransfers(
+  satpoints: string[],
+  bitcoindTip: number | null
+): Promise<EnrichmentMap> {
   const map: EnrichmentMap = new Map();
-  if (satpoints.length === 0 || ordTip == null) return map;
+  if (satpoints.length === 0 || bitcoindTip == null) return map;
   const unique = Array.from(new Set(satpoints));
 
   // Step 1: parallel /output lookups → confirmations → block_height
@@ -713,7 +759,7 @@ async function enrichTransfers(satpoints: string[], ordTip: number | null): Prom
     for (let j = 0; j < results.length; j++) {
       const r = results[j];
       if (r.status !== 'fulfilled' || r.value == null || r.value < 1) continue;
-      const height = ordTip - r.value + 1;
+      const height = bitcoindTip - r.value + 1;
       if (height < 1) continue;
       heights.set(wave[j], height);
     }
@@ -761,6 +807,212 @@ function setOrdResult(status: string, eventCount: number): void {
     event_count: eventCount,
     cursor: null,
   });
+}
+
+// ---------------- mode: heal-heights ----------------
+
+// Walks the events table re-enriching block_height/block_timestamp via ord's
+// /output (using the bitcoind-tip-relative `confirmations` field) so historical
+// rows written under the old buggy formula (or with NULL height from per-event
+// enrichment failures) get corrected. Idempotent: rows already correct are
+// skipped via compare-then-update. Resumable via poll_state.last_cursor JSON.
+//
+// Wallclock-bounded so the cron's curl -m 600 has slack. Re-running the same
+// mode picks up from where the previous run left off; once the full table is
+// scanned, the cursor wraps to 0 so the next nightly run continuously
+// re-verifies the table (belt-and-suspenders against future drift).
+
+const HEAL_BATCH_SIZE = 200;
+const HEAL_CONCURRENCY = 4;
+const HEAL_WALLCLOCK_BUDGET_MS = 8 * 60 * 1000;
+
+let healRunning = false;
+
+async function runHealHeightsTick(): Promise<TickResult> {
+  if (!process.env.ORD_BASE_URL) {
+    return { mode: 'heal-heights', skipped: 'not-configured' };
+  }
+  if (healRunning) {
+    return { mode: 'heal-heights', skipped: 'concurrent' };
+  }
+  healRunning = true;
+  const startedAt = Date.now();
+  let processed = 0;
+  let updated = 0;
+  let nullsFilled = 0;
+  let enrichFailed = 0;
+  let wrappedCursor = false;
+
+  try {
+    let ordTip: number;
+    let bitcoindTip: number | null;
+    try {
+      ordTip = await fetchBlockHeight();
+      bitcoindTip = await fetchBitcoindTip(ordTip);
+    } catch (err) {
+      const msg = `bitcoind tip derivation failed: ${errorMessage(err)}`;
+      log.warn('poll/heal', msg);
+      return { mode: 'heal-heights', error: msg };
+    }
+    if (bitcoindTip == null) {
+      const msg = 'bitcoind tip derivation returned null';
+      log.warn('poll/heal', msg, { ord_tip: ordTip });
+      return { mode: 'heal-heights', error: msg };
+    }
+    setOrdState({ bitcoindTip });
+
+    const db = getDb();
+    const selectBatch = db.prepare(
+      `SELECT id, inscription_number, new_satpoint, block_height, block_timestamp
+       FROM events
+       WHERE id > ? AND new_satpoint IS NOT NULL
+       ORDER BY id ASC
+       LIMIT ?`
+    );
+    const updateRow = db.prepare(
+      `UPDATE events SET block_height = ?, block_timestamp = ? WHERE id = ?`
+    );
+    const rebuildAggregatesForOne = db.prepare(
+      `UPDATE inscriptions SET
+         first_event_at   = (SELECT MIN(block_timestamp) FROM events
+                             WHERE inscription_number = inscriptions.inscription_number),
+         last_event_at    = (SELECT MAX(block_timestamp) FROM events
+                             WHERE inscription_number = inscriptions.inscription_number),
+         last_movement_at = (SELECT MAX(block_timestamp) FROM events
+                             WHERE inscription_number = inscriptions.inscription_number
+                               AND event_type IN ('transferred','sold'))
+       WHERE inscription_number = ?`
+    );
+    const heightToTs = new Map<number, number>();
+
+    let cursor = getOrdState().healCursor ?? 0;
+
+    while (Date.now() - startedAt < HEAL_WALLCLOCK_BUDGET_MS) {
+      // Re-derive bitcoindTip per batch. Across an 8-min run we can cross 0-2
+      // block boundaries; a stale tip + fresh confirmations would compute a
+      // height a few blocks low and trigger update-churn on subsequent runs.
+      // One extra /r/blockinfo call per batch (~50/run) is negligible.
+      try {
+        const fresh = await fetchBitcoindTip(ordTip);
+        if (fresh != null) bitcoindTip = fresh;
+      } catch {
+        // Transient — keep using last-known tip rather than aborting; we'll
+        // try again next batch. Off-by-a-few drift is tolerable; aborting
+        // mid-walk and losing all progress is not.
+      }
+
+      const rows = selectBatch.all(cursor, HEAL_BATCH_SIZE) as Array<{
+        id: number;
+        inscription_number: number;
+        new_satpoint: string;
+        block_height: number | null;
+        block_timestamp: number;
+      }>;
+      if (rows.length === 0) {
+        // End of table — wrap cursor for the next run so heal continuously
+        // re-verifies the table over time.
+        cursor = 0;
+        wrappedCursor = true;
+        setOrdState({ healCursor: 0, healCompletedAt: Math.floor(Date.now() / 1000) });
+        break;
+      }
+
+      // Step 1: parallel /output lookups → confirmations → height
+      const tipForBatch = bitcoindTip;
+      const heights = new Array<number | null>(rows.length).fill(null);
+      for (let i = 0; i < rows.length; i += HEAL_CONCURRENCY) {
+        const wave = rows.slice(i, i + HEAL_CONCURRENCY);
+        const results = await Promise.allSettled(
+          wave.map(r => fetchOutputConfirmations(r.new_satpoint))
+        );
+        for (let j = 0; j < results.length; j++) {
+          const r = results[j];
+          if (r.status !== 'fulfilled' || r.value == null || r.value < 1) continue;
+          const h = tipForBatch - r.value + 1;
+          if (h < 1) continue;
+          heights[i + j] = h;
+        }
+      }
+
+      // Step 2: lazy-fetch block timestamps for any new heights we haven't
+      // already seen this run (inscription transfers tend to cluster, so the
+      // cache hits are non-trivial).
+      const newHeights = Array.from(
+        new Set(heights.filter((h): h is number => h != null && !heightToTs.has(h)))
+      );
+      for (let i = 0; i < newHeights.length; i += HEAL_CONCURRENCY) {
+        const wave = newHeights.slice(i, i + HEAL_CONCURRENCY);
+        const results = await Promise.allSettled(wave.map(h => fetchBlockTimestamp(h)));
+        for (let j = 0; j < results.length; j++) {
+          const r = results[j];
+          if (r.status !== 'fulfilled' || r.value == null) continue;
+          heightToTs.set(wave[j], r.value);
+        }
+      }
+
+      // Step 3: write updates. Track inscription_numbers touched so we can
+      // rebuild their aggregates once at end-of-batch (cheap; ~tens per batch).
+      const touchedInscriptions = new Set<number>();
+      const txn = db.transaction(() => {
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i];
+          const correctHeight = heights[i];
+          if (correctHeight == null) {
+            enrichFailed++;
+            continue;
+          }
+          const correctTs = heightToTs.get(correctHeight);
+          if (correctTs == null) {
+            enrichFailed++;
+            continue;
+          }
+          const wasNull = row.block_height == null;
+          if (correctHeight === row.block_height && correctTs === row.block_timestamp) {
+            continue;
+          }
+          updateRow.run(correctHeight, correctTs, row.id);
+          updated++;
+          if (wasNull) nullsFilled++;
+          touchedInscriptions.add(row.inscription_number);
+        }
+        touchedInscriptions.forEach(n => {
+          rebuildAggregatesForOne.run(n);
+        });
+      });
+      txn();
+
+      processed += rows.length;
+      cursor = rows[rows.length - 1].id;
+      setOrdState({ healCursor: cursor });
+    }
+
+    log.info('poll/heal', 'tick complete', {
+      processed,
+      updated,
+      nulls_filled: nullsFilled,
+      enrich_failed: enrichFailed,
+      cursor,
+      wrapped: wrappedCursor,
+      bitcoind_tip: bitcoindTip,
+      ord_tip: ordTip,
+      dur_ms: Date.now() - startedAt,
+    });
+
+    return {
+      mode: 'heal-heights',
+      processed,
+      updated,
+      nullsFilled,
+      enrichFailed,
+      cursor,
+      wrapped: wrappedCursor,
+      bitcoindTip,
+      ordTip,
+      durMs: Date.now() - startedAt,
+    };
+  } finally {
+    healRunning = false;
+  }
 }
 
 // ---------------- mode: satflow ----------------

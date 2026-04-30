@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getDb, type PollStateRow } from '@/lib/db';
+import { getDb, getOrdState, type PollStateRow } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -18,6 +18,12 @@ const STALE_THRESHOLD_SEC: Record<string, number> = {
 };
 const DEFAULT_STALE_SEC = 600;
 
+// ord-vs-bitcoind index lag thresholds (in blocks). Lag > 50 (~8h drift) is
+// worth a warn; > 1000 (~7 days) means the gallery is missing a meaningful
+// chunk of recent on-chain activity and rolls the global status to degraded.
+const ORD_LAG_WARN_BLOCKS = 50;
+const ORD_LAG_DEGRADED_BLOCKS = 1000;
+
 type StreamStatus = {
   stream: string;
   collection: string;
@@ -28,6 +34,12 @@ type StreamStatus = {
   is_backfilling: boolean;
   last_known_height: number | null;
   stale: boolean;
+  // ord-only extras (null on other streams)
+  ord_index_tip?: number | null;
+  bitcoind_tip?: number | null;
+  ord_lag_blocks?: number | null;
+  heal_cursor?: number | null;
+  heal_completed_at?: number | null;
 };
 
 export async function GET() {
@@ -42,10 +54,12 @@ export async function GET() {
     )
     .all() as PollStateRow[];
 
+  const ordState = getOrdState();
+
   const streams: StreamStatus[] = rows.map(r => {
     const age = r.last_run_at == null ? null : now - r.last_run_at;
     const threshold = STALE_THRESHOLD_SEC[r.stream] ?? DEFAULT_STALE_SEC;
-    return {
+    const base: StreamStatus = {
       stream: r.stream,
       collection: r.collection_slug,
       last_run_at: r.last_run_at,
@@ -56,13 +70,27 @@ export async function GET() {
       last_known_height: r.last_known_height,
       stale: age == null || age > threshold,
     };
+    if (r.stream === 'ord' && r.collection_slug === 'omb') {
+      const ordTip = r.last_known_height;
+      const btcTip = ordState.bitcoindTip;
+      base.ord_index_tip = ordTip;
+      base.bitcoind_tip = btcTip;
+      base.ord_lag_blocks = ordTip != null && btcTip != null ? Math.max(0, btcTip - ordTip) : null;
+      base.heal_cursor = ordState.healCursor;
+      base.heal_completed_at = ordState.healCompletedAt;
+    }
+    return base;
   });
 
   // Roll-up status: ok if all fresh + last_status==='ok'-like; degraded if any
-  // stream is stale or non-ok; never 'down' (passive read can't tell us that).
+  // stream is stale, non-ok, or ord lag exceeds threshold; never 'down' (passive
+  // read can't tell us that).
   const anyStale = streams.some(s => s.stale);
   const anyError = streams.some(s => s.last_status != null && !s.last_status.startsWith('ok'));
-  const status = anyStale ? 'degraded' : anyError ? 'warn' : 'ok';
+  const ordLag = streams.find(s => s.stream === 'ord')?.ord_lag_blocks ?? 0;
+  const lagDegraded = ordLag > ORD_LAG_DEGRADED_BLOCKS;
+  const lagWarn = ordLag > ORD_LAG_WARN_BLOCKS;
+  const status = anyStale || lagDegraded ? 'degraded' : anyError || lagWarn ? 'warn' : 'ok';
 
   return NextResponse.json({
     status,

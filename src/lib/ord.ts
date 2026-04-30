@@ -88,13 +88,40 @@ export async function fetchInscriptionsBatch(ids: string[]): Promise<OrdInscript
  * directly (the inscription endpoint only ships *genesis* height/timestamp),
  * so we derive it from `confirmations` against the chain tip.
  *
+ * IMPORTANT: ord proxies bitcoind's `confirmations` value verbatim, which is
+ * **bitcoind-tip-relative**, NOT ord-index-tip-relative. When ord's index
+ * lags bitcoind, `tip - confirmations + 1` using ord's `/blockheight` is
+ * wrong by exactly the lag. Always compute against the *bitcoind* tip
+ * (derive via `fetchBitcoindTip(ordTip)`).
+ *
  * Returns confirmations of the tx that *created* this output. For a mempool
- * tx, ord returns 0 (and we fall back to the poller's now-time at the call
- * site). Returns 404 if ord doesn't know the output.
+ * tx, ord returns 0. Returns 404 if ord doesn't know the output.
  */
 export async function fetchOutputConfirmations(satpoint: string): Promise<number | null> {
   const json = (await getJson(`${ensureBase()}/output/${satpoint}`)) as Record<string, unknown>;
   return pickInt(json, ['confirmations']);
+}
+
+/**
+ * Derive the bitcoind chain tip via ord. ord's `/r/blockinfo/<H>.confirmations`
+ * is bitcoind-tip-relative, so for any indexed height H:
+ *
+ *   bitcoindTip = H + confirmations - 1
+ *
+ * Pass `ordTip` (from `fetchBlockHeight()`) — guaranteed to be in ord's index.
+ * When ord is fully caught up, the result equals `ordTip` (confirmations=1).
+ * When ord lags, the result equals bitcoind's actual tip — which is what
+ * height computations need.
+ *
+ * Returns null if the response is malformed; caller should treat as
+ * "abort tick" rather than fall back to ordTip (the bug this guards against).
+ */
+export async function fetchBitcoindTip(ordTip: number): Promise<number | null> {
+  if (ordTip < 1) return null;
+  const json = (await getJson(`${ensureBase()}/r/blockinfo/${ordTip}`)) as Record<string, unknown>;
+  const confirmations = pickInt(json, ['confirmations']);
+  if (confirmations == null || confirmations < 1) return null;
+  return ordTip + confirmations - 1;
 }
 
 /**

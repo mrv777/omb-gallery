@@ -1676,6 +1676,51 @@ export function walCheckpoint(): void {
   }
 }
 
+// ord stream state JSON-packed into poll_state.last_cursor for ('ord','omb').
+// `last_cursor` was unused on the ord stream (ord is a stateless poll) until
+// we needed to persist (a) the derived bitcoind tip per tick — for the height
+// formula and the health surface — and (b) the heal-heights cursor.
+// Stored as a JSON object so future fields can be added without a migration.
+export type OrdPersistedState = {
+  bitcoindTip: number | null;
+  healCursor: number | null;
+  healCompletedAt: number | null;
+};
+
+const ORD_STATE_DEFAULT: OrdPersistedState = {
+  bitcoindTip: null,
+  healCursor: null,
+  healCompletedAt: null,
+};
+
+export function getOrdState(): OrdPersistedState {
+  const db = getDb();
+  const row = db
+    .prepare(`SELECT last_cursor FROM poll_state WHERE stream='ord' AND collection_slug='omb'`)
+    .get() as { last_cursor: string | null } | undefined;
+  if (!row || !row.last_cursor) return { ...ORD_STATE_DEFAULT };
+  try {
+    const parsed = JSON.parse(row.last_cursor) as Partial<OrdPersistedState>;
+    if (typeof parsed !== 'object' || parsed == null) return { ...ORD_STATE_DEFAULT };
+    return {
+      bitcoindTip: typeof parsed.bitcoindTip === 'number' ? parsed.bitcoindTip : null,
+      healCursor: typeof parsed.healCursor === 'number' ? parsed.healCursor : null,
+      healCompletedAt: typeof parsed.healCompletedAt === 'number' ? parsed.healCompletedAt : null,
+    };
+  } catch {
+    // Pre-JSON value from before this migration (or corruption) — treat as empty.
+    return { ...ORD_STATE_DEFAULT };
+  }
+}
+
+export function setOrdState(partial: Partial<OrdPersistedState>): void {
+  const db = getDb();
+  const merged: OrdPersistedState = { ...getOrdState(), ...partial };
+  db.prepare(
+    `UPDATE poll_state SET last_cursor=? WHERE stream='ord' AND collection_slug='omb'`
+  ).run(JSON.stringify(merged));
+}
+
 export type EventRow = {
   id: number;
   inscription_id: string;
