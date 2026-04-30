@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import type { EventRow, InscriptionRow } from '@/lib/db';
+import type { EventRow, InscriptionRow, OwnershipDeltaRow } from '@/lib/db';
 import { lookupInscription } from '@/lib/inscriptionLookup';
 import {
   addressLink,
@@ -12,6 +12,8 @@ import {
 } from '@/lib/format';
 import { WalletsList } from './WalletsList';
 import SafeImg from '@/components/SafeImg';
+import ColorPortfolioBar from '@/components/Charts/ColorPortfolioBar';
+import BagSizeOverTime from '@/components/Charts/BagSizeOverTime';
 
 const COLOR_TILE_BG: Record<string, string> = {
   red: 'bg-accent-red/20',
@@ -39,6 +41,9 @@ type Props = {
   events: EventRow[];
   eventTotal: number;
   tileCap: number;
+  /** Full ownership-change deltas across all linked wallets (for the
+   * bag-size-over-time chart). Concatenated per-wallet rows; chart sorts. */
+  ownershipDeltas: OwnershipDeltaRow[];
 };
 
 export default function HolderProfile({
@@ -51,6 +56,7 @@ export default function HolderProfile({
   events,
   eventTotal,
   tileCap,
+  ownershipDeltas,
 }: Props) {
   const ombShown = ombHoldings.slice(0, tileCap);
   const ombHidden = ombHoldings.length - ombShown.length;
@@ -161,6 +167,10 @@ export default function HolderProfile({
           </div>
         )}
       </div>
+
+      {ombHoldings.length > 0 && <ColorPortfolioBar holdings={ombHoldings} />}
+
+      <BagSizeOverTime deltas={ownershipDeltas} />
 
       {/* Bravocados — secondary surface, intentionally muted */}
       {bravoHoldings.length > 0 && (

@@ -939,6 +939,11 @@ type Stmts = {
   getMatricaProfilesForAddrs: ReturnType<DB['prepare']>;
   topHoldersGrouped: ReturnType<DB['prepare']>;
   countHolderIdentities: ReturnType<DB['prepare']>;
+  // charts
+  holderDistributionBuckets: ReturnType<DB['prepare']>;
+  holdingDurationBuckets: ReturnType<DB['prepare']>;
+  transferActivityByDay: ReturnType<DB['prepare']>;
+  ownershipChangesByAddress: ReturnType<DB['prepare']>;
 };
 
 let stmts: Stmts | null = null;
@@ -1548,6 +1553,92 @@ export function getStmts(): Stmts {
         AND i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
     `),
+
+    // Charts: holder distribution histogram. Buckets identities (Matrica user
+    // when known, raw wallet otherwise) by how many inscriptions they hold.
+    // The inner query mirrors topHoldersGrouped — same Matrica collapse — so
+    // the bucket counts square with the top-holders leaderboard.
+    holderDistributionBuckets: db.prepare(`
+      SELECT bucket, COUNT(*) AS wallet_count FROM (
+        SELECT
+          CASE
+            WHEN cnt = 1 THEN '1'
+            WHEN cnt BETWEEN 2 AND 5 THEN '2-5'
+            WHEN cnt BETWEEN 6 AND 10 THEN '6-10'
+            WHEN cnt BETWEEN 11 AND 25 THEN '11-25'
+            ELSE '26+'
+          END AS bucket
+        FROM (
+          SELECT COUNT(*) AS cnt
+          FROM inscriptions i
+          LEFT JOIN wallet_links wl ON wl.wallet_addr = i.current_owner
+          WHERE i.current_owner IS NOT NULL
+            AND i.collection_slug = @collection
+            AND (@color IS NULL OR i.color = @color)
+          GROUP BY COALESCE(wl.matrica_user_id, i.current_owner)
+        )
+      )
+      GROUP BY bucket
+    `),
+
+    // Charts: holding-duration histogram. Bucket each inscription by how long
+    // it has sat at its current address. Uses last_movement_at when present,
+    // falling back to inscribe_at for never-moved OMBs ("held since mint").
+    // Inscriptions with neither timestamp are excluded — those are pre-bootstrap
+    // rows that the indexer hasn't filled yet.
+    holdingDurationBuckets: db.prepare(`
+      SELECT bucket, COUNT(*) AS count FROM (
+        SELECT
+          CASE
+            WHEN (unixepoch() - ref_ts) < 30*86400  THEN '<1mo'
+            WHEN (unixepoch() - ref_ts) < 180*86400 THEN '1-6mo'
+            WHEN (unixepoch() - ref_ts) < 365*86400 THEN '6-12mo'
+            WHEN (unixepoch() - ref_ts) < 730*86400 THEN '1-2y'
+            ELSE '2y+'
+          END AS bucket
+        FROM (
+          SELECT COALESCE(last_movement_at, inscribe_at) AS ref_ts
+          FROM inscriptions
+          WHERE collection_slug = @collection
+            AND (@color IS NULL OR color = @color)
+            AND COALESCE(last_movement_at, inscribe_at) IS NOT NULL
+        )
+      )
+      GROUP BY bucket
+    `),
+
+    // Charts: transfer + sale events per day for the last @days days. The
+    // index idx_events_type_ts_id covers the (event_type, block_timestamp)
+    // probe; the inscription join scopes to a collection.
+    transferActivityByDay: db.prepare(`
+      SELECT date(e.block_timestamp, 'unixepoch') AS date,
+             COUNT(*)                              AS count
+      FROM events e
+      JOIN inscriptions i ON i.inscription_number = e.inscription_number
+      WHERE i.collection_slug = @collection
+        AND (@color IS NULL OR i.color = @color)
+        AND e.event_type IN ('transferred', 'sold')
+        AND e.block_timestamp >= unixepoch() - (@days * 86400)
+      GROUP BY date
+      ORDER BY date ASC
+    `),
+
+    // Charts: bag-size-over-time deltas for one address. Each event involving
+    // this address contributes +1 (when address received) and/or -1 (when it
+    // sent). For internal transfers (same address on both sides) the +1/-1
+    // cancel correctly on the chart side. No cap — full history is small (a
+    // single number/timestamp pair per row) and we want the chart to span
+    // mint→now. Excludes 'listed' (no real ownership change).
+    ownershipChangesByAddress: db.prepare(`
+      SELECT block_timestamp, +1 AS delta
+      FROM events
+      WHERE new_owner = @owner AND event_type != 'listed'
+      UNION ALL
+      SELECT block_timestamp, -1 AS delta
+      FROM events
+      WHERE old_owner = @owner AND event_type != 'listed'
+      ORDER BY block_timestamp ASC
+    `),
   };
   return stmts;
 }
@@ -1652,4 +1743,25 @@ export type GroupedHolderRow = {
   wallets_csv: string;
   inscription_count: number;
   updated_at: number;
+};
+
+export type HolderDistributionBucketRow = {
+  bucket: '1' | '2-5' | '6-10' | '11-25' | '26+';
+  wallet_count: number;
+};
+
+export type HoldingDurationBucketRow = {
+  bucket: '<1mo' | '1-6mo' | '6-12mo' | '1-2y' | '2y+';
+  count: number;
+};
+
+export type TransferActivityDayRow = {
+  /** ISO date string yyyy-mm-dd from SQLite's date(..., 'unixepoch'). */
+  date: string;
+  count: number;
+};
+
+export type OwnershipDeltaRow = {
+  block_timestamp: number;
+  delta: 1 | -1;
 };

@@ -5,6 +5,8 @@ import { useActivityFeed, type FeedFilter, type InitialActivity } from './useAct
 import ActivityRow from './ActivityRow';
 import { formatRelTime } from '@/lib/format';
 import { useColorFilter } from '@/lib/useColorFilter';
+import TransferActivitySparkline from '@/components/Charts/TransferActivitySparkline';
+import type { TransferActivityDayRow } from '@/lib/db';
 
 const FILTERS: { key: FeedFilter; label: string }[] = [
   { key: 'all', label: 'all' },
@@ -14,9 +16,13 @@ const FILTERS: { key: FeedFilter; label: string }[] = [
 
 type Props = {
   initial?: InitialActivity;
+  /** Server-rendered daily counts for the activity sparkline. Static for the
+   * page lifetime — doesn't update with the feed's filter state. */
+  dailyTransfers?: TransferActivityDayRow[];
+  sparklineDays?: number;
 };
 
-export default function ActivityFeed({ initial }: Props) {
+export default function ActivityFeed({ initial, dailyTransfers, sparklineDays = 90 }: Props) {
   const [filter, setFilter] = useState<FeedFilter>('all');
   const { color } = useColorFilter();
   const { events, totals, poll, matrica, loading, error, reachedEnd, loadMore } = useActivityFeed(
@@ -54,6 +60,11 @@ export default function ActivityFeed({ initial }: Props) {
 
   return (
     <section className="px-4 sm:px-6 pb-16">
+      {dailyTransfers && (
+        <div className="mb-4">
+          <TransferActivitySparkline data={dailyTransfers} days={sparklineDays} />
+        </div>
+      )}
       {/* Stats + filter bar */}
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 mb-4">
         <div className="font-mono text-[11px] tracking-[0.08em] uppercase text-bone-dim flex flex-wrap items-center gap-x-4 gap-y-1">

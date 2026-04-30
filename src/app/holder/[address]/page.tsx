@@ -6,6 +6,7 @@ import {
   getStmts,
   type EventRow,
   type InscriptionRow,
+  type OwnershipDeltaRow,
   type WalletLinkRow,
 } from '@/lib/db';
 import { truncateAddr } from '@/lib/format';
@@ -118,6 +119,18 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
     )
     .slice(0, RECENT_EVENTS_DISPLAY);
 
+  // Bag-size-over-time deltas — separate from the events list because we need
+  // every event (not just the recent 50) to render the full step-line. Each
+  // event involving any of our wallets contributes +1 (received) and/or -1
+  // (sent); internal transfers between two of the user's wallets cancel out
+  // on the chart side. Returns just (timestamp, delta) so the payload stays
+  // small even for whales with thousands of events.
+  const ownershipDeltas: OwnershipDeltaRow[] = [];
+  for (const w of wallets) {
+    const rows = stmts.ownershipChangesByAddress.all({ owner: w }) as OwnershipDeltaRow[];
+    ownershipDeltas.push(...rows);
+  }
+
   // Show a real 404 only when nothing in the DB references this address —
   // a wallet that emptied out (no current holdings but has past events)
   // should still render so users can see the activity. For aggregated users,
@@ -140,6 +153,7 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
         events={events}
         eventTotal={eventTotalSum}
         tileCap={TILE_CAP}
+        ownershipDeltas={ownershipDeltas}
       />
     </SubpageShell>
   );

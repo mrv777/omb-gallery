@@ -10,6 +10,7 @@ import {
 } from '@/lib/format';
 import EventTimelineRow from './EventTimelineRow';
 import NotificationButton, { BellIcon } from '@/components/NotificationButton/NotificationButton';
+import MovementTimeline from '@/components/Charts/MovementTimeline';
 
 const COLOR_TILE_BG: Record<string, string> = {
   red: 'bg-accent-red/20',
@@ -192,6 +193,8 @@ export default function InscriptionDetail({
           </div>
         </div>
       </div>
+
+      {events.length > 1 && <MovementTimeline events={events} />}
 
       {/* Activity timeline */}
       <div>

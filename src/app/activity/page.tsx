@@ -2,7 +2,12 @@ import type { Metadata } from 'next';
 import ActivityFeed from '@/components/Activity/ActivityFeed';
 import SubpageShell from '@/components/SubpageShell';
 import HeaderColorSwatches from '@/components/HeaderColorSwatches';
-import { getStmts, type EventRow, type PollStateRow } from '@/lib/db';
+import {
+  getStmts,
+  type EventRow,
+  type PollStateRow,
+  type TransferActivityDayRow,
+} from '@/lib/db';
 import { matricaProfilesForEvents } from '@/lib/matricaOverlay';
 import type { InitialActivity } from '@/components/Activity/useActivityFeed';
 import type { ColorFilter } from '@/lib/types';
@@ -20,6 +25,7 @@ export const dynamic = 'force-dynamic';
 
 const PAGE_SIZE = 60;
 const COLLECTION = 'omb';
+const SPARKLINE_DAYS = 90;
 
 export default async function ActivityPage({
   searchParams,
@@ -29,9 +35,18 @@ export default async function ActivityPage({
   const sp = await searchParams;
   const color = parseColorParam(sp.color);
   const initial = loadInitialActivity(color);
+  const dailyTransfers = getStmts().transferActivityByDay.all({
+    collection: COLLECTION,
+    color: colorParamForSql(color),
+    days: SPARKLINE_DAYS,
+  }) as TransferActivityDayRow[];
   return (
     <SubpageShell active="activity" color={color} headerControls={<HeaderColorSwatches />}>
-      <ActivityFeed initial={initial} />
+      <ActivityFeed
+        initial={initial}
+        dailyTransfers={dailyTransfers}
+        sparklineDays={SPARKLINE_DAYS}
+      />
     </SubpageShell>
   );
 }

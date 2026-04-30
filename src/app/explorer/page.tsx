@@ -2,9 +2,17 @@ import type { Metadata } from 'next';
 import SubpageShell from '@/components/SubpageShell';
 import HeaderColorSwatches from '@/components/HeaderColorSwatches';
 import Leaderboard from '@/components/Explorer/Leaderboard';
-import { getStmts, type GroupedHolderRow, type InscriptionRow } from '@/lib/db';
+import {
+  getStmts,
+  type GroupedHolderRow,
+  type HolderDistributionBucketRow,
+  type HoldingDurationBucketRow,
+  type InscriptionRow,
+} from '@/lib/db';
 import type { ApiHolder } from '@/components/Activity/types';
 import { colorParamForSql, parseColorParam } from '@/lib/colorFilter';
+import HolderDistributionHistogram from '@/components/Charts/HolderDistributionHistogram';
+import HoldingDurationHistogram from '@/components/Charts/HoldingDurationHistogram';
 
 export const metadata: Metadata = {
   title: 'Explorer · OMB Archive',
@@ -54,6 +62,14 @@ export default async function ExplorerPage({
     collection,
     color: colorParam,
   }) as GroupedHolderRow[];
+  const holderBuckets = stmts.holderDistributionBuckets.all({
+    collection,
+    color: colorParam,
+  }) as HolderDistributionBucketRow[];
+  const durationBuckets = stmts.holdingDurationBuckets.all({
+    collection,
+    color: colorParam,
+  }) as HoldingDurationBucketRow[];
   const holders: ApiHolder[] = holderRows.map(r => ({
     group_key: r.group_key,
     is_user: r.is_user === 1,
@@ -67,6 +83,10 @@ export default async function ExplorerPage({
   return (
     <SubpageShell active="explorer" color={color} headerControls={<HeaderColorSwatches />}>
       <section className="px-4 sm:px-6 pb-16">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <HolderDistributionHistogram buckets={holderBuckets} />
+          <HoldingDurationHistogram buckets={durationBuckets} />
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Leaderboard type="most-transferred" items={transfers} showSeeAll color={color} />
           <Leaderboard type="longest-unmoved" items={unmoved} showSeeAll color={color} />
