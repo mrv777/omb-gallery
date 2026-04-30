@@ -11,24 +11,24 @@ const SECTIONS: Section[] = [
     items: [
       {
         label: 'Color swatches',
-        body: 'Filter by red / blue / green / orange / black. "ALL" clears the filter.',
+        body: 'Filter by color. ALL clears it.',
       },
-      { label: 'Search', body: 'Type an inscription number or caption keyword.' },
+      { label: 'Search', body: 'Inscription number or caption keyword.' },
       {
         label: 'Heart (♡ / ♥)',
-        body: 'Click the heart to favorite a tile (long-press on mobile). The header heart filters to favorites only.',
+        body: 'Favorite a tile (long-press on mobile). Header heart filters to favorites.',
       },
       {
         label: '▶ PLAY',
-        body: 'Plays the current filter as a slideshow. Disabled when no images match.',
+        body: 'Plays the current filter as a slideshow.',
       },
       {
         label: '− / + / zoom',
-        body: 'Changes how many columns render. Pinch/scroll-zoom also works.',
+        body: 'Adjusts columns. Pinch or scroll-zoom too.',
       },
       {
         label: 'Click a piece',
-        body: 'Opens the full-size modal. Use ← / → to move, Esc to close.',
+        body: 'Opens full-size. ← / → navigate, Esc closes.',
       },
     ],
   },
@@ -37,26 +37,26 @@ const SECTIONS: Section[] = [
     items: [
       {
         label: 'Controls bar',
-        body: 'Auto-hides after ~2s. Move the mouse or tap the screen to bring it back.',
+        body: 'Auto-hides after ~2s. Move or tap to restore.',
       },
-      { label: 'Speed slider', body: '1–10 seconds per image. Default 4s.' },
+      { label: 'Speed slider', body: '1–10s per image. Default 4s.' },
       {
         label: 'Shuffle / loop',
-        body: 'Shuffle reshuffles immediately. Loop restarts from the top when the sequence ends.',
+        body: 'Shuffle reshuffles now. Loop restarts at the end.',
       },
       {
         label: 'Full',
-        body: 'Browser fullscreen. Esc exits fullscreen first, a second Esc closes the slideshow.',
+        body: 'Browser fullscreen. Esc exits, second Esc closes.',
       },
       {
         label: 'Share',
-        body: 'Generates a short link that freezes the exact image set forever. Cloudflare Turnstile protects the endpoint.',
+        body: 'Short link freezing the exact image set. Turnstile-gated.',
       },
       {
         label: 'Keyboard',
         body: 'Space play/pause · ← → prev/next · F fullscreen · S shuffle · L loop · [ / ] speed · Esc exit.',
       },
-      { label: 'Touch', body: 'Swipe ← / → to navigate. Tap the image to play/pause.' },
+      { label: 'Touch', body: 'Swipe ← / → to navigate. Tap to play/pause.' },
     ],
   },
   {
@@ -64,15 +64,15 @@ const SECTIONS: Section[] = [
     items: [
       {
         label: 'Watch button',
-        body: 'Click the bell on a tile, color filter, or inscription page to subscribe to transfer / sale / listing alerts.',
+        body: 'Bell icon subscribes to transfer / sale / listing alerts for a tile, color, or inscription.',
       },
       {
         label: 'Channels',
-        body: 'Telegram bot or your own Discord webhook. Both can run side by side from the same browser.',
+        body: 'Telegram bot or Discord webhook. Both can run from one browser.',
       },
       {
         label: 'Manage',
-        body: '/notifications shows everything you’re watching. Mute, edit which events trigger, or remove. Or use /list inside the Telegram bot.',
+        body: '/notifications lists watches — mute, edit events, or remove. Or /list in the Telegram bot.',
       },
     ],
   },
@@ -81,11 +81,11 @@ const SECTIONS: Section[] = [
     items: [
       {
         label: 'Activity',
-        body: 'Live on-chain feed for OMB inscriptions. Refreshes every 60s while the tab is visible.',
+        body: 'Live on-chain feed. Refreshes every 60s when visible.',
       },
       {
         label: 'Explorer',
-        body: 'Leaderboards: most-transferred, longest-unmoved, top volume, highest sale, plus top holders.',
+        body: 'Leaderboards: most-transferred, longest-unmoved, top volume, highest sale, top holders.',
       },
     ],
   },
