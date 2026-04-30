@@ -3,6 +3,7 @@ import { shortDate } from './chartUtils';
 
 const VB_W = 600;
 const VB_H = 56;
+const TICK_COUNT = 5;
 
 /**
  * Compact sparkline of (transferred + sold) events per day for the last @days.
@@ -66,9 +67,21 @@ export default function TransferActivitySparkline({
           vectorEffect="non-scaling-stroke"
         />
       </svg>
-      <div className="flex justify-between mt-1 text-[9px] tracking-[0.08em] uppercase text-bone-dim">
-        <span>{filled[0] ? shortDate(filled[0].date) : ''}</span>
-        <span>today</span>
+      <div className="relative h-3 mt-1 text-[9px] tracking-[0.08em] uppercase text-bone-dim">
+        {evenDateTicks(filled, TICK_COUNT).map((tk, i, arr) => {
+          const isFirst = i === 0;
+          const isLast = i === arr.length - 1;
+          const style: React.CSSProperties = isFirst
+            ? { left: 0 }
+            : isLast
+              ? { right: 0 }
+              : { left: `${tk.pct}%`, transform: 'translateX(-50%)' };
+          return (
+            <span key={i} className="absolute top-0 whitespace-nowrap" style={style}>
+              {isLast ? 'today' : tk.label}
+            </span>
+          );
+        })}
       </div>
     </div>
   );
@@ -97,6 +110,24 @@ function Header({
       )}
     </div>
   );
+}
+
+/** Pick `count` evenly-spaced ticks from the filled day series. Index-based
+ * (not time-based) since the sparkline plots one point per day at uniform
+ * spacing — this keeps tick labels aligned with the visual grid even if the
+ * underlying timeseries has irregular gaps (it doesn't here, but stays robust). */
+function evenDateTicks(
+  rows: TransferActivityDayRow[],
+  count: number,
+): Array<{ pct: number; label: string }> {
+  if (rows.length === 0 || count < 2) return [];
+  const out: Array<{ pct: number; label: string }> = [];
+  for (let i = 0; i < count; i++) {
+    const frac = i / (count - 1);
+    const idx = Math.round(frac * (rows.length - 1));
+    out.push({ pct: frac * 100, label: shortDate(rows[idx].date) });
+  }
+  return out;
 }
 
 /** Insert zero-count rows for days the SQL didn't return. Returns @days entries

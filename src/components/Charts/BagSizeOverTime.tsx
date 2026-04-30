@@ -1,8 +1,9 @@
 import type { OwnershipDeltaRow } from '@/lib/db';
-import { monthYear } from './chartUtils';
+import { timeTicks } from './chartUtils';
 
 const VB_W = 600;
 const VB_H = 140;
+const TICK_COUNT = 5;
 
 /**
  * Step-line of bag size over time, derived from on-chain receive/send events.
@@ -54,6 +55,7 @@ export default function BagSizeOverTime({ deltas }: { deltas: OwnershipDeltaRow[
   d += ` L ${x(tMax).toFixed(2)},${y(prevV).toFixed(2)}`;
 
   const yTicks = uniqueYTicks(vMax);
+  const xTicks = timeTicks(tMin, tMax, TICK_COUNT);
 
   return (
     <Frame>
@@ -103,9 +105,23 @@ export default function BagSizeOverTime({ deltas }: { deltas: OwnershipDeltaRow[
           </svg>
         </div>
       </div>
-      <div className="flex justify-between pl-9 mt-1 text-[9px] tracking-[0.08em] uppercase text-bone-dim">
-        <span>{monthYear(tMin)}</span>
-        <span>now</span>
+      <div className="relative pl-9 mt-1 h-3 text-[9px] tracking-[0.08em] uppercase text-bone-dim">
+        <div className="relative h-full">
+          {xTicks.map((tk, i) => {
+            const isFirst = i === 0;
+            const isLast = i === xTicks.length - 1;
+            const style: React.CSSProperties = isFirst
+              ? { left: 0 }
+              : isLast
+                ? { right: 0 }
+                : { left: `${tk.pct}%`, transform: 'translateX(-50%)' };
+            return (
+              <span key={i} className="absolute top-0 whitespace-nowrap" style={style}>
+                {isLast ? 'now' : tk.label}
+              </span>
+            );
+          })}
+        </div>
       </div>
     </Frame>
   );
