@@ -13,7 +13,7 @@ export type WalletLabel = {
 };
 
 export const WALLET_LABELS: Record<string, WalletLabel> = {
-  [TREASURY_ADDRESS]: { name: 'OMB Treasure', subtitle: 'community treasury' },
+  [TREASURY_ADDRESS]: { name: 'OMB Treasury' },
 };
 
 export function lookupWalletLabel(addr: string | null | undefined): WalletLabel | null {
