@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import HelpButton from './HelpButton';
 import MobileMenu from './MobileMenu';
+import FirehoseSubscribe from './FirehoseSubscribe';
 import type { ColorFilter } from '@/lib/types';
 import { appendColorParam } from '@/lib/colorFilter';
 
@@ -61,6 +62,9 @@ export default function SubpageShell({
       </header>
       <main className="pt-6">{children}</main>
       <footer className="px-4 sm:px-6 py-8 font-mono text-[10px] tracking-[0.08em] uppercase text-bone-dim border-t border-ink-2 mt-8">
+        <div className="mb-4">
+          <FirehoseSubscribe />
+        </div>
         on-chain data via ord · sale data via{' '}
         <a
           href="https://www.satflow.com"

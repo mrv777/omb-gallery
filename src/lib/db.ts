@@ -8,7 +8,7 @@ import bravocadosInscriptions from '../data/collections/bravocados/inscriptions.
 import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 15;
 
 // OMB-shape entry: filename = "<inscription_number>.jpg|webp", per-color groups.
 type ImageEntry = { filename: string; description: string; tags: string[] };
@@ -92,6 +92,8 @@ function migrate(db: DB): void {
         upgradeV10ToV11(db);
         upgradeV11ToV12(db);
         upgradeV12ToV13(db);
+        upgradeV13ToV14(db);
+        upgradeV14ToV15(db);
       } else {
         initSchemaLatest(db);
       }
@@ -108,6 +110,8 @@ function migrate(db: DB): void {
       if (current < 11) upgradeV10ToV11(db);
       if (current < 12) upgradeV11ToV12(db);
       if (current < 13) upgradeV12ToV13(db);
+      if (current < 14) upgradeV13ToV14(db);
+      if (current < 15) upgradeV14ToV15(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -213,7 +217,7 @@ function initSchemaLatest(db: DB): void {
     -- one batch poll covers every inscription regardless of collection. The
     -- 'matrica' stream is also collection-agnostic — one row keyed to 'omb'.
     CREATE TABLE IF NOT EXISTS poll_state (
-      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica')),
+      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica','notify')),
       collection_slug           TEXT NOT NULL REFERENCES collections (slug),
       last_cursor               TEXT,
       last_run_at               INTEGER,
@@ -228,7 +232,8 @@ function initSchemaLatest(db: DB): void {
       ('ord', 'omb'),
       ('satflow', 'omb'),
       ('satflow_listings', 'omb'),
-      ('matrica', 'omb');
+      ('matrica', 'omb'),
+      ('notify', 'omb');
 
     -- Matrica wallet-linking (Phase 5). matrica_users holds one row per
     -- distinct Matrica user we've seen (across any wallet); wallet_links
@@ -286,6 +291,53 @@ function initSchemaLatest(db: DB): void {
     );
     CREATE INDEX IF NOT EXISTS idx_slideshows_created_ip_at ON slideshows (creator_ip, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_slideshows_created_at    ON slideshows (created_at DESC);
+
+    -- Phase 6: notification subscriptions. One row per (channel, channel_target,
+    -- kind, target_key) — UNIQUE makes "click Watch twice" a no-op. status flow:
+    -- 'pending' (telegram claim awaiting /start) → 'active' → 'muted' (user
+    -- mute) | 'failed' (3 strikes or dead-target signal). channel_target is
+    -- the Telegram chat_id (string) or the Discord webhook URL.
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel          TEXT NOT NULL CHECK (channel IN ('telegram','discord')),
+      channel_target   TEXT NOT NULL,
+      kind             TEXT NOT NULL CHECK (kind IN ('inscription','color','collection')),
+      target_key       TEXT NOT NULL,
+      event_mask       INTEGER NOT NULL DEFAULT 3,
+      unsub_token      TEXT NOT NULL UNIQUE,
+      status           TEXT NOT NULL DEFAULT 'active'
+                          CHECK (status IN ('pending','active','muted','failed')),
+      claim_token      TEXT UNIQUE,
+      claim_expires_at INTEGER,
+      creator_ip       TEXT NOT NULL,
+      created_at       INTEGER NOT NULL,
+      last_sent_at     INTEGER,
+      fail_count       INTEGER NOT NULL DEFAULT 0,
+      UNIQUE (channel, channel_target, kind, target_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_subs_lookup_insc
+      ON subscriptions (kind, target_key) WHERE status = 'active' AND kind = 'inscription';
+    CREATE INDEX IF NOT EXISTS idx_subs_lookup_color
+      ON subscriptions (kind, target_key) WHERE status = 'active' AND kind = 'color';
+    CREATE INDEX IF NOT EXISTS idx_subs_lookup_collection
+      ON subscriptions (kind, target_key) WHERE status = 'active' AND kind = 'collection';
+    CREATE INDEX IF NOT EXISTS idx_subs_target
+      ON subscriptions (channel, channel_target);
+
+    -- Phase 6: notification fan-out queue. Live writers (ord transfer detection,
+    -- satflow incremental sale enrichment) INSERT OR IGNORE event ids here so
+    -- runNotifyFanout has a precise list of "needs delivery" rows. Backfill
+    -- writers do NOT enqueue (no historical replay). On satflow upgrade
+    -- transferred → sold, we re-enqueue the same event id so sales-only
+    -- subscribers can still be notified after the type change. The fanout
+    -- DELETEs rows only after all wanting recipients confirmed delivery, so
+    -- the queue acts as both new-event signal and per-row retry buffer.
+    CREATE TABLE IF NOT EXISTS notify_pending (
+      event_id    INTEGER PRIMARY KEY,
+      enqueued_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      FOREIGN KEY (event_id) REFERENCES events (id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_notify_pending_enqueued ON notify_pending (enqueued_at);
   `);
 }
 
@@ -584,6 +636,87 @@ function upgradeV12ToV13(db: DB): void {
   `);
 }
 
+function upgradeV13ToV14(db: DB): void {
+  // Phase 6: notification subscriptions. Two changes:
+  //   1. Extend poll_state.stream CHECK to allow 'notify' (cursor for the
+  //      fan-out step). SQLite can't ALTER a CHECK in place, so copy-and-swap
+  //      (same pattern as v6/v9/v12).
+  //   2. Add `subscriptions` table with the partial-index lookup pattern keyed
+  //      to (kind, target_key) where status='active'.
+  db.exec(`
+    CREATE TABLE poll_state_v14 (
+      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica','notify')),
+      collection_slug           TEXT NOT NULL REFERENCES collections (slug),
+      last_cursor               TEXT,
+      last_run_at               INTEGER,
+      last_status               TEXT,
+      last_event_count          INTEGER,
+      is_backfilling            INTEGER NOT NULL DEFAULT 0,
+      last_known_height         INTEGER,
+      backfill_unresolved_seen  INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (stream, collection_slug)
+    );
+    INSERT INTO poll_state_v14 SELECT * FROM poll_state;
+    DROP TABLE poll_state;
+    ALTER TABLE poll_state_v14 RENAME TO poll_state;
+    INSERT OR IGNORE INTO poll_state (stream, collection_slug) VALUES ('notify', 'omb');
+
+    CREATE TABLE subscriptions (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel          TEXT NOT NULL CHECK (channel IN ('telegram','discord')),
+      channel_target   TEXT NOT NULL,
+      kind             TEXT NOT NULL CHECK (kind IN ('inscription','color','collection')),
+      target_key       TEXT NOT NULL,
+      event_mask       INTEGER NOT NULL DEFAULT 3,
+      unsub_token      TEXT NOT NULL UNIQUE,
+      status           TEXT NOT NULL DEFAULT 'active'
+                          CHECK (status IN ('pending','active','muted','failed')),
+      claim_token      TEXT UNIQUE,
+      claim_expires_at INTEGER,
+      creator_ip       TEXT NOT NULL,
+      created_at       INTEGER NOT NULL,
+      last_sent_at     INTEGER,
+      fail_count       INTEGER NOT NULL DEFAULT 0,
+      UNIQUE (channel, channel_target, kind, target_key)
+    );
+    CREATE INDEX idx_subs_lookup_insc
+      ON subscriptions (kind, target_key) WHERE status = 'active' AND kind = 'inscription';
+    CREATE INDEX idx_subs_lookup_color
+      ON subscriptions (kind, target_key) WHERE status = 'active' AND kind = 'color';
+    CREATE INDEX idx_subs_lookup_collection
+      ON subscriptions (kind, target_key) WHERE status = 'active' AND kind = 'collection';
+    CREATE INDEX idx_subs_target
+      ON subscriptions (channel, channel_target);
+  `);
+}
+
+function upgradeV14ToV15(db: DB): void {
+  // Phase 6 v2: replace the cursor-based notify model with a persistent queue.
+  //
+  // The cursor (poll_state.last_cursor for stream='notify') had two problems:
+  //   1. NULL → treated as 0 → first ticks would scan from events.id=1, so
+  //      anyone who subscribed during catch-up could be alerted about events
+  //      that happened before Phase 6 shipped (historical replay).
+  //   2. satflow upgrades a 'transferred' row to 'sold' in place (same id).
+  //      Once cursor passed that id, the type change was invisible to fanout
+  //      and sales-only subscribers (Discord #sales channels) silently lost
+  //      the alert.
+  //
+  // The queue model fixes both: only LIVE writers enqueue (so historical and
+  // backfill rows never enter the queue), and satflow upgrade RE-enqueues the
+  // existing id so the type change is delivered. Existing event rows aren't
+  // backfilled into the queue — they're considered "already past" at upgrade
+  // time, which is the correct semantic on a brownfield deploy.
+  db.exec(`
+    CREATE TABLE notify_pending (
+      event_id    INTEGER PRIMARY KEY,
+      enqueued_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      FOREIGN KEY (event_id) REFERENCES events (id) ON DELETE CASCADE
+    );
+    CREATE INDEX idx_notify_pending_enqueued ON notify_pending (enqueued_at);
+  `);
+}
+
 function upgradeV4ToV5(db: DB): void {
   // Round-robin poll order: without this, runOrdTick always polls in
   // inscription_number ASC and breaks at the wallclock budget, so the back
@@ -754,6 +887,9 @@ type Stmts = {
   bumpSatflowCallCount: ReturnType<DB['prepare']>;
   getSatflowCallBudget: ReturnType<DB['prepare']>;
   resetSatflowCallBudget: ReturnType<DB['prepare']>;
+  // notify queue (Phase 6 v2)
+  enqueueNotify: ReturnType<DB['prepare']>;
+  selectNotifyQueueBatch: ReturnType<DB['prepare']>;
   // matrica wallet-linking
   pickWalletsToProbe: ReturnType<DB['prepare']>;
   upsertWalletLink: ReturnType<DB['prepare']>;
@@ -1196,6 +1332,31 @@ export function getStmts(): Stmts {
       UPDATE satflow_call_budget SET window_start = unixepoch(), call_count = 0 WHERE id = 1
     `),
 
+    // ---------------- notify queue (Phase 6 v2) ----------------
+
+    // Live event writers call this to mark a row for fanout delivery. INSERT
+    // OR IGNORE — the same id can be re-enqueued safely (e.g. satflow
+    // upgrades a transferred row to sold and wants the new type re-delivered;
+    // already-pending rows are no-ops).
+    enqueueNotify: db.prepare(`
+      INSERT OR IGNORE INTO notify_pending (event_id) VALUES (?)
+    `),
+
+    // Pull a batch of pending events for fanout. Joined to inscriptions for
+    // color + collection_slug (used by findMatchesForEvent). FIFO so a busy
+    // tick still drains old events before new ones.
+    selectNotifyQueueBatch: db.prepare(`
+      SELECT e.id, e.event_type, e.inscription_number, e.block_timestamp,
+             e.marketplace, e.sale_price_sats, e.new_owner, e.old_owner, e.txid,
+             i.color, i.collection_slug
+      FROM notify_pending q
+      JOIN events       e ON e.id = q.event_id
+      JOIN inscriptions i ON i.inscription_number = e.inscription_number
+      WHERE e.event_type IN ('transferred','sold')
+      ORDER BY q.enqueued_at ASC, q.event_id ASC
+      LIMIT ?
+    `),
+
     // ---------------- matrica wallet-linking ----------------
 
     // Pick wallets to probe against Matrica. Excludes wallets we've checked
@@ -1365,7 +1526,7 @@ export type HolderRow = {
 };
 
 export type PollStateRow = {
-  stream: 'ord' | 'satflow' | 'satflow_listings' | 'matrica';
+  stream: 'ord' | 'satflow' | 'satflow_listings' | 'matrica' | 'notify';
   collection_slug: string;
   last_cursor: string | null;
   last_run_at: number | null;

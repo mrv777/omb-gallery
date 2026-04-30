@@ -19,6 +19,7 @@ import {
   type NormalizedListing,
 } from '@/lib/satflow';
 import { fetchWalletProfile, MatricaError } from '@/lib/matrica';
+import { runNotifyFanout } from '@/lib/notify';
 import { log } from '@/lib/log';
 
 export const dynamic = 'force-dynamic';
@@ -40,9 +41,12 @@ const ORD_BOOTSTRAP_WAVE_DELAY_MS = 25;
 const ORD_ENRICHMENT_CONCURRENCY = 8;
 
 // Matrica wallet-linking. Per tick, probe N distinct OMB+bravocados owners
-// we haven't checked in MATRICA_STALENESS_SEC. With ~6k unique owners and
+// we haven't checked in MATRICA_STALENESS_SEC. With ~3.8k unique owners and
 // an hourly cron at 2 req/s + 800/tick, the initial backlog drains in
-// ~8 ticks (~8 hours); steady-state only re-probes rows aged past 7 days.
+// ~5 ticks (~5 hours); steady-state only re-probes rows aged past 7 days
+// (~550 calls/day). Newly-seen owners are picked up next tick regardless of
+// the staleness window — the picker's NOT EXISTS clause covers them — so the
+// 7d window only governs re-probes of already-known wallets.
 // Pacing inside src/lib/matrica.ts is 2 req/s, so 800 calls ≈ 7 min wallclock
 // (observed ~1.83 actual rps including HTTP latency).
 const MATRICA_PER_TICK_LIMIT = 800;
@@ -153,6 +157,9 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         result = await runMatricaTick({ limit });
         break;
       }
+      case 'notify':
+        result = await safeNotify();
+        break;
       case 'auto':
       default: {
         // Matrica is intentionally NOT in 'auto'. Auto runs every 5min;
@@ -162,7 +169,8 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         const ord = await runOrdTick();
         const satflow = await iterateSatflowCollections(onlyCollection, {});
         const listings = await iterateListingsCollections(onlyCollection, { force: false });
-        result = [ord, ...satflow, ...listings];
+        const notify = await safeNotify();
+        result = [ord, ...satflow, ...listings, notify];
         break;
       }
     }
@@ -256,6 +264,16 @@ async function iterateListingsCollections(
     out.push(await runListingsTick(c, opts));
   }
   return out;
+}
+
+async function safeNotify(): Promise<TickResult> {
+  try {
+    return (await runNotifyFanout()) as TickResult;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    log.error('poll/notify', 'fanout failed', { error: msg });
+    return { mode: 'notify', error: msg };
+  }
 }
 
 // ---------------- mode: init-backfill ----------------
@@ -617,6 +635,8 @@ function applyOrdStates(
           sale_price_sats: ev.sale_price_sats,
           block_timestamp: ev.block_timestamp,
         });
+        // ord transfer detection is always live (no historical replay path).
+        stmts.enqueueNotify.run(r.lastInsertRowid as number);
       }
       // Always update current state, even if event already existed (e.g. satflow
       // already inserted a 'sold' for this txid — we still need to track location).
@@ -820,7 +840,7 @@ async function runSatflowTick(
       break;
     }
 
-    const ap = applySalesTransaction(page.items, idToNumber);
+    const ap = applySalesTransaction(page.items, idToNumber, !backfilling);
     upgraded += ap.upgraded;
     inserted += ap.inserted;
     unresolved += ap.unresolved;
@@ -935,7 +955,10 @@ function buildIdToNumberMap(): Map<string, number> {
 
 function applySalesTransaction(
   sales: NormalizedSale[],
-  idToNumber: Map<string, number>
+  idToNumber: Map<string, number>,
+  /** True for incremental satflow ticks (sales just happened on chain).
+   *  False for backfill (sales are historical, no notification fanout). */
+  live: boolean
 ): {
   upgraded: number;
   inserted: number;
@@ -988,6 +1011,11 @@ function applySalesTransaction(
             inscription_number: existing.inscription_number,
             sale_price_sats: sale.sale_price_sats,
           });
+          // Re-enqueue ONLY for live ticks. Sales-only subscribers couldn't
+          // match the original 'transferred' row (mask mismatch); we want
+          // them to see the type change. Backfill upgrades are historical and
+          // must NOT replay as fresh alerts.
+          if (live) stmts.enqueueNotify.run(existing.id);
         }
         continue;
       }
@@ -1030,6 +1058,9 @@ function applySalesTransaction(
           sale_price_sats: sale.sale_price_sats,
           block_timestamp: sale.block_timestamp,
         });
+        // Standalone satflow insert (no prior 'transferred' row). Live tick
+        // = real-time sale, enqueue. Backfill = historical, skip.
+        if (live) stmts.enqueueNotify.run(r.lastInsertRowid as number);
       }
     }
   });

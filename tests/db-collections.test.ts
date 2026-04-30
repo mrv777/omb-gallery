@@ -33,11 +33,14 @@ afterEach(() => {
   }
 });
 
-describe('schema v11 — collections + backfill_state + poll_state composite PK + typed-feed index + holder-page indexes', () => {
-  it('reaches user_version 11', () => {
+describe('schema — collections + backfill_state + poll_state composite PK + typed-feed index + holder-page indexes', () => {
+  // The repo SCHEMA_VERSION constant is the authoritative ratchet; this test
+  // asserts the migration sequence runs through completely (>= the version
+  // that introduced the multi-collection composite PK).
+  it('reaches at least user_version 11', () => {
     const db = dbModule.getDb();
-    const ver = db.pragma('user_version', { simple: true });
-    expect(ver).toBe(11);
+    const ver = db.pragma('user_version', { simple: true }) as number;
+    expect(ver).toBeGreaterThanOrEqual(11);
   });
 
   it('creates idx_events_type_ts_id covering the typed activity feed sort', () => {
@@ -157,16 +160,22 @@ describe('schema v11 — collections + backfill_state + poll_state composite PK 
     // ord: single 'omb' row (one batch poll spans all collections).
     // satflow + satflow_listings: per-collection rows for every collection
     // whose manifest has a satflow_slug (omb + bravocados in this repo).
+    // matrica + notify: collection-agnostic, keyed to 'omb' for the composite
+    // PK shape (added in v12 / v14 respectively).
     const rows = db
       .prepare(`SELECT stream, collection_slug FROM poll_state ORDER BY stream, collection_slug`)
       .all() as Array<{ stream: string; collection_slug: string }>;
-    expect(rows).toEqual([
+    // The original v11 set must still be present; later migrations only add streams.
+    const expected = [
       { stream: 'ord', collection_slug: 'omb' },
       { stream: 'satflow', collection_slug: 'bravocados' },
       { stream: 'satflow', collection_slug: 'omb' },
       { stream: 'satflow_listings', collection_slug: 'bravocados' },
       { stream: 'satflow_listings', collection_slug: 'omb' },
-    ]);
+    ];
+    for (const e of expected) {
+      expect(rows).toContainEqual(e);
+    }
   });
 
   it('rejects duplicate (stream, collection_slug) inserts via composite PK', () => {

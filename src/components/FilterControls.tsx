@@ -7,6 +7,7 @@ import { appendColorParam } from '@/lib/colorFilter';
 import ColorSwatches from './ColorSwatches';
 import HelpButton from './HelpButton';
 import MobileMenu from './MobileMenu';
+import NotificationButton from './NotificationButton/NotificationButton';
 
 interface FilterControlsProps {
   colorFilter: ColorFilter;
@@ -55,9 +56,18 @@ const FilterControls = memo(function FilterControls({
     [searchInputRef]
   );
 
+  const isSingleColor = colorFilter !== 'all';
   const filtersBlock = (
     <div className="flex items-center shrink-0">
       <ColorSwatches color={colorFilter} onChange={onColorFilterChange} />
+      {isSingleColor && (
+        <NotificationButton
+          kind="color"
+          targetKey={colorFilter}
+          label="🔔"
+          className="h-10 w-10 flex items-center justify-center text-bone-dim hover:text-bone transition-colors"
+        />
+      )}
       <button
         type="button"
         onClick={onToggleFavoritesOnly}
