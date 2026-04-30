@@ -4,7 +4,7 @@ import React, { memo, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { GalleryImage } from '@/lib/types';
 import { useFavorites } from '@/lib/FavoritesContext';
-import NotificationButton from './NotificationButton/NotificationButton';
+import NotificationButton, { BellIcon } from './NotificationButton/NotificationButton';
 
 interface ImageModalProps {
   onClose: () => void;
@@ -141,7 +141,7 @@ const ImageModal = memo(function ImageModal({
           <NotificationButton
             kind="inscription"
             targetKey={id}
-            label="🔔"
+            label={<BellIcon />}
             className="h-11 w-11 flex items-center justify-center text-bone-dim hover:text-bone transition-colors"
           />
           <button

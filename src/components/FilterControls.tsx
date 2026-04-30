@@ -7,7 +7,7 @@ import { appendColorParam } from '@/lib/colorFilter';
 import ColorSwatches from './ColorSwatches';
 import HelpButton from './HelpButton';
 import MobileMenu from './MobileMenu';
-import NotificationButton from './NotificationButton/NotificationButton';
+import NotificationButton, { BellIcon } from './NotificationButton/NotificationButton';
 
 interface FilterControlsProps {
   colorFilter: ColorFilter;
@@ -64,7 +64,7 @@ const FilterControls = memo(function FilterControls({
         <NotificationButton
           kind="color"
           targetKey={colorFilter}
-          label="🔔"
+          label={<BellIcon />}
           className="h-10 w-10 flex items-center justify-center text-bone-dim hover:text-bone transition-colors"
         />
       )}

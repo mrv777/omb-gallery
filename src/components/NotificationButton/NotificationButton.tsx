@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 
 type Channel = 'telegram' | 'discord';
 type Kind = 'inscription' | 'color' | 'collection';
@@ -8,9 +9,35 @@ type Kind = 'inscription' | 'color' | 'collection';
 type Props = {
   kind: Kind;
   targetKey: string;
-  label?: string;
+  /** Optional override for the trigger button content. Defaults to a bell
+   *  icon followed by "Watch <target>" in the verbose case (when callers
+   *  supply no className override). When pinning into icon-row chrome,
+   *  pass `<BellIcon />` directly. */
+  label?: ReactNode;
   className?: string;
 };
+
+/** Outline bell icon. Matches the 16/1.25 stroke style used by the other
+ *  icon-row buttons (info circle, close X). */
+export function BellIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.25"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M3.25 11.5h9.5l-1-1.75v-3a3.75 3.75 0 0 0-7.5 0v3z" />
+      <path d="M6.5 11.75a1.5 1.5 0 0 0 3 0" />
+    </svg>
+  );
+}
 
 type SessionInfo = { hasSession: boolean; channel?: Channel };
 
@@ -283,14 +310,21 @@ export default function NotificationButton({ kind, targetKey, label, className }
 
   useEffect(() => () => cleanupPoll(), [cleanupPoll]);
 
-  const buttonLabel = label ?? `🔔 Watch ${describeTarget(kind, targetKey)}`;
   const desc = describeTarget(kind, targetKey);
+  const buttonLabel: ReactNode = label ?? (
+    <span className="inline-flex items-center gap-1.5">
+      <BellIcon />
+      <span>Watch {desc}</span>
+    </span>
+  );
 
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
+        aria-label={`Watch ${desc}`}
+        title={`Watch ${desc}`}
         className={
           className ??
           'inline-flex items-center gap-1 px-3 h-9 text-xs uppercase tracking-[0.08em] text-bone border border-ink-2 hover:border-bone transition-colors'

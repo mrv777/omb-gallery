@@ -9,6 +9,7 @@ import {
   truncateAddr,
 } from '@/lib/format';
 import EventTimelineRow from './EventTimelineRow';
+import NotificationButton, { BellIcon } from '@/components/NotificationButton/NotificationButton';
 
 const COLOR_TILE_BG: Record<string, string> = {
   red: 'bg-accent-red/20',
@@ -177,6 +178,17 @@ export default function InscriptionDetail({
                 full image ↗
               </a>
             )}
+            <NotificationButton
+              kind="inscription"
+              targetKey={String(inscription.inscription_number)}
+              label={
+                <span className="inline-flex items-center gap-1.5">
+                  <BellIcon />
+                  <span>Watch</span>
+                </span>
+              }
+              className="inline-flex items-center border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
+            />
           </div>
         </div>
       </div>

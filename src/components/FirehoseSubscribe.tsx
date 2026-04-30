@@ -1,6 +1,6 @@
 'use client';
 
-import NotificationButton from './NotificationButton/NotificationButton';
+import NotificationButton, { BellIcon } from './NotificationButton/NotificationButton';
 
 // "Get all OMB activity in your Discord/Telegram" entry-point. Lives in the
 // SubpageShell footer because community server admins are likeliest to be
@@ -14,7 +14,12 @@ export default function FirehoseSubscribe() {
       <NotificationButton
         kind="collection"
         targetKey="omb"
-        label="🔔 Subscribe"
+        label={
+          <span className="inline-flex items-center gap-1.5">
+            <BellIcon />
+            <span>Subscribe</span>
+          </span>
+        }
         className="inline-flex items-center gap-1 px-3 h-8 text-[11px] uppercase tracking-[0.08em] text-bone border border-ink-2 hover:border-bone transition-colors"
       />
     </div>
