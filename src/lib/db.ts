@@ -909,6 +909,7 @@ type Stmts = {
   otherInscriptionsByOwner: ReturnType<DB['prepare']>;
   getInscriptionsByOwner: ReturnType<DB['prepare']>;
   getEventsByAddress: ReturnType<DB['prepare']>;
+  getEventsByAddressBefore: ReturnType<DB['prepare']>;
   countEventsByAddress: ReturnType<DB['prepare']>;
   // leaderboards
   topByTransfers: ReturnType<DB['prepare']>;
@@ -945,6 +946,7 @@ type Stmts = {
   holdingDurationBuckets: ReturnType<DB['prepare']>;
   transferActivityByDay: ReturnType<DB['prepare']>;
   ownershipChangesByAddress: ReturnType<DB['prepare']>;
+  holderColorHighlights: ReturnType<DB['prepare']>;
 };
 
 let stmts: Stmts | null = null;
@@ -1283,6 +1285,23 @@ export function getStmts(): Stmts {
         SELECT * FROM events WHERE old_owner = @owner AND event_type != 'listed'
           AND old_owner != COALESCE(new_owner, '')
       )
+      ORDER BY block_timestamp DESC, id DESC
+      LIMIT @limit
+    `),
+
+    // Keyset-paginated variant of getEventsByAddress. Used by /api/holder/.../events
+    // for "load more" — same per-wallet shape, but only events strictly older
+    // than the cursor (block_timestamp, id). Fan-out across linked wallets +
+    // dedup happens in the API route.
+    getEventsByAddressBefore: db.prepare(`
+      SELECT * FROM (
+        SELECT * FROM events WHERE new_owner = @owner AND event_type != 'listed'
+        UNION ALL
+        SELECT * FROM events WHERE old_owner = @owner AND event_type != 'listed'
+          AND old_owner != COALESCE(new_owner, '')
+      )
+      WHERE block_timestamp < @cursor_ts
+         OR (block_timestamp = @cursor_ts AND id < @cursor_id)
       ORDER BY block_timestamp DESC, id DESC
       LIMIT @limit
     `),
@@ -1653,16 +1672,43 @@ export function getStmts(): Stmts {
     // sent). For internal transfers (same address on both sides) the +1/-1
     // cancel correctly on the chart side. No cap — full history is small (a
     // single number/timestamp pair per row) and we want the chart to span
-    // mint→now. Excludes 'listed' (no real ownership change).
+    // mint→now. Excludes 'listed' (no real ownership change). `event_id` is
+    // exposed so the chart can correlate highlight markers (see
+    // `holderColorHighlights`) to the running-total at that exact event.
     ownershipChangesByAddress: db.prepare(`
-      SELECT block_timestamp, +1 AS delta
+      SELECT id AS event_id, block_timestamp, +1 AS delta
       FROM events
       WHERE new_owner = @owner AND event_type != 'listed'
       UNION ALL
-      SELECT block_timestamp, -1 AS delta
+      SELECT id AS event_id, block_timestamp, -1 AS delta
       FROM events
       WHERE old_owner = @owner AND event_type != 'listed'
-      ORDER BY block_timestamp ASC
+      ORDER BY block_timestamp ASC, event_id ASC
+    `),
+
+    // Charts: red/blue OMB ownership changes for one address. Powers the
+    // colored markers on the bag-size-over-time chart. Each row pairs a
+    // delta sign with the inscription # and color so the marker can render
+    // in the right swatch and link back to the inscription page. Returns
+    // both directions; the API/page caller groups across wallets by
+    // event_id and drops internal transfers (sum == 0).
+    holderColorHighlights: db.prepare(`
+      SELECT e.id AS event_id, e.block_timestamp, e.inscription_number, i.color, +1 AS delta
+      FROM events e
+      JOIN inscriptions i ON i.inscription_number = e.inscription_number
+      WHERE e.new_owner = @owner
+        AND e.event_type != 'listed'
+        AND i.collection_slug = 'omb'
+        AND i.color IN ('red', 'blue')
+      UNION ALL
+      SELECT e.id AS event_id, e.block_timestamp, e.inscription_number, i.color, -1 AS delta
+      FROM events e
+      JOIN inscriptions i ON i.inscription_number = e.inscription_number
+      WHERE e.old_owner = @owner
+        AND e.event_type != 'listed'
+        AND i.collection_slug = 'omb'
+        AND i.color IN ('red', 'blue')
+      ORDER BY e.block_timestamp ASC, e.id ASC
     `),
   };
   return stmts;
@@ -1832,6 +1878,15 @@ export type TransferActivityDayRow = {
 };
 
 export type OwnershipDeltaRow = {
+  event_id: number;
   block_timestamp: number;
+  delta: 1 | -1;
+};
+
+export type HolderColorHighlightRow = {
+  event_id: number;
+  block_timestamp: number;
+  inscription_number: number;
+  color: 'red' | 'blue';
   delta: 1 | -1;
 };

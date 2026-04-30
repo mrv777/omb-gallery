@@ -4,13 +4,18 @@ import SubpageShell from '@/components/SubpageShell';
 import HolderProfile from '@/components/HolderProfile/HolderProfile';
 import {
   getStmts,
-  type EventRow,
   type InscriptionRow,
   type OwnershipDeltaRow,
   type WalletLinkRow,
 } from '@/lib/db';
 import { truncateAddr } from '@/lib/format';
 import { lookupWalletLabel } from '@/lib/walletLabels';
+import {
+  encodeCursor,
+  fetchHolderColorHighlights,
+  fetchHolderEventsPage,
+  resolveAggregatedWallets,
+} from '@/lib/holderEvents';
 
 type Params = { address: string };
 
@@ -28,11 +33,10 @@ const MAX_ADDR_LEN = 100;
 // data shape (e.g. an indexer bug pinning every OMB to one address).
 const TILE_CAP = 10_000;
 
-// Per-wallet over-fetch when aggregating events across a Matrica user's
-// linked wallets. Each call still hits the per-owner index (idx_events_*_ts_id),
-// so this is bounded I/O — we only pay the cost when the user has multiple
-// linked wallets, and the result is sorted+sliced down to RECENT_EVENTS_DISPLAY.
-const EVENTS_PER_WALLET = 100;
+// Initial event-page size delivered with SSR. Subsequent pages are loaded
+// client-side via /api/holder/[address]/events, keyset-paginated by
+// (block_timestamp, id). Match this to the API route's DEFAULT_LIMIT so the
+// "showing N of M" math reads naturally.
 const RECENT_EVENTS_DISPLAY = 50;
 
 export const dynamic = 'force-dynamic';
@@ -64,27 +68,12 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
 
   const stmts = getStmts();
 
-  // Look up Matrica linkage. If `link` exists with a non-null user_id, this
-  // wallet belongs to a Matrica user; aggregate across all sibling wallets.
-  // If `link` exists but matrica_user_id is null, we've checked and there's
-  // no profile — render exactly as before. If no `link` row at all, we
-  // haven't probed yet — also render as before; the matrica cron will
-  // pick this address up on its next pass.
-  const link = stmts.getWalletLink.get({ wallet_addr: address }) as WalletLinkRow | undefined;
-  const userId = link?.matrica_user_id ?? null;
-
-  // Wallet set we aggregate over. Always includes the URL address (even when
-  // no Matrica row exists for it yet — single-wallet case). When linked, we
-  // dedupe to ensure no wallet appears twice if the URL is one of the
-  // already-known siblings.
-  let wallets: string[] = [address];
-  if (userId) {
-    const siblings = stmts.getWalletsForUser.all({ user_id: userId }) as Array<{
-      wallet_addr: string;
-    }>;
-    const set = new Set<string>([address, ...siblings.map(s => s.wallet_addr)]);
-    wallets = Array.from(set);
-  }
+  // Look up Matrica linkage and resolve the wallet set we aggregate over.
+  // When `matrica_user_id` is non-null, this is a multi-wallet identity and
+  // we fan out across siblings; otherwise it's just `[address]`. Same logic
+  // is shared with the /api/holder/[address]/events route so paginated
+  // "load more" sees the same wallets.
+  const { wallets, link } = resolveAggregatedWallets(address);
 
   // Holdings — fetch per wallet, concat, sort by inscription_number for
   // stable grid ordering. Each call walks idx_insc_owner; small N (typically 1).
@@ -105,38 +94,41 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
   ombHoldings.sort((a, b) => a.inscription_number - b.inscription_number);
   bravoHoldings.sort((a, b) => a.inscription_number - b.inscription_number);
 
-  // Events — same fan-out. Internal transfers between two wallets of the
-  // same user surface as one event with old_owner=A new_owner=B; the SQL
-  // already prevents same-row double-counting per wallet, but cross-wallet
-  // we'd see the row for A AND for B. Dedup by event id to handle that.
-  const eventMap = new Map<number, EventRow>();
+  // Events — first SSR page. The same fan-out + dedupe logic powers
+  // /api/holder/[address]/events for "load more" so the cursor returned here
+  // is interpretable by that route. eventTotal is summed across wallets;
+  // duplicates from internal transfers (same event id appearing in both
+  // wallets' counts) are over-counted, but only by a small constant on a
+  // typical multi-wallet identity, which is fine for the "showing N of M"
+  // affordance.
+  const { events, nextCursor: initialNextCursor } = fetchHolderEventsPage(
+    wallets,
+    null,
+    RECENT_EVENTS_DISPLAY
+  );
   let eventTotalSum = 0;
   for (const w of wallets) {
-    const rows = stmts.getEventsByAddress.all({
-      owner: w,
-      limit: EVENTS_PER_WALLET,
-    }) as EventRow[];
-    for (const r of rows) eventMap.set(r.id, r);
     const c = stmts.countEventsByAddress.get({ owner: w }) as { n: number };
     eventTotalSum += c.n;
   }
-  const events = Array.from(eventMap.values())
-    .sort((a, b) =>
-      b.block_timestamp - a.block_timestamp || b.id - a.id
-    )
-    .slice(0, RECENT_EVENTS_DISPLAY);
+  const initialEventsCursor = initialNextCursor ? encodeCursor(initialNextCursor) : null;
 
   // Bag-size-over-time deltas — separate from the events list because we need
   // every event (not just the recent 50) to render the full step-line. Each
   // event involving any of our wallets contributes +1 (received) and/or -1
   // (sent); internal transfers between two of the user's wallets cancel out
-  // on the chart side. Returns just (timestamp, delta) so the payload stays
-  // small even for whales with thousands of events.
+  // on the chart side. Returns (event_id, timestamp, delta) so the chart can
+  // correlate color highlight markers to the running bag size at that event.
   const ownershipDeltas: OwnershipDeltaRow[] = [];
   for (const w of wallets) {
     const rows = stmts.ownershipChangesByAddress.all({ owner: w }) as OwnershipDeltaRow[];
     ownershipDeltas.push(...rows);
   }
+
+  // Red/blue eye highlights — small payload (only those two color buckets,
+  // only events touching this wallet set). Dropping internal transfers
+  // (sum of +1/-1 across wallet rows = 0) happens inside the helper.
+  const colorHighlights = fetchHolderColorHighlights(wallets);
 
   // Show a real 404 only when nothing in the DB references this address —
   // a wallet that emptied out (no current holdings but has past events)
@@ -159,8 +151,10 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
         bravoHoldings={bravoHoldings}
         events={events}
         eventTotal={eventTotalSum}
+        initialEventsCursor={initialEventsCursor}
         tileCap={TILE_CAP}
         ownershipDeltas={ownershipDeltas}
+        colorHighlights={colorHighlights}
       />
     </SubpageShell>
   );

@@ -1,20 +1,14 @@
 import Link from 'next/link';
 import type { EventRow, InscriptionRow, OwnershipDeltaRow } from '@/lib/db';
+import type { HolderColorHighlight } from '@/lib/holderEvents';
 import { lookupInscription } from '@/lib/inscriptionLookup';
-import {
-  addressLink,
-  formatBtc,
-  formatRelTime,
-  marketplaceLabel,
-  memepoolTxLink,
-  ordNetWalletLink,
-  truncateAddr,
-} from '@/lib/format';
+import { addressLink, ordNetWalletLink, truncateAddr } from '@/lib/format';
 import { lookupWalletLabel } from '@/lib/walletLabels';
 import { WalletsList } from './WalletsList';
 import SafeImg from '@/components/SafeImg';
 import ColorPortfolioBar from '@/components/Charts/ColorPortfolioBar';
 import BagSizeOverTime from '@/components/Charts/BagSizeOverTime';
+import HolderActivityList from './HolderActivityList';
 
 const COLOR_TILE_BG: Record<string, string> = {
   red: 'bg-accent-red/20',
@@ -41,10 +35,17 @@ type Props = {
   bravoHoldings: InscriptionRow[];
   events: EventRow[];
   eventTotal: number;
+  /** Cursor (encoded `${ts}:${id}`) for fetching the next page of events,
+   * or null if SSR already returned the entire timeline. */
+  initialEventsCursor: string | null;
   tileCap: number;
   /** Full ownership-change deltas across all linked wallets (for the
    * bag-size-over-time chart). Concatenated per-wallet rows; chart sorts. */
   ownershipDeltas: OwnershipDeltaRow[];
+  /** Red/blue OMB receive/send events to render as colored markers on the
+   * bag-size-over-time chart. Internal transfers (between two of the user's
+   * own wallets) are pre-filtered out by the page. */
+  colorHighlights: HolderColorHighlight[];
 };
 
 export default function HolderProfile({
@@ -56,8 +57,10 @@ export default function HolderProfile({
   bravoHoldings,
   events,
   eventTotal,
+  initialEventsCursor,
   tileCap,
   ownershipDeltas,
+  colorHighlights,
 }: Props) {
   // Manual identity label (treasury etc.). Looked up against any wallet in
   // the aggregated set so it's stable regardless of which sibling wallet
@@ -192,7 +195,7 @@ export default function HolderProfile({
 
       {ombHoldings.length > 0 && <ColorPortfolioBar holdings={ombHoldings} />}
 
-      <BagSizeOverTime deltas={ownershipDeltas} />
+      <BagSizeOverTime deltas={ownershipDeltas} highlights={colorHighlights} />
 
       {/* Bravocados — secondary surface, intentionally muted */}
       {bravoHoldings.length > 0 && (
@@ -226,31 +229,16 @@ export default function HolderProfile({
       )}
 
       {/* Activity timeline — events involving this address (or any sibling
-          wallet, when aggregated) on either side. */}
-      <div>
-        <div className="flex items-baseline justify-between mb-3">
-          <h2 className="font-mono text-xs tracking-[0.12em] uppercase text-bone">
-            recent activity{' '}
-            <span className="text-bone-dim tabular-nums">· {eventTotal.toLocaleString()}</span>
-          </h2>
-          {events.length < eventTotal && (
-            <span className="font-mono text-[10px] tracking-[0.08em] uppercase text-bone-dim">
-              showing first {events.length}
-            </span>
-          )}
-        </div>
-        {events.length === 0 ? (
-          <div className="font-mono text-xs tracking-[0.08em] uppercase text-bone-dim py-8 text-center border border-ink-2">
-            no recorded activity yet
-          </div>
-        ) : (
-          <div className="border border-ink-2 bg-ink-0">
-            {events.map(ev => (
-              <HolderEventRow key={ev.id} event={ev} wallets={wallets} />
-            ))}
-          </div>
-        )}
-      </div>
+          wallet, when aggregated) on either side. The list is a client
+          component so "load more" can keyset-paginate via /api/holder/.../events
+          without re-rendering the rest of the profile. */}
+      <HolderActivityList
+        address={address}
+        wallets={wallets}
+        initialEvents={events}
+        initialCursor={initialEventsCursor}
+        eventTotal={eventTotal}
+      />
     </section>
   );
 }
@@ -328,153 +316,6 @@ function BravocadosTile({
         }
       />
     </a>
-  );
-}
-
-function HolderEventRow({ event, wallets }: { event: EventRow; wallets: string[] }) {
-  const hit = lookupInscription(event.inscription_number);
-  const tileBg = hit?.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
-
-  const isSold = event.event_type === 'sold';
-  const isTransferred = event.event_type === 'transferred';
-  const eventLabel = isSold ? 'SOLD' : isTransferred ? 'TRANSFERRED' : 'INSCRIBED';
-
-  // Direction relative to the user (any of their linked wallets counts as
-  // "self"). When both sides are the user's own wallets, it's an internal
-  // transfer — neither outgoing nor incoming, no counter-party shown.
-  const selfSet = wallets;
-  const oldIsSelf = event.old_owner != null && selfSet.includes(event.old_owner);
-  const newIsSelf = event.new_owner != null && selfSet.includes(event.new_owner);
-  const isOutgoing = oldIsSelf && !newIsSelf;
-  const isIncoming = newIsSelf && !oldIsSelf;
-  const isInternal = oldIsSelf && newIsSelf;
-  const counterParty = isOutgoing ? event.new_owner : isIncoming ? event.old_owner : null;
-  const directionLabel = isOutgoing
-    ? 'sent →'
-    : isIncoming
-      ? '← received'
-      : isInternal
-        ? 'internal'
-        : '';
-
-  // Transferred badge tints by direction so mobile (where the direction text is
-  // hidden) still surfaces sent vs received at a glance.
-  const transferredColor = isOutgoing
-    ? 'text-accent-red'
-    : isIncoming
-      ? 'text-accent-green'
-      : 'text-bone-dim';
-  const transferredBg = isOutgoing
-    ? 'bg-accent-red/10 border-accent-red/40'
-    : isIncoming
-      ? 'bg-accent-green/10 border-accent-green/40'
-      : 'border-bone-dim/40';
-  const eventColor = isSold
-    ? 'text-accent-green'
-    : isTransferred
-      ? transferredColor
-      : 'text-accent-orange';
-  const eventBg = isSold
-    ? 'bg-accent-green/10 border-accent-green/40'
-    : isTransferred
-      ? transferredBg
-      : 'bg-accent-orange/10 border-accent-orange/40';
-
-  const priceStr = isSold ? formatBtc(event.sale_price_sats) : '';
-  const market = isSold ? marketplaceLabel(event.marketplace) : '';
-  const txLink = memepoolTxLink(event.txid);
-  const inscriptionLink = `/inscription/${event.inscription_number}`;
-
-  return (
-    <div
-      className={`flex items-center gap-x-3 sm:gap-x-4 px-2 sm:px-4 py-2 border-b border-ink-2 ${
-        isSold ? 'bg-accent-green/[0.03]' : ''
-      }`}
-    >
-      <Link
-        href={inscriptionLink}
-        prefetch={false}
-        className={`block w-12 h-12 ${tileBg} overflow-hidden border border-ink-2 hover:border-bone-dim shrink-0`}
-        title={`#${event.inscription_number}`}
-      >
-        {hit ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            src={hit.thumbnail}
-            alt={`#${event.inscription_number}`}
-            loading="lazy"
-            decoding="async"
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center font-mono text-[9px] text-bone-dim">
-            #{event.inscription_number}
-          </div>
-        )}
-      </Link>
-
-      <Link
-        href={inscriptionLink}
-        prefetch={false}
-        className="font-mono text-xs text-bone tabular-nums hover:text-accent-orange w-20 shrink-0"
-      >
-        #{event.inscription_number}
-      </Link>
-
-      <div className="flex items-center gap-2 shrink-0">
-        <span
-          className={`font-mono text-[10px] tracking-[0.12em] uppercase px-1.5 py-0.5 border ${eventBg} ${eventColor} whitespace-nowrap`}
-        >
-          {eventLabel}
-        </span>
-        {priceStr && (
-          <span className="font-mono text-xs text-accent-green tabular-nums whitespace-nowrap">
-            {priceStr}
-          </span>
-        )}
-        {market && (
-          <span className="hidden sm:inline font-mono text-[10px] text-bone-dim tracking-normal whitespace-nowrap">
-            via {market}
-          </span>
-        )}
-      </div>
-
-      <div className="hidden sm:flex items-center gap-1.5 font-mono text-[11px] text-bone-dim min-w-0">
-        {directionLabel && (
-          <span className="shrink-0 normal-case tracking-normal">{directionLabel}</span>
-        )}
-        {counterParty ? (
-          <Link
-            href={`/holder/${counterParty}`}
-            prefetch={false}
-            className="hover:text-accent-orange truncate normal-case tracking-normal"
-            title={counterParty}
-          >
-            {truncateAddr(counterParty)}
-          </Link>
-        ) : null}
-      </div>
-
-      <div className="flex items-center gap-3 ml-auto shrink-0">
-        {txLink && (
-          <a
-            href={txLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hidden sm:inline font-mono text-[10px] text-bone-dim hover:text-accent-orange tracking-[0.08em] uppercase"
-            title={`tx ${event.txid}`}
-          >
-            tx
-          </a>
-        )}
-        <span
-          className="font-mono text-[10px] text-bone-dim tracking-normal whitespace-nowrap"
-          title={new Date(event.block_timestamp * 1000).toISOString()}
-        >
-          {formatRelTime(event.block_timestamp)}
-        </span>
-      </div>
-    </div>
   );
 }
 
