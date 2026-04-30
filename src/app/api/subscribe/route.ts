@@ -82,12 +82,12 @@ function targetLabel(kind: SubKind, targetKey: string): string {
   return 'all OMB activity';
 }
 
-function unsubLink(unsubToken: string): string {
-  return `${siteUrl()}/api/unsubscribe?token=${unsubToken}`;
-}
-
 function burnLink(unsubToken: string): string {
   return `${siteUrl()}/api/unsubscribe?token=${unsubToken}&burn=1`;
+}
+
+function manageLink(sessionValue: string): string {
+  return `${siteUrl()}/api/notifications/auth?s=${encodeURIComponent(sessionValue)}`;
 }
 
 export async function POST(req: NextRequest) {
@@ -181,8 +181,16 @@ export async function POST(req: NextRequest) {
   const existingToken = getExistingUnsubToken('discord', webhookUrl, kind, targetKey);
   const unsubToken = existingToken ?? randomBytes(16).toString('hex');
 
+  // Mint the session value BEFORE the ping so we can embed the magic-login
+  // link in the confirmation message (cross-device manage path). Session is
+  // (channel, channel_target)-bound — minting early is safe because nothing
+  // is persisted until the ping succeeds.
+  const sessionValue = mintSession('discord', webhookUrl);
+
   const ping = await pingWebhook(webhookUrl, {
-    unsubLink: unsubLink(unsubToken),
+    manageLink: sessionValue
+      ? manageLink(sessionValue)
+      : `${siteUrl()}/notifications`,
     burnLink: burnLink(unsubToken),
     targetLabel: targetLabel(kind, targetKey),
   });
@@ -203,8 +211,6 @@ export async function POST(req: NextRequest) {
   if (!created.ok) return bad(429, created.error);
   const { row } = created;
 
-  // Mint the session cookie so subsequent subscribes from this browser are one-click.
-  const sessionValue = mintSession('discord', webhookUrl);
   const headers = new Headers({ 'content-type': 'application/json' });
   if (sessionValue) headers.append('set-cookie', setCookieHeader(sessionValue));
   log.info('subscribe', 'discord active', { kind, target: targetKey });

@@ -12,7 +12,12 @@ import {
   PER_TARGET_LIMIT,
   type SubscriptionRow,
 } from '@/lib/subscriptionStore';
+import { mintSession } from '@/lib/subscriberSession';
 import { log } from '@/lib/log';
+
+function siteUrl(): string {
+  return (process.env.NEXT_PUBLIC_SITE_URL || 'https://ordinalmaxibiz.wiki').replace(/\/$/, '');
+}
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -69,7 +74,7 @@ async function handleStart(chatId: number, payload: string): Promise<void> {
     chatId,
     text:
       `🔔 <b>Subscribed</b> — you'll get alerts for ${escapeHtml(targetLabel(sub))} (${eventMaskLabel(sub.event_mask)}).\n\n` +
-      `Use /list to see all your watches, /unwatch &lt;id&gt; to mute one.`,
+      `/list — show all watches · /unwatch &lt;id&gt; — mute one · /manage — manage on the web.`,
     replyMarkup: {
       inline_keyboard: [[{ text: 'Add another watch', url: 'https://ordinalmaxibiz.wiki' }]],
     },
@@ -92,6 +97,59 @@ async function handleList(chatId: number): Promise<void> {
   await sendMessage({
     chatId,
     text: `<b>Your watches:</b>\n\n${lines.join('\n')}\n\nMute one with /unwatch &lt;id&gt;.`,
+  });
+}
+
+// Per-chat anti-spam for /manage. Each fresh link is a long-lived bearer for
+// managing this chat's subs — limit how often a flood of /manage commands
+// can post links into a chat history.
+const manageCooldown = new Map<number, number>();
+const MANAGE_COOLDOWN_MS = 60 * 1000;
+
+async function handleManage(chatId: number): Promise<void> {
+  const now = Date.now();
+  const last = manageCooldown.get(chatId);
+  if (last != null && now - last < MANAGE_COOLDOWN_MS) {
+    const wait = Math.ceil((MANAGE_COOLDOWN_MS - (now - last)) / 1000);
+    await sendMessage({
+      chatId,
+      text: `Please wait ${wait}s before requesting another manage link.`,
+    });
+    return;
+  }
+
+  // Don't bother minting a session for users with no subs — a manage link to
+  // an empty page is just confusing.
+  const subs = listByTarget('telegram', String(chatId));
+  if (subs.length === 0) {
+    await sendMessage({
+      chatId,
+      text: 'You have no active watches yet. Visit <a href="https://ordinalmaxibiz.wiki">the archive</a> to set one up.',
+    });
+    return;
+  }
+
+  const sessionValue = mintSession('telegram', String(chatId));
+  if (!sessionValue) {
+    log.error('notify/telegram', '/manage failed: session secret missing', {});
+    await sendMessage({
+      chatId,
+      text: 'Manage links are not available right now — try /list and /unwatch instead.',
+    });
+    return;
+  }
+
+  manageCooldown.set(chatId, now);
+  const url = `${siteUrl()}/api/notifications/auth?s=${encodeURIComponent(sessionValue)}`;
+  await sendMessage({
+    chatId,
+    text:
+      `<b>Manage your watches on the web</b>\n\n` +
+      `This link works on any device — bookmark it if you switch browsers often.\n\n` +
+      `It grants visibility/mute access for this Telegram chat's subs only.`,
+    replyMarkup: {
+      inline_keyboard: [[{ text: 'Open notifications', url }]],
+    },
   });
 }
 
@@ -162,13 +220,15 @@ export async function POST(req: NextRequest) {
           });
       } else if (text === '/list') {
         await handleList(chatId);
+      } else if (text === '/manage') {
+        await handleManage(chatId);
       } else if (text.startsWith('/unwatch')) {
         const arg = text.slice('/unwatch'.length).trim();
         await handleUnwatch(chatId, arg);
       } else if (text === '/help') {
         await sendMessage({
           chatId,
-          text: `<b>OMB Archive alerts</b>\n\n/list — show your watches\n/unwatch &lt;id&gt; — mute a watch\n\nSet up new watches at <a href="https://ordinalmaxibiz.wiki">the archive</a>.`,
+          text: `<b>OMB Archive alerts</b>\n\n/list — show your watches\n/unwatch &lt;id&gt; — mute a watch\n/manage — get a magic link to manage from the web (any device)\n\nSet up new watches at <a href="https://ordinalmaxibiz.wiki">the archive</a>.`,
         });
       }
     }

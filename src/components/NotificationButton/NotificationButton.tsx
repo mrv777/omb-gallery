@@ -161,7 +161,13 @@ export default function NotificationButton({ kind, targetKey, label, className }
         return;
       }
       if (!res.ok) {
-        setState({ kind: 'error', message: j?.error ?? `Failed (${res.status}).` });
+        const msg =
+          j?.error === 'not-configured'
+            ? 'Telegram alerts aren’t available right now. Try Discord instead.'
+            : j?.error === 'cap-exceeded'
+              ? 'You already have the maximum number of watches (50). Mute one in /notifications first.'
+              : (j?.error ?? `Failed (${res.status}).`);
+        setState({ kind: 'error', message: msg });
         return;
       }
       if (j.status === 'active') {
@@ -262,7 +268,13 @@ export default function NotificationButton({ kind, targetKey, label, className }
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setState({ kind: 'error', message: j?.error ?? `Failed (${res.status}).` });
+        const msg =
+          j?.error === 'cap-exceeded'
+            ? 'You already have the maximum number of watches (50). Mute one in /notifications first.'
+            : j?.error === 'rate-limited'
+              ? 'Too many requests — wait a minute.'
+              : (j?.error ?? `Failed (${res.status}).`);
+        setState({ kind: 'error', message: msg });
         return;
       }
       setState({ kind: 'success', channel: session.channel });

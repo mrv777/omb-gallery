@@ -83,16 +83,24 @@ export async function postWebhook(url: string, body: Body): Promise<DiscordPostR
 
 // Fast canary: post a small confirmation message to verify the URL works
 // before we persist a sub. If this fails, we don't write the row at all.
-export async function pingWebhook(url: string, opts: { unsubLink: string; burnLink: string; targetLabel: string }): Promise<DiscordPostResult> {
+//
+// `manageLink` is a magic-login URL that mints the subscriber_session cookie
+// on whatever device clicks it — recovery path for users on a different
+// browser or who cleared cookies. Suggest pinning the message in the channel
+// so co-admins can manage subs later.
+export async function pingWebhook(
+  url: string,
+  opts: { manageLink: string; burnLink: string; targetLabel: string }
+): Promise<DiscordPostResult> {
   return postWebhook(url, {
     username: 'OMB Archive',
     embeds: [
       {
         title: 'Subscribed to OMB alerts',
-        description: `This channel will now receive notifications for **${opts.targetLabel}**.`,
+        description: `This channel will now receive notifications for **${opts.targetLabel}**. Pin this message — the manage link works on any device.`,
         color: 0xff5544,
         fields: [
-          { name: 'Manage', value: `[All subscriptions](${opts.unsubLink})`, inline: true },
+          { name: 'Manage', value: `[All subscriptions](${opts.manageLink})`, inline: true },
           { name: 'Not you?', value: `[Remove this webhook](${opts.burnLink})`, inline: true },
         ],
         footer: { text: 'ordinalmaxibiz.wiki' },
