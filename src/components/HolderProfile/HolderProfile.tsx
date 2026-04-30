@@ -86,9 +86,6 @@ export default function HolderProfile({
                   <h1 className="text-base sm:text-lg text-bone normal-case tracking-normal truncate">
                     {username}
                   </h1>
-                  <div className="text-[10px] text-bone-dim tracking-[0.08em] uppercase">
-                    via matrica
-                  </div>
                 </div>
               </div>
             </div>
@@ -302,16 +299,6 @@ function HolderEventRow({ event, wallets }: { event: EventRow; wallets: string[]
   const isSold = event.event_type === 'sold';
   const isTransferred = event.event_type === 'transferred';
   const eventLabel = isSold ? 'SOLD' : isTransferred ? 'TRANSFERRED' : 'INSCRIBED';
-  const eventColor = isSold
-    ? 'text-accent-green'
-    : isTransferred
-      ? 'text-bone-dim'
-      : 'text-accent-orange';
-  const eventBg = isSold
-    ? 'bg-accent-green/10 border-accent-green/40'
-    : isTransferred
-      ? 'border-bone-dim/40'
-      : 'bg-accent-orange/10 border-accent-orange/40';
 
   // Direction relative to the user (any of their linked wallets counts as
   // "self"). When both sides are the user's own wallets, it's an internal
@@ -330,11 +317,29 @@ function HolderEventRow({ event, wallets }: { event: EventRow; wallets: string[]
       : isInternal
         ? 'internal'
         : '';
-  const directionColor = isOutgoing
+
+  // Transferred badge tints by direction so mobile (where the direction text is
+  // hidden) still surfaces sent vs received at a glance.
+  const transferredColor = isOutgoing
     ? 'text-accent-red'
     : isIncoming
       ? 'text-accent-green'
-      : 'text-bone-dim/80';
+      : 'text-bone-dim';
+  const transferredBg = isOutgoing
+    ? 'bg-accent-red/10 border-accent-red/40'
+    : isIncoming
+      ? 'bg-accent-green/10 border-accent-green/40'
+      : 'border-bone-dim/40';
+  const eventColor = isSold
+    ? 'text-accent-green'
+    : isTransferred
+      ? transferredColor
+      : 'text-accent-orange';
+  const eventBg = isSold
+    ? 'bg-accent-green/10 border-accent-green/40'
+    : isTransferred
+      ? transferredBg
+      : 'bg-accent-orange/10 border-accent-orange/40';
 
   const priceStr = isSold ? formatBtc(event.sale_price_sats) : '';
   const market = isSold ? marketplaceLabel(event.marketplace) : '';
@@ -397,9 +402,7 @@ function HolderEventRow({ event, wallets }: { event: EventRow; wallets: string[]
 
       <div className="hidden sm:flex items-center gap-1.5 font-mono text-[11px] text-bone-dim min-w-0">
         {directionLabel && (
-          <span className={`${directionColor} shrink-0 normal-case tracking-normal`}>
-            {directionLabel}
-          </span>
+          <span className="shrink-0 normal-case tracking-normal">{directionLabel}</span>
         )}
         {counterParty ? (
           <Link
