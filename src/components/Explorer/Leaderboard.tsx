@@ -24,7 +24,7 @@ export default function Leaderboard({ type, items, showSeeAll, color = 'all' }: 
       <div className="px-4 py-3 border-b border-ink-2">
         <div className="flex items-baseline justify-between gap-3">
           <h2 className="font-mono text-xs tracking-[0.12em] uppercase text-bone">{meta.title}</h2>
-          {showSeeAll && type !== 'top-holders' && (
+          {showSeeAll && (
             <Link
               href={appendColorParam(`/explorer/${type}`, color)}
               className="font-mono text-[10px] tracking-[0.12em] uppercase text-bone-dim hover:text-bone transition-colors"

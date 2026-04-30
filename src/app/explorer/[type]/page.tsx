@@ -4,7 +4,8 @@ import SubpageShell from '@/components/SubpageShell';
 import HeaderColorSwatches from '@/components/HeaderColorSwatches';
 import Leaderboard from '@/components/Explorer/Leaderboard';
 import { LEADERBOARDS, type LeaderboardKey } from '@/components/Explorer/types';
-import { getStmts, type InscriptionRow } from '@/lib/db';
+import { getStmts, type GroupedHolderRow, type InscriptionRow } from '@/lib/db';
+import type { ApiHolder } from '@/components/Activity/types';
 import { colorParamForSql, parseColorParam } from '@/lib/colorFilter';
 
 const VALID: LeaderboardKey[] = [
@@ -12,6 +13,7 @@ const VALID: LeaderboardKey[] = [
   'longest-unmoved',
   'top-volume',
   'highest-sale',
+  'top-holders',
 ];
 
 export const dynamic = 'force-dynamic';
@@ -48,7 +50,7 @@ export default async function LeaderboardDetailPage({
   const stmts = getStmts();
   const collection = 'omb';
   const limit = 100;
-  const items = (() => {
+  const items: InscriptionRow[] | ApiHolder[] = (() => {
     switch (type) {
       case 'most-transferred':
         return stmts.topByTransfers.all({ limit, collection, color: colorParam }) as InscriptionRow[];
@@ -66,6 +68,24 @@ export default async function LeaderboardDetailPage({
           collection,
           color: colorParam,
         }) as InscriptionRow[];
+      case 'top-holders': {
+        const rows = stmts.topHoldersGrouped.all({
+          limit,
+          collection,
+          color: colorParam,
+        }) as GroupedHolderRow[];
+        return rows.map(
+          (r): ApiHolder => ({
+            group_key: r.group_key,
+            is_user: r.is_user === 1,
+            username: r.username,
+            avatar_url: r.avatar_url,
+            wallets: (r.wallets_csv ?? '').split(',').filter(Boolean),
+            inscription_count: r.inscription_count,
+            updated_at: r.updated_at,
+          })
+        );
+      }
       default:
         return [] as InscriptionRow[];
     }

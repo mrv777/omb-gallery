@@ -93,7 +93,7 @@ export default async function ExplorerPage({
           <Leaderboard type="top-volume" items={volume} showSeeAll color={color} />
           <Leaderboard type="highest-sale" items={highSale} showSeeAll color={color} />
           <div className="md:col-span-2">
-            <Leaderboard type="top-holders" items={holders} color={color} />
+            <Leaderboard type="top-holders" items={holders} showSeeAll color={color} />
           </div>
         </div>
       </section>
