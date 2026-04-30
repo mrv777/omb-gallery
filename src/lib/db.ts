@@ -6,6 +6,7 @@ import ombInscriptions from '../data/collections/omb/inscriptions.json';
 import ombManifest from '../data/collections/omb/manifest.json';
 import bravocadosInscriptions from '../data/collections/bravocados/inscriptions.json';
 import bravocadosManifest from '../data/collections/bravocados/manifest.json';
+import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
 const SCHEMA_VERSION = 16;
@@ -1154,12 +1155,18 @@ export function getStmts(): Stmts {
     // derivation, not an on-chain event, and the activity feed is meant to
     // render the on-chain history. Excluding them keeps the feed semantics
     // stable and avoids ActivityRow's rendering branches mishandling them.
+    // The activity feed scopes events through their inscription's CURRENT
+    // owner: an inscription parked in an excluded wallet (treasury) drops
+    // from the feed entirely, including its prior history. This stays
+    // consistent with the leaderboard exclusion — same set of inscriptions
+    // hidden everywhere.
     getRecentEvents: db.prepare(`
       SELECT e.* FROM events e
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
       WHERE i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
         AND e.event_type != 'listed'
+        AND (i.current_owner IS NULL OR i.current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
       ORDER BY e.block_timestamp DESC, e.id DESC
       LIMIT @limit
     `),
@@ -1170,6 +1177,7 @@ export function getStmts(): Stmts {
       WHERE i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
         AND e.event_type != 'listed'
+        AND (i.current_owner IS NULL OR i.current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
         AND (e.block_timestamp, e.id) < (@cursor_ts, @cursor_id)
       ORDER BY e.block_timestamp DESC, e.id DESC
       LIMIT @limit
@@ -1180,6 +1188,7 @@ export function getStmts(): Stmts {
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
       WHERE e.event_type = @event_type AND i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
+        AND (i.current_owner IS NULL OR i.current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
       ORDER BY e.block_timestamp DESC, e.id DESC
       LIMIT @limit
     `),
@@ -1189,6 +1198,7 @@ export function getStmts(): Stmts {
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
       WHERE e.event_type = @event_type AND i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
+        AND (i.current_owner IS NULL OR i.current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
         AND (e.block_timestamp, e.id) < (@cursor_ts, @cursor_id)
       ORDER BY e.block_timestamp DESC, e.id DESC
       LIMIT @limit
@@ -1200,6 +1210,7 @@ export function getStmts(): Stmts {
       WHERE i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
         AND e.event_type != 'listed'
+        AND (i.current_owner IS NULL OR i.current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
     `),
 
     // Holders are derived from inscriptions.current_owner — count distinct non-null owners.
@@ -1287,11 +1298,16 @@ export function getStmts(): Stmts {
         AS n
     `),
 
+    // The `current_owner NOT IN (...)` clause filters out inscriptions
+    // currently parked in special wallets we surface separately (see
+    // `walletLabels.ts`). Top Holders deliberately keeps them — that's the
+    // intended exception so users can still find the treasury.
     topByTransfers: db.prepare(`
       SELECT * FROM inscriptions
       WHERE (transfer_count + sale_count) > 0
         AND collection_slug = @collection
         AND (@color IS NULL OR color = @color)
+        AND (current_owner IS NULL OR current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
       ORDER BY (transfer_count + sale_count) DESC, last_movement_at DESC
       LIMIT @limit
     `),
@@ -1301,6 +1317,7 @@ export function getStmts(): Stmts {
       WHERE last_movement_at IS NOT NULL
         AND collection_slug = @collection
         AND (@color IS NULL OR color = @color)
+        AND (current_owner IS NULL OR current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
       ORDER BY last_movement_at ASC
       LIMIT @limit
     `),
@@ -1310,6 +1327,7 @@ export function getStmts(): Stmts {
       WHERE total_volume_sats > 0
         AND collection_slug = @collection
         AND (@color IS NULL OR color = @color)
+        AND (current_owner IS NULL OR current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
       ORDER BY total_volume_sats DESC
       LIMIT @limit
     `),
@@ -1319,6 +1337,7 @@ export function getStmts(): Stmts {
       WHERE highest_sale_sats > 0
         AND collection_slug = @collection
         AND (@color IS NULL OR color = @color)
+        AND (current_owner IS NULL OR current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
       ORDER BY highest_sale_sats DESC
       LIMIT @limit
     `),
@@ -1558,6 +1577,9 @@ export function getStmts(): Stmts {
     // when known, raw wallet otherwise) by how many inscriptions they hold.
     // The inner query mirrors topHoldersGrouped — same Matrica collapse — so
     // the bucket counts square with the top-holders leaderboard.
+    //
+    // Excludes special wallets (treasury) so the histogram reflects the
+    // organic distribution rather than being skewed by a single mass holder.
     holderDistributionBuckets: db.prepare(`
       SELECT bucket, COUNT(*) AS wallet_count FROM (
         SELECT
@@ -1575,6 +1597,7 @@ export function getStmts(): Stmts {
           WHERE i.current_owner IS NOT NULL
             AND i.collection_slug = @collection
             AND (@color IS NULL OR i.color = @color)
+            AND i.current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST})
           GROUP BY COALESCE(wl.matrica_user_id, i.current_owner)
         )
       )
@@ -1602,6 +1625,7 @@ export function getStmts(): Stmts {
           WHERE collection_slug = @collection
             AND (@color IS NULL OR color = @color)
             AND COALESCE(last_movement_at, inscribe_at) IS NOT NULL
+            AND (current_owner IS NULL OR current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
         )
       )
       GROUP BY bucket
@@ -1619,6 +1643,7 @@ export function getStmts(): Stmts {
         AND (@color IS NULL OR i.color = @color)
         AND e.event_type IN ('transferred', 'sold')
         AND e.block_timestamp >= unixepoch() - (@days * 86400)
+        AND (i.current_owner IS NULL OR i.current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
       GROUP BY date
       ORDER BY date ASC
     `),

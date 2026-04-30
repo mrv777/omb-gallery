@@ -10,6 +10,7 @@ import {
   ordNetWalletLink,
   truncateAddr,
 } from '@/lib/format';
+import { lookupWalletLabel } from '@/lib/walletLabels';
 import { WalletsList } from './WalletsList';
 import SafeImg from '@/components/SafeImg';
 import ColorPortfolioBar from '@/components/Charts/ColorPortfolioBar';
@@ -58,11 +59,23 @@ export default function HolderProfile({
   tileCap,
   ownershipDeltas,
 }: Props) {
+  // Manual identity label (treasury etc.). Looked up against any wallet in
+  // the aggregated set so it's stable regardless of which sibling wallet
+  // the user navigated through. Takes precedence over Matrica username so
+  // curated overrides win.
+  const manual = wallets.map(lookupWalletLabel).find(Boolean) ?? null;
+  // Render every OMB this wallet owns. Tiles lazy-load via native <img>
+  // and use `content-visibility: auto` so offscreen tiles skip layout +
+  // paint until they scroll into view. Even at ~9k tiles this stays cheap
+  // because the eager work is bounded to whatever's in the viewport.
+  // `tileCap` is preserved as a ceiling-of-safety should we ever blow up
+  // the per-wallet count, but is set high enough that the typical bag
+  // sees no truncation.
   const ombShown = ombHoldings.slice(0, tileCap);
   const ombHidden = ombHoldings.length - ombShown.length;
   const bravoShown = bravoHoldings.slice(0, BRAVO_TILE_CAP);
   const bravoHidden = bravoHoldings.length - bravoShown.length;
-  const linked = !!username;
+  const linked = !!manual || !!username;
 
   return (
     <section className="px-4 sm:px-6 pb-16 max-w-6xl mx-auto">
@@ -80,7 +93,7 @@ export default function HolderProfile({
           <>
             <div className="flex items-start justify-between gap-4 mb-4">
               <div className="flex items-center gap-3 min-w-0">
-                {avatarUrl && (
+                {!manual && avatarUrl && (
                   <SafeImg
                     src={avatarUrl}
                     alt=""
@@ -89,9 +102,18 @@ export default function HolderProfile({
                   />
                 )}
                 <div className="min-w-0">
-                  <h1 className="text-base sm:text-lg text-bone normal-case tracking-normal truncate">
-                    {username}
+                  <h1
+                    className={`text-base sm:text-lg normal-case tracking-normal truncate ${
+                      manual ? 'text-accent-orange' : 'text-bone'
+                    }`}
+                  >
+                    {manual ? manual.name : username}
                   </h1>
+                  {manual?.subtitle && (
+                    <div className="text-[11px] tracking-[0.08em] uppercase text-bone-dim mt-0.5">
+                      {manual.subtitle}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -242,6 +264,15 @@ function OmbTile({ number }: { number: number }) {
       prefetch={false}
       className={`block w-20 h-20 sm:w-24 sm:h-24 ${tileBg} overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors`}
       title={`#${number}`}
+      // content-visibility:auto skips layout + paint for offscreen tiles;
+      // contain-intrinsic-size reserves the right slot so the flex-wrap
+      // layout still resolves up-front and scroll position stays stable.
+      // 96px matches the sm:w-24 tile (we use the larger value so the
+      // mobile-rendered 80px tiles still land within the reserved box).
+      style={{
+        contentVisibility: 'auto',
+        containIntrinsicSize: '96px 96px',
+      }}
     >
       {hit ? (
         /* eslint-disable-next-line @next/next/no-img-element */

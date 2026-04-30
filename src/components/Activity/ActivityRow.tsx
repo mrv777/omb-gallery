@@ -11,6 +11,7 @@ import {
   memepoolTxLink,
   truncateAddr,
 } from '@/lib/format';
+import { lookupWalletLabel } from '@/lib/walletLabels';
 
 const COLOR_TILE_BG: Record<string, string> = {
   red: 'bg-accent-red/20',
@@ -157,16 +158,22 @@ function OwnerLink({
   matrica: ApiMatricaMap;
 }) {
   if (!addr) return <span>—</span>;
+  // Manual labels (treasury etc.) take precedence over Matrica handles —
+  // these are curated identity overrides we want surfaced consistently.
+  const manual = lookupWalletLabel(addr);
   const profile = matrica[addr];
-  const username = profile?.username && !looksLikeAddress(profile.username) ? profile.username : null;
+  const username =
+    !manual && profile?.username && !looksLikeAddress(profile.username) ? profile.username : null;
   return (
     <Link
       href={`/holder/${addr}`}
       prefetch={false}
       className="hover:text-accent-orange truncate"
-      title={addr}
+      title={manual ? `${manual.name} — ${addr}` : addr}
     >
-      {username ? (
+      {manual ? (
+        <span className="text-accent-orange normal-case tracking-normal">{manual.name}</span>
+      ) : username ? (
         <span className="text-bone normal-case tracking-normal">{username}</span>
       ) : (
         truncateAddr(addr)

@@ -10,6 +10,7 @@ import {
   type WalletLinkRow,
 } from '@/lib/db';
 import { truncateAddr } from '@/lib/format';
+import { lookupWalletLabel } from '@/lib/walletLabels';
 
 type Params = { address: string };
 
@@ -18,10 +19,14 @@ type Params = { address: string };
 // address — bad input just renders an empty profile.
 const MAX_ADDR_LEN = 100;
 
-// Cap how many tiles we render per collection to keep DOM size reasonable
-// for whales. Fits ~10 rows at the chosen tile size; anything beyond becomes
-// "+N more". Activity is already capped at 50 in the prepared statement.
-const TILE_CAP = 200;
+// Cap on how many OMB tiles we render. Effectively unlimited for any real
+// wallet — the largest holder in the dataset sits well below this. Tiles
+// use `content-visibility: auto`, native lazy-loaded <img>, and 128w WebP
+// thumbnails so even the entire collection (~9k) renders cheaply: only
+// in-viewport tiles do layout, paint, and image fetch work. The cap stays
+// nonzero purely as a defensive ceiling against a future catastrophic
+// data shape (e.g. an indexer bug pinning every OMB to one address).
+const TILE_CAP = 10_000;
 
 // Per-wallet over-fetch when aggregating events across a Matrica user's
 // linked wallets. Each call still hits the per-owner index (idx_events_*_ts_id),
@@ -36,10 +41,12 @@ export async function generateMetadata({ params }: { params: Promise<Params> }):
   const { address } = await params;
   const stmts = getStmts();
   const link = stmts.getWalletLink.get({ wallet_addr: address }) as WalletLinkRow | undefined;
-  // Prefer the Matrica username for the title when one's known and isn't
-  // just the wallet address echoed back. Falls back cleanly otherwise.
-  const display =
-    link?.username && !looksLikeAddress(link.username)
+  // Manual label (treasury etc.) wins over Matrica handle, which wins over
+  // the truncated address. Curated overrides need to be authoritative.
+  const manual = lookupWalletLabel(address);
+  const display = manual
+    ? manual.name
+    : link?.username && !looksLikeAddress(link.username)
       ? link.username
       : truncateAddr(address, 8, 6);
   return {

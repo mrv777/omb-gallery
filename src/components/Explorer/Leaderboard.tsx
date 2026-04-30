@@ -5,6 +5,7 @@ import { formatBtc, formatRelTime, truncateAddr } from '@/lib/format';
 import type { ApiHolder, ApiInscription } from '@/components/Activity/types';
 import type { ColorFilter } from '@/lib/types';
 import { appendColorParam } from '@/lib/colorFilter';
+import { lookupWalletLabel } from '@/lib/walletLabels';
 import SafeImg from '@/components/SafeImg';
 
 type Props = {
@@ -100,10 +101,20 @@ function HolderRow({ row, rank }: { row: ApiHolder; rank: number }) {
   // Linked Matrica user: deep-link to the first wallet (which then aggregates
   // across all linked wallets server-side). Unlinked wallet: link to itself.
   const primaryWallet = row.wallets[0] ?? row.group_key;
-  const showsUsername = row.is_user && row.username && !looksLikeAddress(row.username);
-  const tooltip = row.is_user
-    ? `Matrica: ${row.username ?? row.group_key} (${row.wallets.length} wallet${row.wallets.length === 1 ? '' : 's'})`
-    : row.group_key;
+  // Manual label takes precedence over Matrica — these are curated identity
+  // overrides for known special wallets (treasury, mint, etc.) and should
+  // win over user-set Matrica handles. For ApiHolder rows the label is
+  // looked up against any of the rolled-up wallets (typically just one).
+  const manual =
+    lookupWalletLabel(primaryWallet) ??
+    row.wallets.map(lookupWalletLabel).find(Boolean) ??
+    null;
+  const showsUsername = !manual && row.is_user && row.username && !looksLikeAddress(row.username);
+  const tooltip = manual
+    ? `${manual.name}${manual.subtitle ? ` — ${manual.subtitle}` : ''}\n${primaryWallet}`
+    : row.is_user
+      ? `Matrica: ${row.username ?? row.group_key} (${row.wallets.length} wallet${row.wallets.length === 1 ? '' : 's'})`
+      : row.group_key;
   return (
     <li>
       <Link
@@ -113,7 +124,7 @@ function HolderRow({ row, rank }: { row: ApiHolder; rank: number }) {
       >
         <span className="font-mono text-[11px] text-bone-dim tabular-nums">{rank}</span>
         <span className="block w-5 h-5 bg-ink-2 overflow-hidden rounded-sm">
-          {row.is_user && (
+          {!manual && row.is_user && (
             <SafeImg
               src={row.avatar_url}
               alt=""
@@ -123,8 +134,21 @@ function HolderRow({ row, rank }: { row: ApiHolder; rank: number }) {
           )}
         </span>
         <span className="font-mono text-xs text-bone truncate" title={tooltip}>
-          {showsUsername ? row.username : truncateAddr(primaryWallet, 8, 6)}
-          {row.is_user && row.wallets.length > 1 && (
+          {manual ? (
+            <>
+              <span className="text-accent-orange">{manual.name}</span>
+              {manual.subtitle && (
+                <span className="ml-1.5 text-[10px] text-bone-dim normal-case tracking-normal">
+                  {manual.subtitle}
+                </span>
+              )}
+            </>
+          ) : showsUsername ? (
+            row.username
+          ) : (
+            truncateAddr(primaryWallet, 8, 6)
+          )}
+          {!manual && row.is_user && row.wallets.length > 1 && (
             <span className="ml-1.5 text-[10px] text-bone-dim">×{row.wallets.length}</span>
           )}
         </span>
