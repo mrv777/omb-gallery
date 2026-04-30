@@ -1402,7 +1402,7 @@ export function getStmts(): Stmts {
     // color + collection_slug (used by findMatchesForEvent). FIFO so a busy
     // tick still drains old events before new ones.
     selectNotifyQueueBatch: db.prepare(`
-      SELECT e.id, e.event_type, e.inscription_number, e.block_timestamp,
+      SELECT e.id, e.event_type, e.inscription_id, e.inscription_number, e.block_timestamp,
              e.marketplace, e.sale_price_sats, e.new_owner, e.old_owner, e.txid,
              i.color, i.collection_slug
       FROM notify_pending q

@@ -4,6 +4,7 @@ import { lookupInscription } from './inscriptionLookup';
 import { log } from './log';
 import { sendMessage, escapeHtml, type SendArgs } from './telegram';
 import { postWebhook, type DiscordEmbed } from './discord';
+import { satflowInscriptionLink } from './format';
 import {
   cleanupExpiredPending,
   findMatchesForEvent,
@@ -19,6 +20,7 @@ import {
 type EventRow = {
   id: number;
   event_type: 'inscribed' | 'transferred' | 'sold' | 'listed';
+  inscription_id: string;
   inscription_number: number;
   block_timestamp: number;
   marketplace: string | null;
@@ -93,6 +95,19 @@ function ordinalsUrl(inscriptionNumber: number): string {
   return `https://ordinals.com/inscription/${inscriptionNumber}`;
 }
 
+// Marketplace-aware link for sold/listed events. Transfers always go to
+// ordinals.com (no marketplace context). Add a branch here when a new
+// marketplace ships its sales/listings into the events table.
+function eventLinkUrl(ev: EventRow): string {
+  if (ev.event_type === 'sold' || ev.event_type === 'listed') {
+    if (ev.marketplace === 'satflow') {
+      const url = satflowInscriptionLink(ev.inscription_id);
+      if (url) return url;
+    }
+  }
+  return ordinalsUrl(ev.inscription_number);
+}
+
 function buildTelegramMessage(events: EventRow[], sub: SubscriptionRow): SendArgs {
   const isOne = events.length === 1;
   const lines: string[] = [];
@@ -103,7 +118,7 @@ function buildTelegramMessage(events: EventRow[], sub: SubscriptionRow): SendArg
     // 'listed' has price but no buyer — phrase as "for X on Y" same as sold.
     // 'transferred' has neither price nor marketplace.
     const priceStr = price ? ` for <b>${escapeHtml(price)}</b>${market}` : '';
-    const link = `<a href="${ordinalsUrl(ev.inscription_number)}">OMB #${ev.inscription_number}</a>`;
+    const link = `<a href="${eventLinkUrl(ev)}">OMB #${ev.inscription_number}</a>`;
     const colorTag = ev.color ? ` <i>(${escapeHtml(ev.color)})</i>` : '';
     // Listed events show only the seller; no recipient yet.
     const movement =
@@ -127,7 +142,7 @@ function buildTelegramMessage(events: EventRow[], sub: SubscriptionRow): SendArg
   const replyMarkup = {
     inline_keyboard: [
       [
-        { text: 'View latest', url: ordinalsUrl(events[events.length - 1].inscription_number) },
+        { text: 'View latest', url: eventLinkUrl(events[events.length - 1]) },
         { text: 'Mute this watch', callback_data: `mute:${sub.id}` },
       ],
     ],
@@ -164,7 +179,7 @@ function buildDiscordEmbeds(events: EventRow[], sub: SubscriptionRow): DiscordEm
     // the synthetic prefix to 10 chars renders fine alongside real txids.
     return {
       title: titleBits.join(' '),
-      url: ordinalsUrl(ev.inscription_number),
+      url: eventLinkUrl(ev),
       color: colorHex(ev.color),
       thumbnail: lookup ? { url: `${siteUrl()}${lookup.thumbnail}` } : undefined,
       fields,
