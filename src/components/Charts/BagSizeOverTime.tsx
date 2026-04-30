@@ -164,7 +164,7 @@ export default function BagSizeOverTime({
                     }}
                   >
                     <span
-                      className={`block w-[7px] h-[7px] rounded-full ${markerClasses(h)}`}
+                      className={`block w-[10px] h-[10px] rounded-full ${markerClasses(h)}`}
                     />
                   </a>
                 );
@@ -260,7 +260,7 @@ function LegendDot({
         : 'bg-ink-1 border-2 border-accent-blue';
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className={`block w-[7px] h-[7px] rounded-full ${cls}`} />
+      <span className={`block w-[9px] h-[9px] rounded-full ${cls}`} />
       <span className="normal-case tracking-normal">{label}</span>
     </span>
   );
