@@ -144,7 +144,7 @@ const FilterControls = memo(function FilterControls({
     <div className="h-full flex flex-col font-mono text-xs tracking-[0.08em] uppercase">
       {/* Row 1: hamburger (mobile) + wordmark + nav (desktop) + filters + desktop search/zoom/help */}
       <div className="flex items-center gap-3 sm:gap-6 px-3 sm:px-6 h-11 md:h-full">
-        <MobileMenu />
+        <MobileMenu active="gallery" />
 
         {/* Wordmark — desktop only */}
         <div className="hidden md:block text-bone shrink-0">OMB</div>

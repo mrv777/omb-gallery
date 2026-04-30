@@ -7,17 +7,16 @@ import { HelpDialog } from './HelpButton';
 import { useColorFilter } from '@/lib/useColorFilter';
 import { appendColorParam } from '@/lib/colorFilter';
 
-type NavItem = { key: 'gallery' | 'activity' | 'explorer'; label: string; href: string };
+type NavKey = 'gallery' | 'activity' | 'explorer';
+type NavItem = { key: NavKey; label: string; href: string };
 
-// Only the gallery uses this menu; /activity and /explorer get their nav from
-// SubpageShell. So "gallery" is always the active item here.
 const NAV: NavItem[] = [
   { key: 'gallery', label: 'gallery', href: '/' },
   { key: 'activity', label: 'activity', href: '/activity' },
   { key: 'explorer', label: 'explorer', href: '/explorer' },
 ];
 
-export default function MobileMenu() {
+export default function MobileMenu({ active }: { active?: NavKey } = {}) {
   const [open, setOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -53,7 +52,7 @@ export default function MobileMenu() {
         onClick={e => e.stopPropagation()}
       >
         {NAV.map(item => {
-          const isActive = item.key === 'gallery';
+          const isActive = item.key === active;
           return (
             <Link
               key={item.key}
