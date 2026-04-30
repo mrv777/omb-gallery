@@ -13,7 +13,7 @@ export type SubStatus = 'pending' | 'active' | 'muted' | 'failed';
 // event_mask bits
 export const MASK_TRANSFERRED = 1;
 export const MASK_SOLD = 2;
-export const MASK_LISTED = 4; // reserved; not yet emitted
+export const MASK_LISTED = 4;
 
 export type SubscriptionRow = {
   id: number;
@@ -57,6 +57,7 @@ type Stmts = {
   mergeExistingFromPending: Statement;
   deleteSubById: Statement;
   getExistingToken: Statement;
+  setEventMaskById: Statement;
 };
 
 let stmts: Stmts | null = null;
@@ -153,6 +154,8 @@ function getStmts(): Stmts {
     `),
 
     setStatus: db.prepare(`UPDATE subscriptions SET status = @status WHERE id = @id`),
+
+    setEventMaskById: db.prepare(`UPDATE subscriptions SET event_mask = @mask WHERE id = @id`),
 
     setStatusForTarget: db.prepare(`
       UPDATE subscriptions SET status = @status
@@ -398,6 +401,23 @@ export function listByTarget(channel: Channel, channelTarget: string): Subscript
 
 export function setStatus(id: number, status: SubStatus): void {
   getStmts().setStatus.run({ id, status });
+}
+
+export function setEventMask(id: number, mask: number): void {
+  getStmts().setEventMaskById.run({ id, mask });
+}
+
+export function deleteSubscriptionById(id: number): void {
+  getStmts().deleteSubById.run(id);
+}
+
+/** Format a subscription event_mask for display ("transfers + sales + listings"). */
+export function eventMaskLabel(mask: number): string {
+  const bits: string[] = [];
+  if (mask & MASK_TRANSFERRED) bits.push('transfers');
+  if (mask & MASK_SOLD) bits.push('sales');
+  if (mask & MASK_LISTED) bits.push('listings');
+  return bits.length ? bits.join(' + ') : 'none';
 }
 
 export function muteAllForTarget(channel: Channel, channelTarget: string): number {

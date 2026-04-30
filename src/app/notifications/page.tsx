@@ -1,6 +1,6 @@
 import { headers } from 'next/headers';
 import type { Metadata } from 'next';
-import { COOKIE_NAME, parseSession } from '@/lib/subscriberSession';
+import { parseSessionV2, readCookieRaw } from '@/lib/subscriberSession';
 import { listByTarget, type SubscriptionRow } from '@/lib/subscriptionStore';
 import SubpageShell from '@/components/SubpageShell';
 import NotificationsList from '@/components/Notifications/NotificationsList';
@@ -22,20 +22,46 @@ function describeTarget(sub: SubscriptionRow): string {
 
 export default async function NotificationsPage() {
   const h = await headers();
-  const cookie = h.get('cookie') ?? '';
-  const m = cookie.match(new RegExp(`(?:^|;\\s*)${COOKIE_NAME}=([^;]+)`));
-  const session = parseSession(m?.[1]);
+  const cookieRaw = readCookieRaw(h.get('cookie'));
+  const sessionV2 = parseSessionV2(cookieRaw);
 
-  const subs = session
-    ? listByTarget(session.channel, session.channelTarget).map(s => ({
-        id: s.id,
-        kind: s.kind,
-        targetKey: s.target_key,
-        label: describeTarget(s),
-        eventMask: s.event_mask,
-        status: s.status,
-        unsubToken: s.unsub_token,
-      }))
+  // Iterate EVERY binding in the cookie so a user with both Telegram + Discord
+  // sees both groups on one page. Dedupe by sub.id (defensive — the unique
+  // (channel, channel_target, kind, target_key) constraint already prevents
+  // the same row appearing under two bindings, but a future refactor that
+  // changes that contract shouldn't double-render).
+  const seen = new Set<number>();
+  const subs: Array<{
+    id: number;
+    channel: 'telegram' | 'discord';
+    kind: SubscriptionRow['kind'];
+    targetKey: string;
+    label: string;
+    eventMask: number;
+    status: SubscriptionRow['status'];
+    unsubToken: string;
+  }> = [];
+  if (sessionV2) {
+    for (const binding of sessionV2.sessions) {
+      for (const s of listByTarget(binding.channel, binding.channelTarget)) {
+        if (seen.has(s.id)) continue;
+        seen.add(s.id);
+        subs.push({
+          id: s.id,
+          channel: s.channel,
+          kind: s.kind,
+          targetKey: s.target_key,
+          label: describeTarget(s),
+          eventMask: s.event_mask,
+          status: s.status,
+          unsubToken: s.unsub_token,
+        });
+      }
+    }
+  }
+
+  const channels = sessionV2
+    ? Array.from(new Set(sessionV2.sessions.map(s => s.channel)))
     : [];
 
   return (
@@ -45,8 +71,8 @@ export default async function NotificationsPage() {
           Notifications
         </h1>
         <NotificationsList
-          hasSession={!!session}
-          channel={session?.channel ?? null}
+          hasSession={!!sessionV2}
+          channels={channels}
           subs={subs}
         />
       </div>

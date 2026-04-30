@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { parseSession, setCookieHeader } from '@/lib/subscriberSession';
+import { addBinding, parseSession, readCookieRaw, setCookieHeader } from '@/lib/subscriberSession';
 import { log } from '@/lib/log';
 
 export const dynamic = 'force-dynamic';
@@ -29,8 +29,13 @@ export async function GET(req: NextRequest) {
     log.warn('subscribe', 'auth link rejected', {});
     return new NextResponse('Invalid or expired link', { status: 400 });
   }
-  // Set the cookie verbatim and bounce to /notifications. The redirect target
-  // is same-origin and not user-controlled, so no open-redirect risk.
+  // APPEND the link's binding to whatever cookie the browser already has,
+  // so a user clicking a Discord magic-login while already onboarded for
+  // Telegram (or vice versa) gets BOTH bindings, not just the link's. The
+  // redirect target is same-origin and not user-controlled, so no
+  // open-redirect risk.
+  const cookieRaw = readCookieRaw(req.headers.get('cookie'));
+  const merged = addBinding(cookieRaw, session.channel, session.channelTarget);
   const headers = new Headers({
     location: '/notifications',
     // Don't leak the token to /notifications via Referer.
@@ -41,6 +46,9 @@ export async function GET(req: NextRequest) {
     // this token reaches; nuking subs needs unsub_token).
     'cache-control': 'private, no-store',
   });
-  headers.append('set-cookie', setCookieHeader(raw));
+  // Fall back to the original token if the merge failed (e.g. session secret
+  // missing) — at least the user gets the single-binding cookie they would
+  // have had with the old behavior.
+  headers.append('set-cookie', setCookieHeader(merged ?? raw));
   return new NextResponse(null, { status: 302, headers });
 }

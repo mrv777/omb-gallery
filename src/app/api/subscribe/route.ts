@@ -9,15 +9,17 @@ import {
   createActive,
   createPending,
   getExistingUnsubToken,
+  MASK_LISTED,
   MASK_SOLD,
   MASK_TRANSFERRED,
   type Channel,
   type SubKind,
 } from '@/lib/subscriptionStore';
 import {
-  COOKIE_NAME,
-  mintSession,
-  parseSession,
+  addBinding,
+  findBindingByChannel,
+  parseSessionV2,
+  readCookieRaw,
   setCookieHeader,
 } from '@/lib/subscriberSession';
 import { log } from '@/lib/log';
@@ -65,14 +67,18 @@ function readKindAndTarget(body: Body): { kind: SubKind; targetKey: string } | {
 }
 
 function readEventMask(body: Body, kind: SubKind): number {
-  // Default sub gets transfers + sales. Collection-kind defaults to sales-only
-  // (volume guard) — explicit transferred bit must be opted in.
+  // Default for inscription/color: transfers + sales + listings.
+  // Default for collection (firehose): sales only — volume guard against the
+  // listings/transfers tide flooding a community channel. Operators can
+  // explicitly opt in to those bits via /notifications later.
+  const FULL_NON_COLLECTION = MASK_TRANSFERRED | MASK_SOLD | MASK_LISTED;
+  const ALLOWED = MASK_TRANSFERRED | MASK_SOLD | MASK_LISTED;
   const raw = typeof body.eventMask === 'number' ? body.eventMask : null;
   if (raw === null) {
-    return kind === 'collection' ? MASK_SOLD : MASK_TRANSFERRED | MASK_SOLD;
+    return kind === 'collection' ? MASK_SOLD : FULL_NON_COLLECTION;
   }
-  const masked = raw & (MASK_TRANSFERRED | MASK_SOLD);
-  if (masked === 0) return kind === 'collection' ? MASK_SOLD : MASK_TRANSFERRED | MASK_SOLD;
+  const masked = raw & ALLOWED;
+  if (masked === 0) return kind === 'collection' ? MASK_SOLD : FULL_NON_COLLECTION;
   return masked;
 }
 
@@ -110,16 +116,29 @@ export async function POST(req: NextRequest) {
 
   const ip = clientIpKey(req.headers);
 
-  // Re-use a session cookie if present and matches the requested channel.
-  const cookieHeader = req.headers.get('cookie') ?? '';
-  const cookieMatch = cookieHeader.match(new RegExp(`(?:^|;\\s*)${COOKIE_NAME}=([^;]+)`));
-  const session = parseSession(cookieMatch?.[1]);
+  // Re-use any cookie binding for the requested channel. Multi-binding cookie
+  // (v2) means a single browser can hold both a Telegram chat AND a Discord
+  // webhook side by side; the fast path picks whichever binding matches the
+  // channel of THIS subscribe request.
+  //
+  // Design choice — one channel_target per channel per browser. If the
+  // request includes a `webhookUrl` that differs from an existing Discord
+  // binding in the cookie, we still take the fast path against the existing
+  // binding (the new URL is ignored). Supporting multiple Discord webhooks
+  // from one browser would require re-running Turnstile + ping for the new
+  // URL while skipping it for the existing one — the UX questions (which
+  // binding does "Manage" surface? does the dialog show two "one-click"
+  // buttons?) outweigh the niche use case. Workaround for users who want
+  // a second webhook: clear cookies, or use a private window.
+  const cookieRaw = readCookieRaw(req.headers.get('cookie'));
+  const sessionV2 = parseSessionV2(cookieRaw);
+  const matchingBinding = findBindingByChannel(sessionV2 ?? null, channel);
 
-  if (session && session.channel === channel) {
+  if (matchingBinding) {
     // Fast path: trusted session, no Turnstile / no round-trip needed.
     const r = createActive({
       channel,
-      channelTarget: session.channelTarget,
+      channelTarget: matchingBinding.channelTarget,
       kind,
       targetKey,
       eventMask,
@@ -181,11 +200,13 @@ export async function POST(req: NextRequest) {
   const existingToken = getExistingUnsubToken('discord', webhookUrl, kind, targetKey);
   const unsubToken = existingToken ?? randomBytes(16).toString('hex');
 
-  // Mint the session value BEFORE the ping so we can embed the magic-login
-  // link in the confirmation message (cross-device manage path). Session is
-  // (channel, channel_target)-bound — minting early is safe because nothing
-  // is persisted until the ping succeeds.
-  const sessionValue = mintSession('discord', webhookUrl);
+  // Mint the cookie value BEFORE the ping so we can embed the magic-login
+  // link in the confirmation message (cross-device manage path). We APPEND
+  // a Discord binding to whatever the browser already had — preserving any
+  // prior Telegram binding so /notifications can still see those subs.
+  // Minting early is safe because nothing is persisted until the ping
+  // succeeds.
+  const sessionValue = addBinding(cookieRaw, 'discord', webhookUrl);
 
   const ping = await pingWebhook(webhookUrl, {
     manageLink: sessionValue

@@ -39,7 +39,12 @@ export function BellIcon({ className }: { className?: string }) {
   );
 }
 
-type SessionInfo = { hasSession: boolean; channel?: Channel };
+type SessionInfo = { hasSession: boolean; channels: Channel[] };
+
+function withChannel(s: SessionInfo, c: Channel): SessionInfo {
+  if (s.channels.includes(c)) return { hasSession: true, channels: s.channels };
+  return { hasSession: true, channels: [...s.channels, c] };
+}
 
 type DialogState =
   | { kind: 'choose' }
@@ -109,11 +114,15 @@ export default function NotificationButton({ kind, targetKey, label, className }
     let cancelled = false;
     fetch('/api/me')
       .then(r => r.json())
-      .then((j: SessionInfo) => {
-        if (!cancelled) setSession(j);
+      .then((j: { hasSession?: boolean; channels?: Channel[] }) => {
+        if (cancelled) return;
+        setSession({
+          hasSession: !!j.hasSession,
+          channels: Array.isArray(j.channels) ? j.channels : [],
+        });
       })
       .catch(() => {
-        if (!cancelled) setSession({ hasSession: false });
+        if (!cancelled) setSession({ hasSession: false, channels: [] });
       });
     return () => {
       cancelled = true;
@@ -192,7 +201,7 @@ export default function NotificationButton({ kind, targetKey, label, className }
               if (sj.status === 'claimed') {
                 cleanupPoll();
                 setState({ kind: 'success', channel: 'telegram' });
-                setSession({ hasSession: true, channel: 'telegram' });
+                setSession(prev => withChannel(prev ?? { hasSession: false, channels: [] }, 'telegram'));
               }
             }
           } catch {
@@ -216,7 +225,8 @@ export default function NotificationButton({ kind, targetKey, label, className }
       setState({ kind: 'error', message: 'Paste a Discord webhook URL.' });
       return;
     }
-    if (session?.hasSession && session.channel === 'discord') {
+    const hasDiscordSession = !!session?.channels.includes('discord');
+    if (hasDiscordSession) {
       // Session reuse — no Turnstile needed.
     } else if (!tsToken) {
       setState({ kind: 'error', message: 'Complete the verification first.' });
@@ -250,43 +260,48 @@ export default function NotificationButton({ kind, targetKey, label, className }
         return;
       }
       setState({ kind: 'success', channel: 'discord' });
-      setSession({ hasSession: true, channel: 'discord' });
+      setSession(prev => withChannel(prev ?? { hasSession: false, channels: [] }, 'discord'));
     } catch {
       setState({ kind: 'error', message: 'Network error. Try again.' });
     }
   }, [kind, targetKey, webhookUrl, tsToken, session]);
 
-  // One-click for users with a matching session.
-  const oneClickSubscribe = useCallback(async () => {
-    if (!session?.hasSession || !session.channel) return;
-    setState({ kind: 'submitting' });
-    try {
-      const res = await fetch('/api/subscribe', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ channel: session.channel, kind, targetKey }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const msg =
-          j?.error === 'cap-exceeded'
-            ? 'You already have the maximum number of watches (50). Mute one in /notifications first.'
-            : j?.error === 'rate-limited'
-              ? 'Too many requests — wait a minute.'
-              : (j?.error ?? `Failed (${res.status}).`);
-        setState({ kind: 'error', message: msg });
-        return;
+  // One-click for users with a matching session. `which` picks among the
+  // channels in the cookie — when both are present the dialog renders two
+  // distinct buttons and passes the chosen channel here.
+  const oneClickSubscribe = useCallback(
+    async (which: Channel) => {
+      if (!session?.channels.includes(which)) return;
+      setState({ kind: 'submitting' });
+      try {
+        const res = await fetch('/api/subscribe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ channel: which, kind, targetKey }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const msg =
+            j?.error === 'cap-exceeded'
+              ? 'You already have the maximum number of watches (50). Mute one in /notifications first.'
+              : j?.error === 'rate-limited'
+                ? 'Too many requests — wait a minute.'
+                : (j?.error ?? `Failed (${res.status}).`);
+          setState({ kind: 'error', message: msg });
+          return;
+        }
+        setState({ kind: 'success', channel: which });
+      } catch {
+        setState({ kind: 'error', message: 'Network error. Try again.' });
       }
-      setState({ kind: 'success', channel: session.channel });
-    } catch {
-      setState({ kind: 'error', message: 'Network error. Try again.' });
-    }
-  }, [session, kind, targetKey]);
+    },
+    [session, kind, targetKey],
+  );
 
   // Mount Turnstile widget when entering the discord-form state without a session.
   useEffect(() => {
     if (state.kind !== 'discord-form') return;
-    if (session?.hasSession && session.channel === 'discord') return; // session reuse — skip widget
+    if (session?.channels.includes('discord')) return; // session reuse — skip widget
     const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '';
     if (!siteKey) return;
     let cancelled = false;
@@ -375,15 +390,24 @@ export default function NotificationButton({ kind, targetKey, label, className }
                     ? 'Get a notification on every OMB sale. (Volume-conscious: transfers are off by default for collection-wide watches.)'
                     : `Get a notification whenever this ${kind} has a sale or transfer.`}
                 </p>
-                {session?.hasSession ? (
+                {session?.channels.includes('telegram') && (
                   <button
                     type="button"
-                    onClick={oneClickSubscribe}
+                    onClick={() => oneClickSubscribe('telegram')}
+                    className="w-full h-10 px-4 mb-2 text-bone border border-bone hover:bg-bone hover:text-ink-0 transition-colors"
+                  >
+                    Subscribe via Telegram (one click)
+                  </button>
+                )}
+                {session?.channels.includes('discord') && (
+                  <button
+                    type="button"
+                    onClick={() => oneClickSubscribe('discord')}
                     className="w-full h-10 px-4 mb-3 text-bone border border-bone hover:bg-bone hover:text-ink-0 transition-colors"
                   >
-                    Subscribe via {session.channel === 'telegram' ? 'Telegram' : 'Discord'} (one click)
+                    Subscribe via Discord (one click)
                   </button>
-                ) : null}
+                )}
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
@@ -448,7 +472,7 @@ export default function NotificationButton({ kind, targetKey, label, className }
                   className="w-full bg-transparent border-0 border-b border-ink-2 focus:border-bone outline-none h-10 px-0 text-sm font-mono tracking-normal text-bone placeholder:text-bone-dim placeholder:normal-case mb-4"
                   spellCheck={false}
                 />
-                {!(session?.hasSession && session.channel === 'discord') && (
+                {!session?.channels.includes('discord') && (
                   <div ref={tsHost} className="mb-4 min-h-[65px]" />
                 )}
                 <div className="flex justify-end gap-2">

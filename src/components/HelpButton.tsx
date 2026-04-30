@@ -16,7 +16,7 @@ const SECTIONS: Section[] = [
       { label: 'Search', body: 'Type an inscription number or caption keyword.' },
       {
         label: 'Heart (♡ / ♥)',
-        body: 'Desktop: hover a tile to reveal its heart and click to favorite (or shift-click the tile). Mobile: long-press a tile to favorite — favorited tiles get a red ring. Toggle the header heart to show only your favorites.',
+        body: 'Click the heart to favorite a tile (long-press on mobile). The header heart filters to favorites only.',
       },
       {
         label: '▶ PLAY',
@@ -60,6 +60,23 @@ const SECTIONS: Section[] = [
     ],
   },
   {
+    title: 'Notifications',
+    items: [
+      {
+        label: 'Watch button',
+        body: 'Click the bell on a tile, color filter, or inscription page to subscribe to transfer / sale / listing alerts.',
+      },
+      {
+        label: 'Channels',
+        body: 'Telegram bot or your own Discord webhook. Both can run side by side from the same browser.',
+      },
+      {
+        label: 'Manage',
+        body: '/notifications shows everything you’re watching. Mute, edit which events trigger, or remove. Or use /list inside the Telegram bot.',
+      },
+    ],
+  },
+  {
     title: 'Activity & Explorer',
     items: [
       {
@@ -69,10 +86,6 @@ const SECTIONS: Section[] = [
       {
         label: 'Explorer',
         body: 'Leaderboards: most-transferred, longest-unmoved, top volume, highest sale, plus top holders.',
-      },
-      {
-        label: 'Data source',
-        body: 'Transfer state from a self-hosted ord node (polled every 5 minutes); sale prices and marketplaces enriched from Satflow.',
       },
     ],
   },

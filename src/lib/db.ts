@@ -8,7 +8,7 @@ import bravocadosInscriptions from '../data/collections/bravocados/inscriptions.
 import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
 
 // OMB-shape entry: filename = "<inscription_number>.jpg|webp", per-color groups.
 type ImageEntry = { filename: string; description: string; tags: string[] };
@@ -94,6 +94,7 @@ function migrate(db: DB): void {
         upgradeV12ToV13(db);
         upgradeV13ToV14(db);
         upgradeV14ToV15(db);
+        upgradeV15ToV16(db);
       } else {
         initSchemaLatest(db);
       }
@@ -112,6 +113,7 @@ function migrate(db: DB): void {
       if (current < 13) upgradeV12ToV13(db);
       if (current < 14) upgradeV13ToV14(db);
       if (current < 15) upgradeV14ToV15(db);
+      if (current < 16) upgradeV15ToV16(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -186,7 +188,7 @@ function initSchemaLatest(db: DB): void {
       id                  INTEGER PRIMARY KEY AUTOINCREMENT,
       inscription_id      TEXT    NOT NULL,
       inscription_number  INTEGER NOT NULL,
-      event_type          TEXT    NOT NULL CHECK (event_type IN ('inscribed','transferred','sold')),
+      event_type          TEXT    NOT NULL CHECK (event_type IN ('inscribed','transferred','sold','listed')),
       block_height        INTEGER,
       block_timestamp     INTEGER NOT NULL,
       new_satpoint        TEXT,
@@ -717,6 +719,42 @@ function upgradeV14ToV15(db: DB): void {
   `);
 }
 
+function upgradeV15ToV16(db: DB): void {
+  // Phase 6.1: extend events.event_type CHECK to allow 'listed' so the
+  // listings poll can emit fan-out-eligible rows. SQLite can't ALTER a CHECK
+  // in place — copy-and-swap, same pattern as v3 / v6 / v9 / v12 / v14.
+  db.exec(`
+    CREATE TABLE events_v3 (
+      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      inscription_id      TEXT    NOT NULL,
+      inscription_number  INTEGER NOT NULL,
+      event_type          TEXT    NOT NULL CHECK (event_type IN ('inscribed','transferred','sold','listed')),
+      block_height        INTEGER,
+      block_timestamp     INTEGER NOT NULL,
+      new_satpoint        TEXT,
+      old_owner           TEXT,
+      new_owner           TEXT,
+      marketplace         TEXT,
+      sale_price_sats     INTEGER,
+      txid                TEXT    NOT NULL,
+      raw_json            TEXT,
+      created_at          INTEGER NOT NULL DEFAULT (unixepoch()),
+      FOREIGN KEY (inscription_number) REFERENCES inscriptions (inscription_number) ON DELETE CASCADE,
+      UNIQUE (inscription_id, txid)
+    );
+    INSERT INTO events_v3 SELECT * FROM events;
+    DROP TABLE events;
+    ALTER TABLE events_v3 RENAME TO events;
+    CREATE INDEX IF NOT EXISTS idx_events_block_ts        ON events (block_timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_inscription_num ON events (inscription_number, block_timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_id_desc         ON events (id DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_type_id         ON events (event_type, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_type_ts_id      ON events (event_type, block_timestamp DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_new_owner_ts_id ON events (new_owner, block_timestamp DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_old_owner_ts_id ON events (old_owner, block_timestamp DESC, id DESC);
+  `);
+}
+
 function upgradeV4ToV5(db: DB): void {
   // Round-robin poll order: without this, runOrdTick always polls in
   // inscription_number ASC and breaks at the wallclock budget, so the back
@@ -890,6 +928,8 @@ type Stmts = {
   // notify queue (Phase 6 v2)
   enqueueNotify: ReturnType<DB['prepare']>;
   selectNotifyQueueBatch: ReturnType<DB['prepare']>;
+  selectActiveListingsForCollection: ReturnType<DB['prepare']>;
+  insertListedEvent: ReturnType<DB['prepare']>;
   // matrica wallet-linking
   pickWalletsToProbe: ReturnType<DB['prepare']>;
   upsertWalletLink: ReturnType<DB['prepare']>;
@@ -1105,11 +1145,16 @@ export function getStmts(): Stmts {
     // The `(@color IS NULL OR i.color = @color)` predicate is the across-the-
     // board pattern for color-filtered reads — pass null to query the whole
     // collection, pass a concrete color to scope to that color cohort.
+    // 'listed' events are notification-only — they're a Satflow-snapshot
+    // derivation, not an on-chain event, and the activity feed is meant to
+    // render the on-chain history. Excluding them keeps the feed semantics
+    // stable and avoids ActivityRow's rendering branches mishandling them.
     getRecentEvents: db.prepare(`
       SELECT e.* FROM events e
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
       WHERE i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
+        AND e.event_type != 'listed'
       ORDER BY e.block_timestamp DESC, e.id DESC
       LIMIT @limit
     `),
@@ -1119,6 +1164,7 @@ export function getStmts(): Stmts {
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
       WHERE i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
+        AND e.event_type != 'listed'
         AND (e.block_timestamp, e.id) < (@cursor_ts, @cursor_id)
       ORDER BY e.block_timestamp DESC, e.id DESC
       LIMIT @limit
@@ -1148,6 +1194,7 @@ export function getStmts(): Stmts {
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
       WHERE i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
+        AND e.event_type != 'listed'
     `),
 
     // Holders are derived from inscriptions.current_owner — count distinct non-null owners.
@@ -1164,9 +1211,12 @@ export function getStmts(): Stmts {
       WHERE inscription_number = @inscription_number AND collection_slug = @collection
     `),
 
+    // Both inscription-detail timelines exclude 'listed' events for the
+    // same reason as getRecentEvents — listings are off-chain notification
+    // triggers, not on-chain history.
     getInscriptionEvents: db.prepare(`
       SELECT * FROM events
-      WHERE inscription_number = ?
+      WHERE inscription_number = ? AND event_type != 'listed'
       ORDER BY block_timestamp DESC, id DESC
       LIMIT 50
     `),
@@ -1175,7 +1225,7 @@ export function getStmts(): Stmts {
     // Indexed scan via idx_events_inscription_num — fast even for thousands of rows.
     getAllInscriptionEvents: db.prepare(`
       SELECT * FROM events
-      WHERE inscription_number = ?
+      WHERE inscription_number = ? AND event_type != 'listed'
       ORDER BY block_timestamp DESC, id DESC
     `),
 
@@ -1206,11 +1256,16 @@ export function getStmts(): Stmts {
     // lookups (one per owner side) since SQLite won't pick a single index for
     // the disjunction `new_owner=? OR old_owner=?`. Outer ORDER BY does the
     // merge — at the LIMIT we use here (50) the cost is negligible.
+    // Holder timeline — also excludes 'listed' events. Listings have NULL
+    // new_owner so they wouldn't even match `new_owner = @owner`, but they
+    // WOULD match `old_owner = @owner` for the seller's address; exclude
+    // explicitly to keep the holder profile to on-chain history only.
     getEventsByAddress: db.prepare(`
       SELECT * FROM (
-        SELECT * FROM events WHERE new_owner = @owner
+        SELECT * FROM events WHERE new_owner = @owner AND event_type != 'listed'
         UNION ALL
-        SELECT * FROM events WHERE old_owner = @owner AND old_owner != COALESCE(new_owner, '')
+        SELECT * FROM events WHERE old_owner = @owner AND event_type != 'listed'
+          AND old_owner != COALESCE(new_owner, '')
       )
       ORDER BY block_timestamp DESC, id DESC
       LIMIT @limit
@@ -1221,8 +1276,9 @@ export function getStmts(): Stmts {
     // count client-side over a capped events list.
     countEventsByAddress: db.prepare(`
       SELECT
-        (SELECT COUNT(*) FROM events WHERE new_owner = @owner)
-        + (SELECT COUNT(*) FROM events WHERE old_owner = @owner AND old_owner != COALESCE(new_owner, ''))
+        (SELECT COUNT(*) FROM events WHERE new_owner = @owner AND event_type != 'listed')
+        + (SELECT COUNT(*) FROM events WHERE old_owner = @owner AND event_type != 'listed'
+           AND old_owner != COALESCE(new_owner, ''))
         AS n
     `),
 
@@ -1352,9 +1408,37 @@ export function getStmts(): Stmts {
       FROM notify_pending q
       JOIN events       e ON e.id = q.event_id
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
-      WHERE e.event_type IN ('transferred','sold')
+      WHERE e.event_type IN ('transferred','sold','listed')
       ORDER BY q.enqueued_at ASC, q.event_id ASC
       LIMIT ?
+    `),
+
+    // Read (inscription_number, listed_at) for currently-active listings in
+    // ONE collection. Used to diff before/after the snapshot replace so we
+    // know which rows are *newly* listed (and should fan out a 'listed'
+    // event). We carry listed_at — not just the number — so a re-listing
+    // (same inscription, different listed_at) emits a fresh notification
+    // rather than being suppressed as "still active".
+    selectActiveListingsForCollection: db.prepare(`
+      SELECT al.inscription_number, al.listed_at FROM active_listings al
+      JOIN inscriptions i ON i.inscription_number = al.inscription_number
+      WHERE i.collection_slug = ?
+    `),
+
+    // Insert a 'listed' event with a synthetic txid so the existing
+    // UNIQUE(inscription_id, txid) constraint dedupes re-detections of the
+    // same listing within the same `listed_at` second. Re-listings at a
+    // different `listed_at` produce a fresh row → fresh notification.
+    insertListedEvent: db.prepare(`
+      INSERT OR IGNORE INTO events (
+        inscription_id, inscription_number, event_type,
+        block_timestamp, old_owner, new_owner, marketplace,
+        sale_price_sats, txid
+      ) VALUES (
+        @inscription_id, @inscription_number, 'listed',
+        @block_timestamp, @seller, NULL, @marketplace,
+        @price_sats, @txid
+      )
     `),
 
     // ---------------- matrica wallet-linking ----------------

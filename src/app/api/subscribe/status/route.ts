@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { clearClaimToken, findByClaimToken } from '@/lib/subscriptionStore';
-import { mintSession, setCookieHeader } from '@/lib/subscriberSession';
+import { addBinding, readCookieRaw, setCookieHeader } from '@/lib/subscriberSession';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -21,7 +21,12 @@ export async function GET(req: NextRequest) {
   }
 
   if (row.status === 'active' && row.channel === 'telegram') {
-    const sessionValue = mintSession('telegram', row.channel_target);
+    // APPEND a Telegram binding to whatever cookie the browser already has,
+    // so a user who's already onboarded Discord doesn't lose that binding
+    // when they finish a Telegram claim. Multi-binding cookie (v2) holds
+    // both side by side.
+    const cookieRaw = readCookieRaw(req.headers.get('cookie'));
+    const sessionValue = addBinding(cookieRaw, 'telegram', row.channel_target);
     const headers = new Headers({ 'content-type': 'application/json' });
     if (sessionValue) headers.append('set-cookie', setCookieHeader(sessionValue));
     // The source tab has now seen the claim and will mint its session — the

@@ -7,6 +7,7 @@ import {
 } from '@/lib/telegram';
 import {
   claimByToken,
+  eventMaskLabel,
   listByTarget,
   setStatus,
   PER_TARGET_LIMIT,
@@ -46,13 +47,6 @@ function targetLabel(sub: SubscriptionRow): string {
   if (sub.kind === 'inscription') return `OMB #${sub.target_key}`;
   if (sub.kind === 'color') return `${sub.target_key} OMBs`;
   return 'all OMB activity';
-}
-
-function eventMaskLabel(mask: number): string {
-  const bits: string[] = [];
-  if (mask & 1) bits.push('transfers');
-  if (mask & 2) bits.push('sales');
-  return bits.length ? bits.join(' + ') : 'none';
 }
 
 async function handleStart(chatId: number, payload: string): Promise<void> {

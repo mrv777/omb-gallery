@@ -12,12 +12,13 @@ import {
   hashTarget,
   MASK_TRANSFERRED,
   MASK_SOLD,
+  MASK_LISTED,
   type SubscriptionRow,
 } from './subscriptionStore';
 
 type EventRow = {
   id: number;
-  event_type: 'inscribed' | 'transferred' | 'sold';
+  event_type: 'inscribed' | 'transferred' | 'sold' | 'listed';
   inscription_number: number;
   block_timestamp: number;
   marketplace: string | null;
@@ -67,7 +68,14 @@ function colorHex(color: string | null): number {
 function eventBit(t: EventRow['event_type']): number {
   if (t === 'sold') return MASK_SOLD;
   if (t === 'transferred') return MASK_TRANSFERRED;
+  if (t === 'listed') return MASK_LISTED;
   return 0;
+}
+
+function actionLabel(t: EventRow['event_type']): { upper: string; lower: string; emoji: string } {
+  if (t === 'sold') return { upper: 'SOLD', lower: 'sold', emoji: '💰' };
+  if (t === 'listed') return { upper: 'LISTED', lower: 'listed', emoji: '🏷️' };
+  return { upper: 'TRANSFERRED', lower: 'transferred', emoji: '🔄' };
 }
 
 function truncAddr(a: string | null): string {
@@ -89,14 +97,20 @@ function buildTelegramMessage(events: EventRow[], sub: SubscriptionRow): SendArg
   const isOne = events.length === 1;
   const lines: string[] = [];
   for (const ev of events) {
-    const action = ev.event_type === 'sold' ? 'SOLD' : 'TRANSFERRED';
+    const { upper, emoji } = actionLabel(ev.event_type);
     const price = formatBtc(ev.sale_price_sats);
     const market = ev.marketplace ? ` on ${escapeHtml(ev.marketplace)}` : '';
+    // 'listed' has price but no buyer — phrase as "for X on Y" same as sold.
+    // 'transferred' has neither price nor marketplace.
     const priceStr = price ? ` for <b>${escapeHtml(price)}</b>${market}` : '';
     const link = `<a href="${ordinalsUrl(ev.inscription_number)}">OMB #${ev.inscription_number}</a>`;
     const colorTag = ev.color ? ` <i>(${escapeHtml(ev.color)})</i>` : '';
-    const movement = `${escapeHtml(truncAddr(ev.old_owner))} → ${escapeHtml(truncAddr(ev.new_owner))}`;
-    lines.push(`🔔 ${link}${colorTag} <b>${action}</b>${priceStr}\n   ${movement}`);
+    // Listed events show only the seller; no recipient yet.
+    const movement =
+      ev.event_type === 'listed'
+        ? `by ${escapeHtml(truncAddr(ev.old_owner))}`
+        : `${escapeHtml(truncAddr(ev.old_owner))} → ${escapeHtml(truncAddr(ev.new_owner))}`;
+    lines.push(`${emoji} ${link}${colorTag} <b>${upper}</b>${priceStr}\n   ${movement}`);
   }
   let header = '';
   if (sub.kind === 'inscription') {
@@ -131,17 +145,23 @@ function buildDiscordEmbeds(events: EventRow[], sub: SubscriptionRow): DiscordEm
   // Bucket is already capped at 10 events upstream; no slice needed here.
   return events.map(ev => {
     const lookup = lookupInscription(ev.inscription_number);
-    const action = ev.event_type === 'sold' ? 'sold' : 'transferred';
+    const { lower } = actionLabel(ev.event_type);
     const price = formatBtc(ev.sale_price_sats);
     const market = ev.marketplace ?? '';
-    const titleBits: string[] = [`OMB #${ev.inscription_number} ${action}`];
+    const titleBits: string[] = [`OMB #${ev.inscription_number} ${lower}`];
     if (price) titleBits.push(`for ${price}`);
     if (market) titleBits.push(`on ${market}`);
-    const fields: DiscordEmbed['fields'] = [
-      { name: 'From', value: truncAddr(ev.old_owner), inline: true },
-      { name: 'To', value: truncAddr(ev.new_owner), inline: true },
-    ];
-    if (ev.color) fields.unshift({ name: 'Color', value: ev.color, inline: true });
+    const fields: DiscordEmbed['fields'] = [];
+    if (ev.color) fields.push({ name: 'Color', value: ev.color, inline: true });
+    if (ev.event_type === 'listed') {
+      // Listings have no recipient — show seller only.
+      fields.push({ name: 'Seller', value: truncAddr(ev.old_owner), inline: true });
+    } else {
+      fields.push({ name: 'From', value: truncAddr(ev.old_owner), inline: true });
+      fields.push({ name: 'To', value: truncAddr(ev.new_owner), inline: true });
+    }
+    // Listed events use a synthetic txid like "listed:<num>:<ts>"; truncating
+    // the synthetic prefix to 10 chars renders fine alongside real txids.
     return {
       title: titleBits.join(' '),
       url: ordinalsUrl(ev.inscription_number),

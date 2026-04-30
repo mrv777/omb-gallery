@@ -68,6 +68,13 @@ const LISTINGS_MIN_INTERVAL_SEC = 15 * 60;
 // at pageSize=100, 5 pages is ample headroom for growth and a defensive
 // brake if the API ever returns runaway data.
 const LISTINGS_MAX_PAGES = 5;
+// Cold-start window for listed-event fanout. If the listings stream hasn't
+// run within this many seconds (first deploy after this code lands, or a
+// long outage), we treat the entire snapshot as "already known" and skip
+// emitting `kind='listed'` events — otherwise users would get a flood of
+// hundreds of "newly listed" notifications for items that have been on the
+// market for days. 30 min is comfortably longer than the 15-min cadence.
+const LISTED_COLD_START_SEC = 30 * 60;
 // Soft alarm threshold for the monthly call budget. We don't BLOCK at this
 // threshold — that could disable the indexer silently — but we surface it in
 // the tick result so it shows up in the activity-page status bar.
@@ -1079,15 +1086,19 @@ async function runListingsTick(
 
   const stmts = getStmts();
 
+  // Capture the pre-tick poll state BEFORE acquireLock — `acquireLock`
+  // overwrites `last_run_at` to the current time, so any read after it would
+  // see "now" and break the listed-event cold-start guard below.
+  const priorState = stmts.getPollState.get({
+    stream: 'satflow_listings',
+    collection: collection.slug,
+  }) as PollStateRow | undefined;
+
   // Cadence guard: skip if last successful run was within the interval and
   // we're not being explicitly forced (e.g. ?mode=listings).
   if (!opts.force) {
-    const state = stmts.getPollState.get({
-      stream: 'satflow_listings',
-      collection: collection.slug,
-    }) as PollStateRow | undefined;
-    if (state?.last_run_at && state.last_status === 'ok') {
-      const sinceLast = Math.floor(Date.now() / 1000) - state.last_run_at;
+    if (priorState?.last_run_at && priorState.last_status === 'ok') {
+      const sinceLast = Math.floor(Date.now() / 1000) - priorState.last_run_at;
       if (sinceLast < LISTINGS_MIN_INTERVAL_SEC) {
         return {
           mode: 'listings',
@@ -1208,8 +1219,46 @@ async function runListingsTick(
   // Phase 4: snapshot-replace inside one transaction. Readers see either the
   // pre-tick snapshot or the post-tick snapshot, never a partial mid-write
   // view. With ~209 active listings, this is well under 10ms.
-  const refreshedAt = Math.floor(Date.now() / 1000);
+  //
+  // Inside the same transaction we also emit `kind='listed'` events for
+  // newly-listed inscriptions and enqueue them for fan-out, so a crash
+  // mid-tick can't leave the snapshot-replace and event-emit out of sync.
+  //
+  // Cold-start guard: don't fan out hundreds of "newly listed" notifications
+  // on first deploy or after a long outage. We treat the snapshot as cold
+  // when ANY of:
+  //   - last_run_at is null (first ever run for this stream)
+  //   - last_status is not 'ok' — a failed prior tick still bumps last_run_at
+  //     (acquireLock + setPollResult both write it) but the active_listings
+  //     snapshot was NOT replaced. Diffing the next successful tick against
+  //     that stale snapshot would flood subscribers with false "newly listed"
+  //     events. ('ok-skipped-empty-resolution' is also non-'ok' here, which
+  //     is intentional — that path also leaves active_listings stale.)
+  //   - last_run_at is older than LISTED_COLD_START_SEC
+  // `priorState` was captured pre-acquireLock so it reflects the actual
+  // previous tick's timestamp + status, not the lock-write of THIS tick.
+  const nowSec = Math.floor(Date.now() / 1000);
+  const isColdStart =
+    !priorState?.last_run_at ||
+    priorState.last_status !== 'ok' ||
+    nowSec - priorState.last_run_at > LISTED_COLD_START_SEC;
+
+  const refreshedAt = nowSec;
+  let listedEventsEmitted = 0;
   const tx = getDb().transaction(() => {
+    // Snapshot of pre-tick active listings for this collection — keyed by
+    // (inscription_number, listed_at). After the upsert+delete below, an item
+    // whose listed_at differs from the prior listed_at (or wasn't present at
+    // all) counts as "newly listed".
+    const priorRows = isColdStart
+      ? []
+      : (stmts.selectActiveListingsForCollection.all(collection.slug) as Array<{
+          inscription_number: number;
+          listed_at: number;
+        }>);
+    const priorListedAt = new Map<number, number>();
+    for (const r of priorRows) priorListedAt.set(r.inscription_number, r.listed_at);
+
     for (const item of ready) {
       stmts.upsertActiveListing.run({
         inscription_number: item.inscription_number,
@@ -1226,6 +1275,37 @@ async function runListingsTick(
     // active on Satflow. Scoped to the current collection so other
     // collections' rows aren't affected.
     stmts.deleteStaleListings.run({ cutoff: refreshedAt, collection: collection.slug });
+
+    if (!isColdStart) {
+      for (const item of ready) {
+        // Skip when the prior snapshot already had this exact (number,
+        // listed_at) — that's a continuously-active listing, not a fresh
+        // one. A new inscription OR a different listed_at (re-listing the
+        // poll never observed delisted) both pass the guard. The synthetic
+        // txid below provides additional dedup against accidental re-runs.
+        const prior = priorListedAt.get(item.inscription_number);
+        if (prior === item.listed_at) continue;
+        const txid = `listed:${item.inscription_number}:${item.listed_at}`;
+        const insertRes = stmts.insertListedEvent.run({
+          inscription_id: item.inscription_id,
+          inscription_number: item.inscription_number,
+          block_timestamp: item.listed_at,
+          seller: item.seller,
+          marketplace: 'satflow',
+          price_sats: item.price_sats,
+          txid,
+        });
+        // INSERT OR IGNORE → changes=0 means we'd already emitted this exact
+        // (inscription, listed_at) combo; skip enqueue.
+        if (insertRes.changes > 0) {
+          // better-sqlite3 returns Number by default (safeIntegers off); cast
+          // defensively in case that ever changes.
+          const eventId = Number(insertRes.lastInsertRowid);
+          stmts.enqueueNotify.run(eventId);
+          listedEventsEmitted++;
+        }
+      }
+    }
   });
   tx();
 
@@ -1256,6 +1336,8 @@ async function runListingsTick(
     written: ready.length,
     unresolved,
     total_reported: totalReported,
+    listed_events: listedEventsEmitted,
+    cold_start: isColdStart,
     dur_ms: Date.now() - startedAt,
   });
 
@@ -1268,6 +1350,8 @@ async function runListingsTick(
     written: ready.length,
     deduped: collected.length - byInscriptionId.size,
     unresolved,
+    listed_events: listedEventsEmitted,
+    cold_start: isColdStart,
     active_in_db: writtenCount?.n ?? null,
     ...(budgetWarning ? { warning: budgetWarning } : {}),
   };
