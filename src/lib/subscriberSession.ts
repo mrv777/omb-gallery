@@ -145,8 +145,11 @@ export function mintSession(channel: SubscriberSession['channel'], channelTarget
 
 // Append a binding to the existing cookie (if any). Dedupes by
 // (channel, channelTarget) — re-subscribing with the same target updates the
-// issuedAt timestamp rather than producing a duplicate. If the cookie's binding
-// list grows past MAX_BINDINGS, the oldest are evicted.
+// issuedAt timestamp rather than producing a duplicate. For Discord, also
+// dedupes by webhook id so a token rotation (same id, new token) replaces
+// the older binding instead of leaving both in the list (which would let the
+// picker silently target a stale/dead webhook). If the cookie's binding list
+// grows past MAX_BINDINGS, the oldest are evicted.
 export function addBinding(
   existingRaw: string | undefined | null,
   channel: SubscriberSession['channel'],
@@ -154,10 +157,16 @@ export function addBinding(
 ): string | null {
   const existing = parseSessionV2(existingRaw);
   const now = Math.floor(Date.now() / 1000);
+  const newDiscordId =
+    channel === 'discord' ? (discordWebhookParts(channelTarget)?.id ?? null) : null;
   const next: SubscriberSession[] = [];
   if (existing) {
     for (const s of existing.sessions) {
       if (s.channel === channel && s.channelTarget === channelTarget) continue;
+      if (newDiscordId && s.channel === 'discord') {
+        const sParts = discordWebhookParts(s.channelTarget);
+        if (sParts && sParts.id === newDiscordId) continue;
+      }
       next.push(s);
     }
   }
@@ -182,6 +191,60 @@ export function findBindingByChannel(
   // Last binding for that channel wins (most recently added).
   for (let i = v2.sessions.length - 1; i >= 0; i--) {
     if (v2.sessions[i].channel === channel) return v2.sessions[i];
+  }
+  return undefined;
+}
+
+// Discord webhook URLs look like:
+//   https://discord.com/api/webhooks/<numeric_id>/<token>
+// The numeric id alone is public-ish (Discord exposes it in URLs) and useless
+// without the token, so we surface it to the client as a stable identifier
+// for picker UI without leaking the secret token. The token suffix gives the
+// human something memorable.
+const WEBHOOK_PATH_RE = /\/api\/webhooks\/(\d{10,25})\/([\w-]{40,200})$/;
+
+export function discordWebhookParts(url: string): { id: string; tokenSuffix: string } | null {
+  const m = WEBHOOK_PATH_RE.exec(url);
+  if (!m) return null;
+  return { id: m[1], tokenSuffix: m[2].slice(-4) };
+}
+
+// Pull every Discord binding's id+suffix out of the cookie for the picker UI.
+// Iterates from the END so the most recent token wins for any duplicate ids
+// (defense for pre-existing dupes; addBinding now prevents new ones).
+export function discordWebhookSummaries(
+  v2: SubscriberSessionV2 | null,
+): Array<{ id: string; tokenSuffix: string }> {
+  if (!v2) return [];
+  const out: Array<{ id: string; tokenSuffix: string }> = [];
+  const seen = new Set<string>();
+  for (let i = v2.sessions.length - 1; i >= 0; i--) {
+    const s = v2.sessions[i];
+    if (s.channel !== 'discord') continue;
+    const parts = discordWebhookParts(s.channelTarget);
+    if (!parts) continue;
+    if (seen.has(parts.id)) continue;
+    seen.add(parts.id);
+    out.push(parts);
+  }
+  // Reverse so the rendered order matches insertion order (oldest first),
+  // keeping the picker stable across reloads while the dedupe still picks
+  // the newest token per id.
+  return out.reverse();
+}
+
+export function findBindingByDiscordWebhookId(
+  v2: SubscriberSessionV2 | null,
+  webhookId: string,
+): SubscriberSession | undefined {
+  if (!v2) return undefined;
+  if (!/^\d{10,25}$/.test(webhookId)) return undefined;
+  // Walk backwards so the newest binding for this id wins.
+  for (let i = v2.sessions.length - 1; i >= 0; i--) {
+    const s = v2.sessions[i];
+    if (s.channel !== 'discord') continue;
+    const parts = discordWebhookParts(s.channelTarget);
+    if (parts && parts.id === webhookId) return s;
   }
   return undefined;
 }

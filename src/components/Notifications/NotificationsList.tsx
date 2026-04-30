@@ -12,6 +12,7 @@ type ClientSub = {
   eventMask: number;
   status: 'active' | 'muted' | 'failed' | 'pending';
   unsubToken: string;
+  webhookSuffix?: string;
 };
 
 type Props = {
@@ -196,6 +197,11 @@ export default function NotificationsList({ hasSession, channels, subs: initial 
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-[10px] tracking-[0.1em] text-bone-dim border border-ink-2 px-1.5 py-0.5">
                       {CHANNEL_LABEL[s.channel]}
+                      {s.channel === 'discord' && s.webhookSuffix && (
+                        <span className="text-bone-dim/70 ml-1 normal-case tracking-normal">
+                          …{s.webhookSuffix}
+                        </span>
+                      )}
                     </span>
                     <Link
                       href={detailHref}

@@ -118,7 +118,11 @@ function buildTelegramMessage(events: EventRow[], sub: SubscriptionRow): SendArg
     // 'listed' has price but no buyer — phrase as "for X on Y" same as sold.
     // 'transferred' has neither price nor marketplace.
     const priceStr = price ? ` for <b>${escapeHtml(price)}</b>${market}` : '';
-    const link = `<a href="${eventLinkUrl(ev)}">OMB #${ev.inscription_number}</a>`;
+    // Escape the URL for HTML attribute context. inscription_id today is
+    // ord-formatted (`<64-hex>i<digits>`) so escaping is purely defensive,
+    // but keeping a malformed external value out of the href ensures
+    // Telegram parse_mode=HTML can never break on a single bad event.
+    const link = `<a href="${escapeHtml(eventLinkUrl(ev))}">OMB #${ev.inscription_number}</a>`;
     const colorTag = ev.color ? ` <i>(${escapeHtml(ev.color)})</i>` : '';
     // Listed events show only the seller; no recipient yet.
     const movement =

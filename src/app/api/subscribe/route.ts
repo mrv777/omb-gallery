@@ -17,7 +17,10 @@ import {
 } from '@/lib/subscriptionStore';
 import {
   addBinding,
+  findBinding,
   findBindingByChannel,
+  findBindingByDiscordWebhookId,
+  mintSession,
   parseSessionV2,
   readCookieRaw,
   setCookieHeader,
@@ -42,6 +45,10 @@ type Body = {
   targetKey?: unknown;
   eventMask?: unknown;
   webhookUrl?: unknown;
+  /** When the user is picking a webhook already in their cookie, the client
+   *  passes its numeric id (from /api/me) instead of the full URL. The server
+   *  resolves it back to the bound URL, skipping Turnstile + ping. */
+  discordWebhookId?: unknown;
   turnstileToken?: unknown;
 };
 
@@ -116,23 +123,40 @@ export async function POST(req: NextRequest) {
 
   const ip = clientIpKey(req.headers);
 
-  // Re-use any cookie binding for the requested channel. Multi-binding cookie
-  // (v2) means a single browser can hold both a Telegram chat AND a Discord
-  // webhook side by side; the fast path picks whichever binding matches the
-  // channel of THIS subscribe request.
-  //
-  // Design choice — one channel_target per channel per browser. If the
-  // request includes a `webhookUrl` that differs from an existing Discord
-  // binding in the cookie, we still take the fast path against the existing
-  // binding (the new URL is ignored). Supporting multiple Discord webhooks
-  // from one browser would require re-running Turnstile + ping for the new
-  // URL while skipping it for the existing one — the UX questions (which
-  // binding does "Manage" surface? does the dialog show two "one-click"
-  // buttons?) outweigh the niche use case. Workaround for users who want
-  // a second webhook: clear cookies, or use a private window.
+  // Re-use any cookie binding for the requested channel. The cookie can hold
+  // multiple Discord webhooks side by side, so the fast path resolution order
+  // for channel=discord is:
+  //   1. body.discordWebhookId          — explicit pick from the picker UI
+  //   2. body.webhookUrl matches binding — user pasted a URL we already have
+  //   3. (no webhook info supplied)     — single-webhook back-compat (legacy
+  //                                        clients) → findBindingByChannel
+  // For Telegram, only one binding per channel is ever produced, so
+  // findBindingByChannel is sufficient.
   const cookieRaw = readCookieRaw(req.headers.get('cookie'));
   const sessionV2 = parseSessionV2(cookieRaw);
-  const matchingBinding = findBindingByChannel(sessionV2 ?? null, channel);
+
+  let matchingBinding;
+  if (channel === 'discord') {
+    if (typeof body.discordWebhookId === 'string') {
+      matchingBinding = findBindingByDiscordWebhookId(sessionV2 ?? null, body.discordWebhookId);
+      if (!matchingBinding) {
+        // Client is referencing a webhook the cookie doesn't have. Most
+        // likely a stale tab — refresh /api/me will pick up the truth.
+        return bad(400, 'webhook-not-bound');
+      }
+    } else if (typeof body.webhookUrl === 'string' && isValidWebhookUrl(body.webhookUrl)) {
+      // Paste of a URL that's already in our cookie → fast path. Safe because
+      // ownership was proved when the binding was first established.
+      matchingBinding = findBinding(sessionV2 ?? null, 'discord', body.webhookUrl);
+    } else if (typeof body.webhookUrl !== 'string') {
+      // No webhook info at all — fall back to the legacy single-webhook
+      // shortcut. New clients always send either discordWebhookId or
+      // webhookUrl; this branch catches old cached clients.
+      matchingBinding = findBindingByChannel(sessionV2 ?? null, 'discord');
+    }
+  } else {
+    matchingBinding = findBindingByChannel(sessionV2 ?? null, channel);
+  }
 
   if (matchingBinding) {
     // Fast path: trusted session, no Turnstile / no round-trip needed.
@@ -200,17 +224,21 @@ export async function POST(req: NextRequest) {
   const existingToken = getExistingUnsubToken('discord', webhookUrl, kind, targetKey);
   const unsubToken = existingToken ?? randomBytes(16).toString('hex');
 
-  // Mint the cookie value BEFORE the ping so we can embed the magic-login
-  // link in the confirmation message (cross-device manage path). We APPEND
-  // a Discord binding to whatever the browser already had — preserving any
-  // prior Telegram binding so /notifications can still see those subs.
+  // Mint two session values BEFORE the ping:
+  //   - cookieSession: the appended multi-binding cookie installed on this
+  //     browser (preserves any prior Telegram / other-Discord bindings).
+  //   - linkSession:   a SINGLE-binding token embedded in the manage link.
+  //     Magic-login (parseSession on receipt) only takes sessions[0], so a
+  //     cross-device click should land on THIS new webhook — not whichever
+  //     binding happened to be at index 0 of the multi-binding cookie.
   // Minting early is safe because nothing is persisted until the ping
   // succeeds.
-  const sessionValue = addBinding(cookieRaw, 'discord', webhookUrl);
+  const cookieSession = addBinding(cookieRaw, 'discord', webhookUrl);
+  const linkSession = mintSession('discord', webhookUrl);
 
   const ping = await pingWebhook(webhookUrl, {
-    manageLink: sessionValue
-      ? manageLink(sessionValue)
+    manageLink: linkSession
+      ? manageLink(linkSession)
       : `${siteUrl()}/notifications`,
     burnLink: burnLink(unsubToken),
     targetLabel: targetLabel(kind, targetKey),
@@ -233,7 +261,7 @@ export async function POST(req: NextRequest) {
   const { row } = created;
 
   const headers = new Headers({ 'content-type': 'application/json' });
-  if (sessionValue) headers.append('set-cookie', setCookieHeader(sessionValue));
+  if (cookieSession) headers.append('set-cookie', setCookieHeader(cookieSession));
   log.info('subscribe', 'discord active', { kind, target: targetKey });
   return new NextResponse(
     JSON.stringify({ status: 'active', id: row.id, unsubToken: row.unsub_token }),

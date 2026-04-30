@@ -39,11 +39,22 @@ export function BellIcon({ className }: { className?: string }) {
   );
 }
 
-type SessionInfo = { hasSession: boolean; channels: Channel[] };
+type DiscordWebhookSummary = { id: string; tokenSuffix: string };
+
+type SessionInfo = {
+  hasSession: boolean;
+  channels: Channel[];
+  discordWebhooks: DiscordWebhookSummary[];
+};
 
 function withChannel(s: SessionInfo, c: Channel): SessionInfo {
-  if (s.channels.includes(c)) return { hasSession: true, channels: s.channels };
-  return { hasSession: true, channels: [...s.channels, c] };
+  if (s.channels.includes(c)) return { ...s, hasSession: true };
+  return { ...s, hasSession: true, channels: [...s.channels, c] };
+}
+
+function withDiscordWebhook(s: SessionInfo, w: DiscordWebhookSummary): SessionInfo {
+  if (s.discordWebhooks.some(x => x.id === w.id)) return s;
+  return { ...s, discordWebhooks: [...s.discordWebhooks, w] };
 }
 
 type DialogState =
@@ -114,15 +125,20 @@ export default function NotificationButton({ kind, targetKey, label, className }
     let cancelled = false;
     fetch('/api/me')
       .then(r => r.json())
-      .then((j: { hasSession?: boolean; channels?: Channel[] }) => {
+      .then((j: {
+        hasSession?: boolean;
+        channels?: Channel[];
+        discordWebhooks?: DiscordWebhookSummary[];
+      }) => {
         if (cancelled) return;
         setSession({
           hasSession: !!j.hasSession,
           channels: Array.isArray(j.channels) ? j.channels : [],
+          discordWebhooks: Array.isArray(j.discordWebhooks) ? j.discordWebhooks : [],
         });
       })
       .catch(() => {
-        if (!cancelled) setSession({ hasSession: false, channels: [] });
+        if (!cancelled) setSession({ hasSession: false, channels: [], discordWebhooks: [] });
       });
     return () => {
       cancelled = true;
@@ -201,7 +217,12 @@ export default function NotificationButton({ kind, targetKey, label, className }
               if (sj.status === 'claimed') {
                 cleanupPoll();
                 setState({ kind: 'success', channel: 'telegram' });
-                setSession(prev => withChannel(prev ?? { hasSession: false, channels: [] }, 'telegram'));
+                setSession(prev =>
+                  withChannel(
+                    prev ?? { hasSession: false, channels: [], discordWebhooks: [] },
+                    'telegram',
+                  ),
+                );
               }
             }
           } catch {
@@ -221,14 +242,24 @@ export default function NotificationButton({ kind, targetKey, label, className }
   }, []);
 
   const submitDiscord = useCallback(async () => {
-    if (!webhookUrl.trim()) {
+    const trimmed = webhookUrl.trim();
+    if (!trimmed) {
       setState({ kind: 'error', message: 'Paste a Discord webhook URL.' });
       return;
     }
-    const hasDiscordSession = !!session?.channels.includes('discord');
-    if (hasDiscordSession) {
-      // Session reuse — no Turnstile needed.
-    } else if (!tsToken) {
+    // Detect URL re-paste of a webhook whose id is already bound. When that
+    // happens we want to reuse the existing binding (same fast path as the
+    // picker buttons): send `discordWebhookId` so the server resolves to the
+    // STORED URL — not the just-typed one. Critical for token-rotation /
+    // trailing-slash cases where the typed URL no longer matches the cookie's
+    // exactly: server-side findBinding() does an exact match and would fall
+    // through to the onboarding flow demanding a Turnstile token we
+    // deliberately didn't collect.
+    const webhookIdMatch = /\/api\/webhooks\/(\d{10,25})\//.exec(trimmed);
+    const isAlreadyBound = !!(
+      webhookIdMatch && session?.discordWebhooks.some(w => w.id === webhookIdMatch[1])
+    );
+    if (!isAlreadyBound && !tsToken) {
       setState({ kind: 'error', message: 'Complete the verification first.' });
       return;
     }
@@ -241,8 +272,9 @@ export default function NotificationButton({ kind, targetKey, label, className }
           channel: 'discord',
           kind,
           targetKey,
-          webhookUrl: webhookUrl.trim(),
-          turnstileToken: tsToken,
+          ...(isAlreadyBound && webhookIdMatch
+            ? { discordWebhookId: webhookIdMatch[1] }
+            : { webhookUrl: trimmed, turnstileToken: tsToken }),
         }),
       });
       const j = await res.json().catch(() => ({}));
@@ -260,24 +292,41 @@ export default function NotificationButton({ kind, targetKey, label, className }
         return;
       }
       setState({ kind: 'success', channel: 'discord' });
-      setSession(prev => withChannel(prev ?? { hasSession: false, channels: [] }, 'discord'));
+      setSession(prev => {
+        const base = prev ?? { hasSession: false, channels: [], discordWebhooks: [] };
+        let next = withChannel(base, 'discord');
+        if (webhookIdMatch) {
+          // Append the new webhook id to local state so subsequent dialogs
+          // pick it up without a /api/me round-trip. tokenSuffix matches the
+          // server's mask (last 4 of token).
+          const tokenSuffix = trimmed.split('/').pop()?.slice(-4) ?? '';
+          next = withDiscordWebhook(next, { id: webhookIdMatch[1], tokenSuffix });
+        }
+        return next;
+      });
     } catch {
       setState({ kind: 'error', message: 'Network error. Try again.' });
     }
   }, [kind, targetKey, webhookUrl, tsToken, session]);
 
   // One-click for users with a matching session. `which` picks among the
-  // channels in the cookie — when both are present the dialog renders two
-  // distinct buttons and passes the chosen channel here.
+  // channels in the cookie. For Discord, when multiple webhooks are bound,
+  // `discordWebhookId` selects which one — without it the server falls back
+  // to legacy first-binding behaviour (fine for legacy/single-webhook users).
   const oneClickSubscribe = useCallback(
-    async (which: Channel) => {
+    async (which: Channel, discordWebhookId?: string) => {
       if (!session?.channels.includes(which)) return;
       setState({ kind: 'submitting' });
       try {
         const res = await fetch('/api/subscribe', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ channel: which, kind, targetKey }),
+          body: JSON.stringify({
+            channel: which,
+            kind,
+            targetKey,
+            ...(discordWebhookId ? { discordWebhookId } : {}),
+          }),
         });
         const j = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -286,7 +335,9 @@ export default function NotificationButton({ kind, targetKey, label, className }
               ? 'You already have the maximum number of watches (50). Mute one in /notifications first.'
               : j?.error === 'rate-limited'
                 ? 'Too many requests — wait a minute.'
-                : (j?.error ?? `Failed (${res.status}).`);
+                : j?.error === 'webhook-not-bound'
+                  ? 'That webhook is no longer in this browser. Reload the page.'
+                  : (j?.error ?? `Failed (${res.status}).`);
           setState({ kind: 'error', message: msg });
           return;
         }
@@ -298,10 +349,24 @@ export default function NotificationButton({ kind, targetKey, label, className }
     [session, kind, targetKey],
   );
 
-  // Mount Turnstile widget when entering the discord-form state without a session.
+  // Decide whether the URL the user's currently typing is one we already
+  // hold a binding for. When true, the server fast-paths and Turnstile is
+  // unnecessary; when false (a brand-new webhook), we need the widget.
+  const typedWebhookId = (() => {
+    const m = /\/api\/webhooks\/(\d{10,25})\//.exec(webhookUrl.trim());
+    return m ? m[1] : null;
+  })();
+  const typedIsAlreadyBound = !!(
+    typedWebhookId && session?.discordWebhooks.some(w => w.id === typedWebhookId)
+  );
+
+  // Mount Turnstile when the user appears to be entering a NEW webhook URL.
+  // For an already-bound URL (re-paste or "use existing" path), the server
+  // skips Turnstile so we skip the widget too. We also re-evaluate as the
+  // user types — paste-of-existing should immediately hide the widget.
   useEffect(() => {
     if (state.kind !== 'discord-form') return;
-    if (session?.channels.includes('discord')) return; // session reuse — skip widget
+    if (typedIsAlreadyBound) return;
     const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '';
     if (!siteKey) return;
     let cancelled = false;
@@ -323,7 +388,7 @@ export default function NotificationButton({ kind, targetKey, label, className }
       cancelled = true;
       cleanupTurnstile();
     };
-  }, [state.kind, session, cleanupTurnstile]);
+  }, [state.kind, typedIsAlreadyBound, cleanupTurnstile]);
 
   // Esc closes the dialog.
   useEffect(() => {
@@ -399,16 +464,34 @@ export default function NotificationButton({ kind, targetKey, label, className }
                     Subscribe via Telegram (one click)
                   </button>
                 )}
-                {session?.channels.includes('discord') && (
+                {/* One button per bound Discord webhook. With multiple webhooks
+                 *  we send discordWebhookId so the server picks the right one;
+                 *  with zero/one we let the server fall back to its default. */}
+                {(session?.discordWebhooks ?? []).map(w => (
                   <button
+                    key={w.id}
                     type="button"
-                    onClick={() => oneClickSubscribe('discord')}
-                    className="w-full h-10 px-4 mb-3 text-bone border border-bone hover:bg-bone hover:text-ink-0 transition-colors"
+                    onClick={() => oneClickSubscribe('discord', w.id)}
+                    className="w-full h-10 px-4 mb-2 text-bone border border-bone hover:bg-bone hover:text-ink-0 transition-colors normal-case tracking-normal"
                   >
-                    Subscribe via Discord (one click)
+                    <span className="uppercase tracking-[0.08em]">Subscribe via Discord</span>
+                    <span className="text-bone-dim ml-2">webhook …{w.tokenSuffix}</span>
                   </button>
-                )}
-                <div className="grid grid-cols-2 gap-2">
+                ))}
+                {/* Legacy session (v1 cookie) — channels has 'discord' but the
+                 *  webhook URL didn't parse, so no per-webhook button rendered.
+                 *  Surface a generic one-click for back-compat. */}
+                {session?.channels.includes('discord') &&
+                  (session?.discordWebhooks.length ?? 0) === 0 && (
+                    <button
+                      type="button"
+                      onClick={() => oneClickSubscribe('discord')}
+                      className="w-full h-10 px-4 mb-2 text-bone border border-bone hover:bg-bone hover:text-ink-0 transition-colors"
+                    >
+                      Subscribe via Discord (one click)
+                    </button>
+                  )}
+                <div className="grid grid-cols-2 gap-2 mt-1">
                   <button
                     type="button"
                     onClick={startTelegram}
@@ -421,7 +504,9 @@ export default function NotificationButton({ kind, targetKey, label, className }
                     onClick={startDiscordForm}
                     className="h-10 px-3 text-bone border border-ink-2 hover:border-bone transition-colors"
                   >
-                    Discord
+                    {session?.channels.includes('discord')
+                      ? 'Add Discord webhook'
+                      : 'Discord'}
                   </button>
                 </div>
                 <p className="text-bone-dim normal-case tracking-normal mt-4 text-[11px]">
@@ -472,7 +557,11 @@ export default function NotificationButton({ kind, targetKey, label, className }
                   className="w-full bg-transparent border-0 border-b border-ink-2 focus:border-bone outline-none h-10 px-0 text-sm font-mono tracking-normal text-bone placeholder:text-bone-dim placeholder:normal-case mb-4"
                   spellCheck={false}
                 />
-                {!session?.channels.includes('discord') && (
+                {typedIsAlreadyBound ? (
+                  <p className="text-bone-dim normal-case tracking-normal text-[11px] mb-4">
+                    Already linked in this browser — no verification needed.
+                  </p>
+                ) : (
                   <div ref={tsHost} className="mb-4 min-h-[65px]" />
                 )}
                 <div className="flex justify-end gap-2">
