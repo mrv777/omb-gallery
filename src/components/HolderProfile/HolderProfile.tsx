@@ -11,6 +11,7 @@ import {
   truncateAddr,
 } from '@/lib/format';
 import { WalletsList } from './WalletsList';
+import SafeImg from '@/components/SafeImg';
 
 const COLOR_TILE_BG: Record<string, string> = {
   red: 'bg-accent-red/20',
@@ -74,8 +75,7 @@ export default function HolderProfile({
             <div className="flex items-start justify-between gap-4 mb-4">
               <div className="flex items-center gap-3 min-w-0">
                 {avatarUrl && (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img
+                  <SafeImg
                     src={avatarUrl}
                     alt=""
                     loading="lazy"
@@ -274,20 +274,18 @@ function BravocadosTile({
       className="block w-10 h-10 bg-ink-2 overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors"
       title={`Bravocados #${number}`}
     >
-      {src ? (
-        /* eslint-disable-next-line @next/next/no-img-element */
-        <img
-          src={src}
-          alt={`Bravocados #${number}`}
-          loading="lazy"
-          decoding="async"
-          className="w-full h-full object-cover"
-        />
-      ) : (
-        <div className="w-full h-full flex items-center justify-center font-mono text-[8px] text-bone-dim">
-          #{number}
-        </div>
-      )}
+      <SafeImg
+        src={src}
+        alt={`Bravocados #${number}`}
+        loading="lazy"
+        decoding="async"
+        className="w-full h-full object-cover"
+        fallback={
+          <div className="w-full h-full flex items-center justify-center font-mono text-[8px] text-bone-dim">
+            #{number}
+          </div>
+        }
+      />
     </a>
   );
 }

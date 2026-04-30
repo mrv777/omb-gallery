@@ -5,6 +5,7 @@ import { formatBtc, formatRelTime, truncateAddr } from '@/lib/format';
 import type { ApiHolder, ApiInscription } from '@/components/Activity/types';
 import type { ColorFilter } from '@/lib/types';
 import { appendColorParam } from '@/lib/colorFilter';
+import SafeImg from '@/components/SafeImg';
 
 type Props = {
   type: LeaderboardKey;
@@ -112,9 +113,8 @@ function HolderRow({ row, rank }: { row: ApiHolder; rank: number }) {
       >
         <span className="font-mono text-[11px] text-bone-dim tabular-nums">{rank}</span>
         <span className="block w-5 h-5 bg-ink-2 overflow-hidden rounded-sm">
-          {row.is_user && row.avatar_url && (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img
+          {row.is_user && (
+            <SafeImg
               src={row.avatar_url}
               alt=""
               loading="lazy"
