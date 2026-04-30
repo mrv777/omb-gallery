@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import { FavoritesProvider } from '@/lib/FavoritesContext';
+import { TooltipProvider } from '@/components/ui/Tooltip';
 
 const sans = Inter({
   subsets: ['latin'],
@@ -44,7 +45,11 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${sans.variable} ${mono.variable}`}>
       <body className="font-sans bg-ink-0 text-bone">
-        <FavoritesProvider>{children}</FavoritesProvider>
+        <FavoritesProvider>
+          <TooltipProvider delayDuration={150} skipDelayDuration={300}>
+            {children}
+          </TooltipProvider>
+        </FavoritesProvider>
       </body>
     </html>
   );

@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { GalleryImage } from '@/lib/types';
 import { useFavorites } from '@/lib/FavoritesContext';
 import NotificationButton, { BellIcon } from './NotificationButton/NotificationButton';
+import { Tooltip } from './ui/Tooltip';
 
 interface ImageModalProps {
   onClose: () => void;
@@ -97,15 +98,16 @@ const ImageModal = memo(function ImageModal({
         onClick={e => e.stopPropagation()}
       >
         <div className="text-bone">
-          <a
-            href={`https://ordinals.com/inscription/${id}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:underline underline-offset-4 decoration-bone-dim"
-            title="View on ordinals.com"
-          >
-            #{id}
-          </a>
+          <Tooltip content="View on ordinals.com">
+            <a
+              href={`https://ordinals.com/inscription/${id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:underline underline-offset-4 decoration-bone-dim"
+            >
+              #{id}
+            </a>
+          </Tooltip>
           <span className="mx-2 text-bone-dim">·</span>
           <span>{colorLabel}</span>
           <span className="mx-2 text-bone-dim hidden sm:inline">·</span>
@@ -114,14 +116,14 @@ const ImageModal = memo(function ImageModal({
           </span>
         </div>
         <div className="flex items-center">
-          <a
-            href={`/inscription/${id}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="h-11 w-11 flex items-center justify-center text-bone-dim hover:text-bone transition-colors"
-            aria-label="Open detail page in new tab"
-            title="Open detail page"
-          >
+          <Tooltip content="Open detail page">
+            <a
+              href={`/inscription/${id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="h-11 w-11 flex items-center justify-center text-bone-dim hover:text-bone transition-colors"
+              aria-label="Open detail page in new tab"
+            >
             <svg
               width="16"
               height="16"
@@ -137,7 +139,8 @@ const ImageModal = memo(function ImageModal({
               <line x1="8" y1="7" x2="8" y2="11.5" />
               <line x1="8" y1="4.75" x2="8" y2="4.75" />
             </svg>
-          </a>
+            </a>
+          </Tooltip>
           <NotificationButton
             kind="inscription"
             targetKey={id}
@@ -211,13 +214,14 @@ const ImageModal = memo(function ImageModal({
         className="px-4 sm:px-6 py-4 font-mono text-[11px] tracking-[0.08em] leading-relaxed text-bone-dim shrink-0"
         onClick={e => e.stopPropagation()}
       >
-        <div
-          className="text-bone uppercase max-w-3xl line-clamp-2"
-          style={{ minHeight: '2lh' }}
-          title={image.caption}
-        >
-          {image.caption ? `"${image.caption}"` : ''}
-        </div>
+        <Tooltip content={image.caption} side="top" align="start">
+          <div
+            className="text-bone uppercase max-w-3xl line-clamp-2"
+            style={{ minHeight: '2lh' }}
+          >
+            {image.caption ? `"${image.caption}"` : ''}
+          </div>
+        </Tooltip>
       </div>
     </div>
   );

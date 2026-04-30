@@ -11,6 +11,7 @@ import {
 import EventTimelineRow from './EventTimelineRow';
 import NotificationButton, { BellIcon } from '@/components/NotificationButton/NotificationButton';
 import MovementTimeline from '@/components/Charts/MovementTimeline';
+import { Tooltip } from '../ui/Tooltip';
 
 const COLOR_TILE_BG: Record<string, string> = {
   red: 'bg-accent-red/20',
@@ -102,40 +103,39 @@ export default function InscriptionDetail({
             <div className="flex flex-wrap items-baseline gap-x-2">
               <span>owner</span>
               {inscription.current_owner ? (
-                <Link
-                  href={`/holder/${inscription.current_owner}`}
-                  prefetch={false}
-                  className="text-bone hover:text-accent-orange normal-case tracking-normal"
-                  title={inscription.current_owner}
-                >
-                  {truncateAddr(inscription.current_owner, 10, 8)}
-                </Link>
+                <Tooltip content={inscription.current_owner}>
+                  <Link
+                    href={`/holder/${inscription.current_owner}`}
+                    prefetch={false}
+                    className="text-bone hover:text-accent-orange normal-case tracking-normal"
+                  >
+                    {truncateAddr(inscription.current_owner, 10, 8)}
+                  </Link>
+                </Tooltip>
               ) : (
                 <span className="text-bone-dim">—</span>
               )}
               {heldSince != null && inscription.current_owner && (
-                <span
-                  className="text-bone-dim normal-case tracking-normal"
-                  title={new Date(heldSince * 1000).toISOString()}
-                >
-                  · held {formatRelTime(heldSince)}
-                </span>
+                <Tooltip content={new Date(heldSince * 1000).toISOString()}>
+                  <span className="text-bone-dim normal-case tracking-normal">
+                    · held {formatRelTime(heldSince)}
+                  </span>
+                </Tooltip>
               )}
             </div>
             {inscription.current_output && (
               <div className="flex flex-wrap items-baseline gap-x-2">
                 <span>output</span>
-                <span
-                  className="text-bone normal-case tracking-normal break-all"
-                  title={inscription.current_output}
-                >
-                  {(() => {
-                    const [txid, vout] = inscription.current_output.split(':');
-                    return vout != null
-                      ? `${txid.slice(0, 16)}…:${vout}`
-                      : inscription.current_output;
-                  })()}
-                </span>
+                <Tooltip content={inscription.current_output}>
+                  <span className="text-bone normal-case tracking-normal break-all">
+                    {(() => {
+                      const [txid, vout] = inscription.current_output.split(':');
+                      return vout != null
+                        ? `${txid.slice(0, 16)}…:${vout}`
+                        : inscription.current_output;
+                    })()}
+                  </span>
+                </Tooltip>
               </div>
             )}
           </div>
@@ -220,14 +220,15 @@ export default function InscriptionDetail({
         <div className="mt-10">
           <div className="font-mono text-[11px] tracking-[0.08em] uppercase text-bone-dim mb-3">
             also held by{' '}
-            <Link
-              href={`/holder/${inscription.current_owner}`}
-              prefetch={false}
-              className="text-bone hover:text-accent-orange normal-case tracking-normal"
-              title={inscription.current_owner}
-            >
-              {truncateAddr(inscription.current_owner, 8, 6)}
-            </Link>
+            <Tooltip content={inscription.current_owner}>
+              <Link
+                href={`/holder/${inscription.current_owner}`}
+                prefetch={false}
+                className="text-bone hover:text-accent-orange normal-case tracking-normal"
+              >
+                {truncateAddr(inscription.current_owner, 8, 6)}
+              </Link>
+            </Tooltip>
           </div>
           <div className="flex flex-wrap gap-2 items-center">
             {ownerOthers.map(n => {
@@ -236,12 +237,11 @@ export default function InscriptionDetail({
                 ? (COLOR_TILE_BG[otherHit.color] ?? 'bg-ink-2')
                 : 'bg-ink-2';
               return (
+                <Tooltip key={n} content={`#${n}`}>
                 <Link
-                  key={n}
                   href={`/inscription/${n}`}
                   prefetch={false}
                   className={`block w-16 h-16 ${otherTileBg} overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors`}
-                  title={`#${n}`}
                 >
                   {otherHit ? (
                     /* eslint-disable-next-line @next/next/no-img-element */
@@ -258,6 +258,7 @@ export default function InscriptionDetail({
                     </div>
                   )}
                 </Link>
+                </Tooltip>
               );
             })}
             {ownerOthersHasMore && (

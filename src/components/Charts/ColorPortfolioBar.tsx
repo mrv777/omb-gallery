@@ -1,5 +1,6 @@
 import type { InscriptionRow } from '@/lib/db';
 import { OMB_COLOR_HEX, OMB_COLOR_ORDER } from './chartUtils';
+import { Tooltip } from '../ui/Tooltip';
 
 /**
  * Stacked horizontal color bar — visual fingerprint of a holder's bag spread
@@ -24,11 +25,14 @@ export default function ColorPortfolioBar({ holdings }: { holdings: InscriptionR
         {totals.map(t => {
           const pct = (t.count / total) * 100;
           return (
-            <div
+            <Tooltip
               key={t.color}
-              style={{ width: `${pct}%`, backgroundColor: OMB_COLOR_HEX[t.color] ?? '#bfbfbf' }}
-              title={`${t.color}: ${t.count.toLocaleString()} (${pct.toFixed(1)}%)`}
-            />
+              content={`${t.color}: ${t.count.toLocaleString()} (${pct.toFixed(1)}%)`}
+            >
+              <div
+                style={{ width: `${pct}%`, backgroundColor: OMB_COLOR_HEX[t.color] ?? '#bfbfbf' }}
+              />
+            </Tooltip>
           );
         })}
       </div>

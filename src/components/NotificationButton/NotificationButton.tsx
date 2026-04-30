@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { Tooltip } from '../ui/Tooltip';
 
 type Channel = 'telegram' | 'discord';
 type Kind = 'inscription' | 'color' | 'collection';
@@ -412,18 +413,19 @@ export default function NotificationButton({ kind, targetKey, label, className }
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        aria-label={`Watch ${desc}`}
-        title={`Watch ${desc}`}
-        className={
-          className ??
-          'inline-flex items-center gap-1 px-3 h-9 text-xs uppercase tracking-[0.08em] text-bone border border-ink-2 hover:border-bone transition-colors'
-        }
-      >
-        {buttonLabel}
-      </button>
+      <Tooltip content={`Watch ${desc}`}>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label={`Watch ${desc}`}
+          className={
+            className ??
+            'inline-flex items-center gap-1 px-3 h-9 text-xs uppercase tracking-[0.08em] text-bone border border-ink-2 hover:border-bone transition-colors'
+          }
+        >
+          {buttonLabel}
+        </button>
+      </Tooltip>
       {open && (
         <div
           className="fixed inset-0 z-[2000] bg-ink-0/80 backdrop-blur-sm flex items-center justify-center px-4"

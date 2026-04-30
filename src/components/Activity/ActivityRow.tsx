@@ -12,6 +12,7 @@ import {
   truncateAddr,
 } from '@/lib/format';
 import { lookupWalletLabel } from '@/lib/walletLabels';
+import { Tooltip } from '../ui/Tooltip';
 
 const COLOR_TILE_BG: Record<string, string> = {
   red: 'bg-accent-red/20',
@@ -59,13 +60,13 @@ const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev, matrica 
       } ${groupedWithPrev ? '' : 'border-t border-t-bone-dim/20'}`}
     >
       {/* Thumbnail (faded if same inscription as previous row) */}
+      <Tooltip content={`#${event.inscription_number}`}>
       <Link
         href={inscriptionLink}
         prefetch={false}
         className={`block w-12 h-12 ${tileBg} overflow-hidden border border-ink-2 hover:border-bone-dim transition-opacity ${
           groupedWithPrev ? 'opacity-25 hover:opacity-100' : ''
         }`}
-        title={`#${event.inscription_number}`}
       >
         {hit ? (
           /* eslint-disable-next-line @next/next/no-img-element */
@@ -82,6 +83,7 @@ const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev, matrica 
           </div>
         )}
       </Link>
+      </Tooltip>
 
       {/* Inscription number — fixed width so columns line up */}
       <Link
@@ -121,22 +123,22 @@ const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev, matrica 
       {/* Right rail: time + tx link */}
       <div className="flex items-center gap-3 ml-auto shrink-0">
         {txLink && (
-          <a
-            href={txLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hidden sm:inline font-mono text-[10px] text-bone-dim hover:text-accent-orange tracking-[0.08em] uppercase"
-            title={`tx ${event.txid}`}
-          >
-            tx
-          </a>
+          <Tooltip content={`tx ${event.txid}`}>
+            <a
+              href={txLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hidden sm:inline font-mono text-[10px] text-bone-dim hover:text-accent-orange tracking-[0.08em] uppercase"
+            >
+              tx
+            </a>
+          </Tooltip>
         )}
-        <span
-          className="font-mono text-[10px] text-bone-dim tracking-normal whitespace-nowrap"
-          title={new Date(event.block_timestamp * 1000).toISOString()}
-        >
-          {formatRelTime(event.block_timestamp)}
-        </span>
+        <Tooltip content={new Date(event.block_timestamp * 1000).toISOString()}>
+          <span className="font-mono text-[10px] text-bone-dim tracking-normal whitespace-nowrap">
+            {formatRelTime(event.block_timestamp)}
+          </span>
+        </Tooltip>
       </div>
     </div>
   );
@@ -165,20 +167,21 @@ function OwnerLink({
   const username =
     !manual && profile?.username && !looksLikeAddress(profile.username) ? profile.username : null;
   return (
-    <Link
-      href={`/holder/${addr}`}
-      prefetch={false}
-      className="hover:text-accent-orange truncate"
-      title={manual ? `${manual.name} — ${addr}` : addr}
-    >
-      {manual ? (
-        <span className="text-accent-orange normal-case tracking-normal">{manual.name}</span>
-      ) : username ? (
-        <span className="text-bone normal-case tracking-normal">{username}</span>
-      ) : (
-        truncateAddr(addr)
-      )}
-    </Link>
+    <Tooltip content={manual ? `${manual.name} — ${addr}` : addr}>
+      <Link
+        href={`/holder/${addr}`}
+        prefetch={false}
+        className="hover:text-accent-orange truncate"
+      >
+        {manual ? (
+          <span className="text-accent-orange normal-case tracking-normal">{manual.name}</span>
+        ) : username ? (
+          <span className="text-bone normal-case tracking-normal">{username}</span>
+        ) : (
+          truncateAddr(addr)
+        )}
+      </Link>
+    </Tooltip>
   );
 }
 

@@ -7,6 +7,7 @@ import type { ColorFilter } from '@/lib/types';
 import { appendColorParam } from '@/lib/colorFilter';
 import { lookupWalletLabel } from '@/lib/walletLabels';
 import SafeImg from '@/components/SafeImg';
+import { Tooltip } from '@/components/ui/Tooltip';
 
 type Props = {
   type: LeaderboardKey;
@@ -133,7 +134,8 @@ function HolderRow({ row, rank }: { row: ApiHolder; rank: number }) {
             />
           )}
         </span>
-        <span className="font-mono text-xs text-bone truncate" title={tooltip}>
+        <Tooltip content={tooltip}>
+        <span className="font-mono text-xs text-bone truncate">
           {manual ? (
             <>
               <span className="text-accent-orange">{manual.name}</span>
@@ -152,6 +154,7 @@ function HolderRow({ row, rank }: { row: ApiHolder; rank: number }) {
             <span className="ml-1.5 text-[10px] text-bone-dim">×{row.wallets.length}</span>
           )}
         </span>
+        </Tooltip>
         <span className="font-mono text-xs text-bone tabular-nums whitespace-nowrap">
           {row.inscription_count.toLocaleString()}
         </span>

@@ -1,6 +1,7 @@
 import type { OwnershipDeltaRow } from '@/lib/db';
 import type { HolderColorHighlight } from '@/lib/holderEvents';
 import { timeTicks } from './chartUtils';
+import { Tooltip } from '../ui/Tooltip';
 
 const VB_W = 600;
 const VB_H = 140;
@@ -151,22 +152,22 @@ export default function BagSizeOverTime({
               {markers.map(({ h, xPct, yPct }) => {
                 const label = `#${h.inscription_number} · ${h.color} · ${h.direction === 'in' ? 'received' : 'sent'}`;
                 return (
-                  <a
-                    key={h.event_id}
-                    href={`/inscription/${h.inscription_number}`}
-                    title={label}
-                    aria-label={label}
-                    className="absolute pointer-events-auto"
-                    style={{
-                      left: `${xPct}%`,
-                      top: `${yPct}%`,
-                      transform: 'translate(-50%, -50%)',
-                    }}
-                  >
-                    <span
-                      className={`block w-[10px] h-[10px] rounded-full ${markerClasses(h)}`}
-                    />
-                  </a>
+                  <Tooltip key={h.event_id} content={label}>
+                    <a
+                      href={`/inscription/${h.inscription_number}`}
+                      aria-label={label}
+                      className="absolute pointer-events-auto"
+                      style={{
+                        left: `${xPct}%`,
+                        top: `${yPct}%`,
+                        transform: 'translate(-50%, -50%)',
+                      }}
+                    >
+                      <span
+                        className={`block w-[10px] h-[10px] rounded-full ${markerClasses(h)}`}
+                      />
+                    </a>
+                  </Tooltip>
                 );
               })}
             </div>

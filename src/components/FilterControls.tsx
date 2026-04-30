@@ -8,6 +8,7 @@ import ColorSwatches from './ColorSwatches';
 import HelpButton from './HelpButton';
 import MobileMenu from './MobileMenu';
 import NotificationButton, { BellIcon } from './NotificationButton/NotificationButton';
+import { Tooltip } from './ui/Tooltip';
 
 interface FilterControlsProps {
   colorFilter: ColorFilter;
@@ -89,16 +90,17 @@ const FilterControls = memo(function FilterControls({
           </span>
         </Link>
       ) : (
-        <span
-          className="h-10 px-2 flex items-center text-bone-dim opacity-30 cursor-not-allowed"
-          aria-label="Play slideshow (no images selected)"
-          aria-disabled="true"
-          title="No images in the current filter"
-        >
-          <span className="border border-transparent px-1.5 py-0.5 text-[11px] tracking-[0.12em]">
-            ▶ PLAY
+        <Tooltip content="No images in the current filter">
+          <span
+            className="h-10 px-2 flex items-center text-bone-dim opacity-30 cursor-not-allowed"
+            aria-label="Play slideshow (no images selected)"
+            aria-disabled="true"
+          >
+            <span className="border border-transparent px-1.5 py-0.5 text-[11px] tracking-[0.12em]">
+              ▶ PLAY
+            </span>
           </span>
-        </span>
+        </Tooltip>
       )}
     </div>
   );

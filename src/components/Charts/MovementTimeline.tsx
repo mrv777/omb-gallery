@@ -1,5 +1,6 @@
 import type { EventRow } from '@/lib/db';
 import { fullDate, timeTicks } from './chartUtils';
+import { Tooltip } from '../ui/Tooltip';
 
 const VB_W = 600;
 const VB_H = 40;
@@ -91,16 +92,19 @@ export default function MovementTimeline({ events }: { events: EventRow[] }) {
           {sorted.map(ev => {
             const fill = EVENT_COLOR[ev.event_type] ?? '#bfbfbf';
             return (
-              <span
+              <Tooltip
                 key={ev.id}
-                className="pointer-events-auto absolute w-2 h-2 rounded-full -translate-x-1/2 -translate-y-1/2"
-                style={{
-                  left: `${pct(ev.block_timestamp)}%`,
-                  top: '50%',
-                  backgroundColor: fill,
-                }}
-                title={`${EVENT_LABEL[ev.event_type] ?? ev.event_type} · ${fullDate(ev.block_timestamp)}`}
-              />
+                content={`${EVENT_LABEL[ev.event_type] ?? ev.event_type} · ${fullDate(ev.block_timestamp)}`}
+              >
+                <span
+                  className="pointer-events-auto absolute w-2 h-2 rounded-full -translate-x-1/2 -translate-y-1/2"
+                  style={{
+                    left: `${pct(ev.block_timestamp)}%`,
+                    top: '50%',
+                    backgroundColor: fill,
+                  }}
+                />
+              </Tooltip>
             );
           })}
         </div>

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { addressLink, ordNetWalletLink, truncateAddr } from '@/lib/format';
+import { Tooltip } from '../ui/Tooltip';
 
 const COLLAPSE_THRESHOLD = 3;
 
@@ -32,14 +33,15 @@ export function WalletsList({ wallets }: { wallets: string[] }) {
       <ul className="divide-y divide-ink-2 border border-ink-2">
         {visible.map(w => (
           <li key={w} className="flex items-center gap-2 sm:gap-3 px-3 py-2">
-            <Link
-              href={`/holder/${w}`}
-              prefetch={false}
-              className="font-mono text-xs text-bone hover:text-accent-orange tabular-nums truncate min-w-0"
-              title={w}
-            >
-              {truncateAddr(w, 10, 8)}
-            </Link>
+            <Tooltip content={w}>
+              <Link
+                href={`/holder/${w}`}
+                prefetch={false}
+                className="font-mono text-xs text-bone hover:text-accent-orange tabular-nums truncate min-w-0"
+              >
+                {truncateAddr(w, 10, 8)}
+              </Link>
+            </Tooltip>
             <span className="ml-auto flex items-center gap-1.5 shrink-0">
               <a
                 href={ordNetWalletLink(w)}

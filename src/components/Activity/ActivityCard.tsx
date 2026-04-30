@@ -11,6 +11,7 @@ import {
   ordinalsLink,
   truncateAddr,
 } from '@/lib/format';
+import { Tooltip } from '../ui/Tooltip';
 
 const COLOR_TILE_BG: Record<string, string> = {
   red: 'bg-accent-red/20',
@@ -90,27 +91,29 @@ const ActivityCard = memo(function ActivityCard({ event }: Props) {
       {showOwners && (
         <div className="px-3 pb-3 font-mono text-[10px] tracking-normal text-bone-dim normal-case truncate">
           {event.old_owner ? (
-            <Link
-              href={`/holder/${event.old_owner}`}
-              prefetch={false}
-              className="hover:text-accent-orange"
-              title={event.old_owner}
-            >
-              {truncateAddr(event.old_owner)}
-            </Link>
+            <Tooltip content={event.old_owner}>
+              <Link
+                href={`/holder/${event.old_owner}`}
+                prefetch={false}
+                className="hover:text-accent-orange"
+              >
+                {truncateAddr(event.old_owner)}
+              </Link>
+            </Tooltip>
           ) : (
             <span>—</span>
           )}
           <span> → </span>
           {event.new_owner ? (
-            <Link
-              href={`/holder/${event.new_owner}`}
-              prefetch={false}
-              className="hover:text-accent-orange"
-              title={event.new_owner}
-            >
-              {truncateAddr(event.new_owner)}
-            </Link>
+            <Tooltip content={event.new_owner}>
+              <Link
+                href={`/holder/${event.new_owner}`}
+                prefetch={false}
+                className="hover:text-accent-orange"
+              >
+                {truncateAddr(event.new_owner)}
+              </Link>
+            </Tooltip>
           ) : (
             <span>—</span>
           )}

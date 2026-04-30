@@ -9,6 +9,7 @@ import SafeImg from '@/components/SafeImg';
 import ColorPortfolioBar from '@/components/Charts/ColorPortfolioBar';
 import BagSizeOverTime from '@/components/Charts/BagSizeOverTime';
 import HolderActivityList from './HolderActivityList';
+import { Tooltip } from '../ui/Tooltip';
 
 const COLOR_TILE_BG: Record<string, string> = {
   red: 'bg-accent-red/20',
@@ -247,11 +248,11 @@ function OmbTile({ number }: { number: number }) {
   const hit = lookupInscription(number);
   const tileBg = hit?.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
   return (
+    <Tooltip content={`#${number}`}>
     <Link
       href={`/inscription/${number}`}
       prefetch={false}
       className={`block w-20 h-20 sm:w-24 sm:h-24 ${tileBg} overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors`}
-      title={`#${number}`}
       // content-visibility:auto skips layout + paint for offscreen tiles;
       // contain-intrinsic-size reserves the right slot so the flex-wrap
       // layout still resolves up-front and scroll position stays stable.
@@ -277,6 +278,7 @@ function OmbTile({ number }: { number: number }) {
         </div>
       )}
     </Link>
+    </Tooltip>
   );
 }
 
@@ -296,26 +298,27 @@ function BravocadosTile({
     ? `https://ordinals.com/content/${inscriptionId}`
     : null;
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="block w-10 h-10 bg-ink-2 overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors"
-      title={`Bravocados #${number}`}
-    >
-      <SafeImg
-        src={src}
-        alt={`Bravocados #${number}`}
-        loading="lazy"
-        decoding="async"
-        className="w-full h-full object-cover"
-        fallback={
-          <div className="w-full h-full flex items-center justify-center font-mono text-[8px] text-bone-dim">
-            #{number}
-          </div>
-        }
-      />
-    </a>
+    <Tooltip content={`Bravocados #${number}`}>
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block w-10 h-10 bg-ink-2 overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors"
+      >
+        <SafeImg
+          src={src}
+          alt={`Bravocados #${number}`}
+          loading="lazy"
+          decoding="async"
+          className="w-full h-full object-cover"
+          fallback={
+            <div className="w-full h-full flex items-center justify-center font-mono text-[8px] text-bone-dim">
+              #{number}
+            </div>
+          }
+        />
+      </a>
+    </Tooltip>
   );
 }
 

@@ -8,6 +8,7 @@ import {
   memepoolTxLink,
   truncateAddr,
 } from '@/lib/format';
+import { Tooltip } from '../ui/Tooltip';
 
 const COLOR_TILE_BG: Record<string, string> = {
   red: 'bg-accent-red/20',
@@ -77,11 +78,11 @@ export default function HolderEventRow({
         isSold ? 'bg-accent-green/[0.03]' : ''
       }`}
     >
+      <Tooltip content={`#${event.inscription_number}`}>
       <Link
         href={inscriptionLink}
         prefetch={false}
         className={`block w-12 h-12 ${tileBg} overflow-hidden border border-ink-2 hover:border-bone-dim shrink-0`}
-        title={`#${event.inscription_number}`}
       >
         {hit ? (
           /* eslint-disable-next-line @next/next/no-img-element */
@@ -98,6 +99,7 @@ export default function HolderEventRow({
           </div>
         )}
       </Link>
+      </Tooltip>
 
       <Link
         href={inscriptionLink}
@@ -130,35 +132,36 @@ export default function HolderEventRow({
           <span className="shrink-0 normal-case tracking-normal">{directionLabel}</span>
         )}
         {counterParty ? (
-          <Link
-            href={`/holder/${counterParty}`}
-            prefetch={false}
-            className="hover:text-accent-orange truncate normal-case tracking-normal"
-            title={counterParty}
-          >
-            {truncateAddr(counterParty)}
-          </Link>
+          <Tooltip content={counterParty}>
+            <Link
+              href={`/holder/${counterParty}`}
+              prefetch={false}
+              className="hover:text-accent-orange truncate normal-case tracking-normal"
+            >
+              {truncateAddr(counterParty)}
+            </Link>
+          </Tooltip>
         ) : null}
       </div>
 
       <div className="flex items-center gap-3 ml-auto shrink-0">
         {txLink && (
-          <a
-            href={txLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hidden sm:inline font-mono text-[10px] text-bone-dim hover:text-accent-orange tracking-[0.08em] uppercase"
-            title={`tx ${event.txid}`}
-          >
-            tx
-          </a>
+          <Tooltip content={`tx ${event.txid}`}>
+            <a
+              href={txLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hidden sm:inline font-mono text-[10px] text-bone-dim hover:text-accent-orange tracking-[0.08em] uppercase"
+            >
+              tx
+            </a>
+          </Tooltip>
         )}
-        <span
-          className="font-mono text-[10px] text-bone-dim tracking-normal whitespace-nowrap"
-          title={new Date(event.block_timestamp * 1000).toISOString()}
-        >
-          {formatRelTime(event.block_timestamp)}
-        </span>
+        <Tooltip content={new Date(event.block_timestamp * 1000).toISOString()}>
+          <span className="font-mono text-[10px] text-bone-dim tracking-normal whitespace-nowrap">
+            {formatRelTime(event.block_timestamp)}
+          </span>
+        </Tooltip>
       </div>
     </div>
   );

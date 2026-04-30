@@ -139,6 +139,24 @@ body {
   animation: omb-fav-flash 280ms ease-out;
 }
 
+/* Tooltip enter animation. Subtle fade + scale around the side anchor so it
+ * reads as "popping out of" the trigger. Driven by Radix's data-state attr. */
+@keyframes omb-tooltip-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.omb-tooltip[data-state='delayed-open'],
+.omb-tooltip[data-state='instant-open'] {
+  animation: omb-tooltip-in 120ms ease-out;
+}
+
 /* Remove native number-input spinners in search field */
 input[type='search']::-webkit-search-decoration,
 input[type='search']::-webkit-search-cancel-button {
