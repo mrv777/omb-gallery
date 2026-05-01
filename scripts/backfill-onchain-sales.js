@@ -65,7 +65,7 @@ const DB_PATH = process.env.OMB_DB_PATH ?? path.resolve(__dirname, '..', 'tmp', 
 const CONCURRENCY = parseInt(process.env.ONCHAIN_HEUR_CONCURRENCY ?? '8', 10);
 const REQUEST_TIMEOUT_MS = 30_000;
 const BATCH_SIZE = 200;
-const DETECTOR_VERSION = 1;
+const DETECTOR_VERSION = 2; // v2 adds the cyclic-buyer guard to Layer 2
 
 const ARGS = parseArgs(process.argv.slice(2));
 
@@ -466,6 +466,18 @@ async function classifyEvent(event, ctx = {}) {
     return { kind: 'skip', reason: 'coop:no-buyer-input' };
   }
 
+  // Cyclic-buyer guard: if `new_owner` was the recipient of any earlier event
+  // for this inscription, this isn't a fresh purchase — it's a return-to-sender
+  // pattern (e.g. holder ships out for listing, gets it back via a tx that
+  // happens to also carry an unrelated payment). Flagging that payment as a
+  // sale price gives wrong, often huge, false positives. The user-spotted
+  // #965265 case had 13 such flags all bouncing back to the same address.
+  // (#213924 — the rare real cooperative sale we built Layer 2 for — passes
+  // because the buyer there was a fresh new owner.)
+  if (ctx.buyerWasOwnerBefore?.(event.inscription_id, event.id, event.new_owner)) {
+    return { kind: 'skip', reason: 'coop:cyclic-buyer' };
+  }
+
   // External outputs = not paid to a buyer-cluster addr, not the inscription
   // destination.
   const externals = [];
@@ -653,12 +665,20 @@ async function main() {
   const countEventsForTxidStmt = db.prepare(
     `SELECT COUNT(*) AS n FROM events WHERE txid = ? AND id != ?`
   );
+  // Cyclic-buyer probe: did `addr` already appear as the recipient of some
+  // earlier event for this inscription? If yes, treat the candidate "sale"
+  // as a return-to-sender flow and skip (see classifyEvent for rationale).
+  const buyerWasOwnerBeforeStmt = db.prepare(
+    `SELECT 1 FROM events WHERE inscription_id = ? AND id < ? AND new_owner = ? LIMIT 1`
+  );
   const ctx = {
     includeCooperative: ARGS.includeCooperative,
     coopMinRatio: ARGS.coopMinRatio,
     coopMinPriceSats: ARGS.coopMinPriceSats,
     countEventsForTxid: (txid, selfId) =>
       countEventsForTxidStmt.get(txid, selfId)?.n ?? 0,
+    buyerWasOwnerBefore: (inscriptionId, eventId, addr) =>
+      buyerWasOwnerBeforeStmt.get(inscriptionId, eventId, addr) != null,
   };
   if (ARGS.includeCooperative) {
     console.log(
