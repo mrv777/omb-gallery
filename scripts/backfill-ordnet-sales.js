@@ -426,8 +426,10 @@ async function main() {
   const baseUrl = `${ORDNET_BASE}/collection/${COLLECTION_SLUG}/sales/__data.json`;
   const startedAt = Date.now();
   let pageNum = 0;
-  let prevHeight = Number.POSITIVE_INFINITY;
+  let prevToken = null;
   let zeroWriteStreak = 0;
+  let stallRecoveries = 0;
+  const MAX_STALL_RECOVERIES = 50;
   let totalSales = 0;
   let totalUpgraded = 0;
   let totalInserted = 0;
@@ -515,9 +517,30 @@ async function main() {
       console.log('[ord-net-backfill] no next cursor — done');
       break;
     }
-    if (Number.isFinite(nextHeight) && nextHeight >= prevHeight) {
-      console.log(`[ord-net-backfill] cursor stopped advancing (h=${nextHeight}) — done`);
-      break;
+    // ord.net's cursor occasionally stalls (returns the same token it just
+    // accepted) even though more data exists below. When that happens, forge
+    // a cursor at h-1 to step past the stall point. Cap recoveries so a
+    // pathological feed can't loop forever.
+    if (nextCursor.token === prevToken) {
+      if (stallRecoveries >= MAX_STALL_RECOVERIES) {
+        console.log(
+          `[ord-net-backfill] cursor stalled at h=${nextHeight} after ${stallRecoveries} recoveries — done`
+        );
+        break;
+      }
+      stallRecoveries++;
+      const forged = Buffer.from(
+        JSON.stringify({ h: String(Math.max(0, nextHeight - 1)), s: '0', e: '0' }),
+        'utf8'
+      )
+        .toString('base64')
+        .replace(/=+$/, '');
+      console.log(
+        `[ord-net-backfill] cursor stalled at h=${nextHeight}; forging h=${nextHeight - 1} (recovery ${stallRecoveries}/${MAX_STALL_RECOVERIES})`
+      );
+      cursorParam = `?cursor=${forged}`;
+      prevToken = forged;
+      continue;
     }
     if (zeroWriteStreak >= ARGS.earlyExitStreak) {
       console.log(
@@ -525,7 +548,7 @@ async function main() {
       );
       break;
     }
-    prevHeight = nextHeight;
+    prevToken = nextCursor.token;
     cursorParam = `?cursor=${nextCursor.token}`;
   }
 
