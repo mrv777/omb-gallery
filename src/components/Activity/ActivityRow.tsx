@@ -7,6 +7,7 @@ import { lookupInscription } from '@/lib/inscriptionLookup';
 import {
   formatBtc,
   formatRelTime,
+  looksLikeAddress,
   marketplaceLabel,
   memepoolTxLink,
   truncateAddr,
@@ -61,28 +62,28 @@ const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev, matrica 
     >
       {/* Thumbnail (faded if same inscription as previous row) */}
       <Tooltip content={`#${event.inscription_number}`}>
-      <Link
-        href={inscriptionLink}
-        prefetch={false}
-        className={`block w-12 h-12 ${tileBg} overflow-hidden border border-ink-2 hover:border-bone-dim transition-opacity ${
-          groupedWithPrev ? 'opacity-25 hover:opacity-100' : ''
-        }`}
-      >
-        {hit ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            src={hit.thumbnail}
-            alt={`#${event.inscription_number}`}
-            loading="lazy"
-            decoding="async"
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center font-mono text-[9px] text-bone-dim">
-            #{event.inscription_number}
-          </div>
-        )}
-      </Link>
+        <Link
+          href={inscriptionLink}
+          prefetch={false}
+          className={`block w-12 h-12 ${tileBg} overflow-hidden border border-ink-2 hover:border-bone-dim transition-opacity ${
+            groupedWithPrev ? 'opacity-25 hover:opacity-100' : ''
+          }`}
+        >
+          {hit ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={hit.thumbnail}
+              alt={`#${event.inscription_number}`}
+              loading="lazy"
+              decoding="async"
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center font-mono text-[9px] text-bone-dim">
+              #{event.inscription_number}
+            </div>
+          )}
+        </Link>
       </Tooltip>
 
       {/* Inscription number — fixed width so columns line up */}
@@ -152,13 +153,7 @@ export default ActivityRow;
  * verbatim (no `@` prefix) since Matrica usernames aren't necessarily Twitter
  * handles — but the visual treatment differs from a raw address so it reads
  * as an identity. */
-function OwnerLink({
-  addr,
-  matrica,
-}: {
-  addr: string | null;
-  matrica: ApiMatricaMap;
-}) {
+function OwnerLink({ addr, matrica }: { addr: string | null; matrica: ApiMatricaMap }) {
   if (!addr) return <span>—</span>;
   // Manual labels (treasury etc.) take precedence over Matrica handles —
   // these are curated identity overrides we want surfaced consistently.
@@ -168,11 +163,7 @@ function OwnerLink({
     !manual && profile?.username && !looksLikeAddress(profile.username) ? profile.username : null;
   return (
     <Tooltip content={manual ? `${manual.name} — ${addr}` : addr}>
-      <Link
-        href={`/holder/${addr}`}
-        prefetch={false}
-        className="hover:text-accent-orange truncate"
-      >
+      <Link href={`/holder/${addr}`} prefetch={false} className="hover:text-accent-orange truncate">
         {manual ? (
           <span className="text-accent-orange normal-case tracking-normal">{manual.name}</span>
         ) : username ? (
@@ -183,8 +174,4 @@ function OwnerLink({
       </Link>
     </Tooltip>
   );
-}
-
-function looksLikeAddress(s: string): boolean {
-  return /^bc1[a-z0-9]{30,}$/i.test(s) || /^0x[a-f0-9]{40}$/i.test(s) || s.length > 30;
 }

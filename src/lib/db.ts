@@ -1636,7 +1636,7 @@ export function getStmts(): Stmts {
     // @username on event rows. json_each(?) lets one prepared statement
     // handle a dynamic IN-list — pass JSON.stringify(addrs).
     getMatricaProfilesForAddrs: db.prepare(`
-      SELECT wl.wallet_addr, mu.username, mu.avatar_url
+      SELECT wl.wallet_addr, wl.matrica_user_id AS user_id, mu.username, mu.avatar_url
       FROM wallet_links wl
       JOIN matrica_users mu ON mu.user_id = wl.matrica_user_id
       WHERE wl.wallet_addr IN (SELECT value FROM json_each(@addrs_json))

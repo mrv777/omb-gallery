@@ -3,10 +3,13 @@ import { getStmts, type EventRow } from './db';
 
 /** Wallet → Matrica display data. Only addresses with a non-null username
  * are returned (default-square / no-profile wallets are dropped client-side
- * by exclusion from this map). */
+ * by exclusion from this map). `user_id` is the stable Matrica identity —
+ * always non-null in returned rows because the SQL INNER JOINs matrica_users.
+ * Notifications use it to detect transfers between two wallets owned by the
+ * same Matrica user (internal moves). */
 export type MatricaOverlay = Record<
   string,
-  { username: string | null; avatar_url: string | null }
+  { user_id: string; username: string | null; avatar_url: string | null }
 >;
 
 /**
@@ -33,10 +36,19 @@ export function matricaProfilesForAddrs(addrs: string[]): MatricaOverlay {
   const stmts = getStmts();
   const rows = stmts.getMatricaProfilesForAddrs.all({
     addrs_json: JSON.stringify(addrs),
-  }) as Array<{ wallet_addr: string; username: string | null; avatar_url: string | null }>;
+  }) as Array<{
+    wallet_addr: string;
+    user_id: string;
+    username: string | null;
+    avatar_url: string | null;
+  }>;
   const out: MatricaOverlay = {};
   for (const r of rows) {
-    out[r.wallet_addr] = { username: r.username, avatar_url: r.avatar_url };
+    out[r.wallet_addr] = {
+      user_id: r.user_id,
+      username: r.username,
+      avatar_url: r.avatar_url,
+    };
   }
   return out;
 }

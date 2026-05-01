@@ -30,6 +30,29 @@ export function truncateAddr(addr: string | null | undefined, head = 6, tail = 4
   return `${addr.slice(0, head)}…${addr.slice(-tail)}`;
 }
 
+/** Heuristic: does this string look like a wallet address rather than a
+ * username? Used to defend against a Matrica display name that's been set
+ * to a raw address — we'd rather show the truncated address than a long
+ * unreadable handle. */
+export function looksLikeAddress(s: string): boolean {
+  return /^bc1[a-z0-9]{30,}$/i.test(s) || /^0x[a-f0-9]{40}$/i.test(s) || s.length > 30;
+}
+
+/** Render an owner slot for plain-text contexts (notifications). Returns
+ * `@username` when the address has a non-trivial Matrica handle, otherwise
+ * the truncated address. Pass `null` for unknown owners (returns '?'). */
+export function ownerDisplay(
+  addr: string | null,
+  profiles: Record<string, { username: string | null } | undefined>
+): string {
+  if (!addr) return '?';
+  const profile = profiles[addr];
+  if (profile?.username && !looksLikeAddress(profile.username)) {
+    return `@${profile.username}`;
+  }
+  return truncateAddr(addr);
+}
+
 const MARKETPLACE_LABELS: Record<string, string> = {
   magiceden: 'Magic Eden',
   'magic-eden': 'Magic Eden',

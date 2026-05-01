@@ -4,7 +4,8 @@ import { lookupInscription } from './inscriptionLookup';
 import { log } from './log';
 import { sendMessage, escapeHtml, type SendArgs } from './telegram';
 import { postWebhook, type DiscordEmbed } from './discord';
-import { satflowInscriptionLink } from './format';
+import { ownerDisplay, satflowInscriptionLink, truncateAddr } from './format';
+import { matricaProfilesForAddrs, type MatricaOverlay } from './matricaOverlay';
 import {
   cleanupExpiredPending,
   findMatchesForEvent,
@@ -58,12 +59,18 @@ function siteUrl(): string {
 
 function colorHex(color: string | null): number {
   switch (color) {
-    case 'red': return 0xff5544;
-    case 'blue': return 0x4488ff;
-    case 'green': return 0x44cc77;
-    case 'orange': return 0xff9933;
-    case 'black': return 0x222222;
-    default: return 0x888888;
+    case 'red':
+      return 0xff5544;
+    case 'blue':
+      return 0x4488ff;
+    case 'green':
+      return 0x44cc77;
+    case 'orange':
+      return 0xff9933;
+    case 'black':
+      return 0x222222;
+    default:
+      return 0x888888;
   }
 }
 
@@ -80,10 +87,22 @@ function actionLabel(t: EventRow['event_type']): { upper: string; lower: string;
   return { upper: 'TRANSFERRED', lower: 'transferred', emoji: '🔄' };
 }
 
-function truncAddr(a: string | null): string {
-  if (!a) return '?';
-  if (a.length <= 12) return a;
-  return `${a.slice(0, 6)}…${a.slice(-4)}`;
+/** True when both `old_owner` and `new_owner` resolve to the same Matrica
+ * user. Returns the shared username when known (may be null even on a match —
+ * Matrica accounts can have a user_id without a username set). Only meaningful
+ * for `transferred`; `sold`/`listed` keep their normal rendering even on the
+ * rare same-user case (a sale to yourself is still a sale). */
+function internalTransferUsername(
+  ev: EventRow,
+  matrica: MatricaOverlay
+): { isInternal: true; username: string | null } | { isInternal: false } {
+  if (ev.event_type !== 'transferred') return { isInternal: false };
+  if (!ev.old_owner || !ev.new_owner) return { isInternal: false };
+  if (ev.old_owner === ev.new_owner) return { isInternal: false };
+  const a = matrica[ev.old_owner]?.user_id;
+  const b = matrica[ev.new_owner]?.user_id;
+  if (!a || !b || a !== b) return { isInternal: false };
+  return { isInternal: true, username: matrica[ev.old_owner]?.username ?? null };
 }
 
 function formatBtc(sats: number | null): string {
@@ -108,7 +127,11 @@ function eventLinkUrl(ev: EventRow): string {
   return ordinalsUrl(ev.inscription_number);
 }
 
-function buildTelegramMessage(events: EventRow[], sub: SubscriptionRow): SendArgs {
+function buildTelegramMessage(
+  events: EventRow[],
+  sub: SubscriptionRow,
+  matrica: MatricaOverlay
+): SendArgs {
   const isOne = events.length === 1;
   const lines: string[] = [];
   for (const ev of events) {
@@ -124,12 +147,21 @@ function buildTelegramMessage(events: EventRow[], sub: SubscriptionRow): SendArg
     // Telegram parse_mode=HTML can never break on a single bad event.
     const link = `<a href="${escapeHtml(eventLinkUrl(ev))}">OMB #${ev.inscription_number}</a>`;
     const colorTag = ev.color ? ` <i>(${escapeHtml(ev.color)})</i>` : '';
-    // Listed events show only the seller; no recipient yet.
-    const movement =
-      ev.event_type === 'listed'
-        ? `by ${escapeHtml(truncAddr(ev.old_owner))}`
-        : `${escapeHtml(truncAddr(ev.old_owner))} → ${escapeHtml(truncAddr(ev.new_owner))}`;
-    lines.push(`${emoji} ${link}${colorTag} <b>${upper}</b>${priceStr}\n   ${movement}`);
+    const internal = internalTransferUsername(ev, matrica);
+    let movement: string;
+    let labelOverride: string | null = null;
+    if (internal.isInternal) {
+      labelOverride = 'INTERNAL';
+      movement = internal.username
+        ? `between ${escapeHtml(`@${internal.username}`)}'s wallets`
+        : `between same owner's wallets`;
+    } else if (ev.event_type === 'listed') {
+      movement = `by ${escapeHtml(ownerDisplay(ev.old_owner, matrica))}`;
+    } else {
+      movement = `${escapeHtml(ownerDisplay(ev.old_owner, matrica))} → ${escapeHtml(ownerDisplay(ev.new_owner, matrica))}`;
+    }
+    const labelStr = labelOverride ?? upper;
+    lines.push(`${emoji} ${link}${colorTag} <b>${labelStr}</b>${priceStr}\n   ${movement}`);
   }
   let header = '';
   if (sub.kind === 'inscription') {
@@ -160,24 +192,37 @@ function buildTelegramMessage(events: EventRow[], sub: SubscriptionRow): SendArg
   };
 }
 
-function buildDiscordEmbeds(events: EventRow[], sub: SubscriptionRow): DiscordEmbed[] {
+function buildDiscordEmbeds(
+  events: EventRow[],
+  sub: SubscriptionRow,
+  matrica: MatricaOverlay
+): DiscordEmbed[] {
   // Bucket is already capped at 10 events upstream; no slice needed here.
   return events.map(ev => {
     const lookup = lookupInscription(ev.inscription_number);
     const { lower } = actionLabel(ev.event_type);
     const price = formatBtc(ev.sale_price_sats);
     const market = ev.marketplace ?? '';
-    const titleBits: string[] = [`OMB #${ev.inscription_number} ${lower}`];
+    const internal = internalTransferUsername(ev, matrica);
+    const verb = internal.isInternal ? 'internal transfer' : lower;
+    const titleBits: string[] = [`OMB #${ev.inscription_number} ${verb}`];
     if (price) titleBits.push(`for ${price}`);
     if (market) titleBits.push(`on ${market}`);
     const fields: DiscordEmbed['fields'] = [];
     if (ev.color) fields.push({ name: 'Color', value: ev.color, inline: true });
-    if (ev.event_type === 'listed') {
+    if (internal.isInternal) {
+      // Collapse From/To into one row — both wallets belong to the same Matrica
+      // identity, so showing them as two distinct addresses misleads.
+      const value = internal.username
+        ? `@${internal.username} (between own wallets)`
+        : `Between same owner's wallets (${truncateAddr(ev.old_owner)} → ${truncateAddr(ev.new_owner)})`;
+      fields.push({ name: 'Internal transfer', value, inline: false });
+    } else if (ev.event_type === 'listed') {
       // Listings have no recipient — show seller only.
-      fields.push({ name: 'Seller', value: truncAddr(ev.old_owner), inline: true });
+      fields.push({ name: 'Seller', value: ownerDisplay(ev.old_owner, matrica), inline: true });
     } else {
-      fields.push({ name: 'From', value: truncAddr(ev.old_owner), inline: true });
-      fields.push({ name: 'To', value: truncAddr(ev.new_owner), inline: true });
+      fields.push({ name: 'From', value: ownerDisplay(ev.old_owner, matrica), inline: true });
+      fields.push({ name: 'To', value: ownerDisplay(ev.new_owner, matrica), inline: true });
     }
     // Listed events use a synthetic txid like "listed:<num>:<ts>"; truncating
     // the synthetic prefix to 10 chars renders fine alongside real txids.
@@ -187,7 +232,9 @@ function buildDiscordEmbeds(events: EventRow[], sub: SubscriptionRow): DiscordEm
       color: colorHex(ev.color),
       thumbnail: lookup ? { url: `${siteUrl()}${lookup.thumbnail}` } : undefined,
       fields,
-      footer: { text: `${sub.kind === 'collection' ? 'all OMB' : sub.kind === 'color' ? `${sub.target_key} OMBs` : `OMB #${sub.target_key}`} · tx ${ev.txid.slice(0, 10)}…` },
+      footer: {
+        text: `${sub.kind === 'collection' ? 'all OMB' : sub.kind === 'color' ? `${sub.target_key} OMBs` : `OMB #${sub.target_key}`} · tx ${ev.txid.slice(0, 10)}…`,
+      },
       timestamp: new Date(ev.block_timestamp * 1000).toISOString(),
     };
   });
@@ -286,6 +333,18 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
     eventToWantingBuckets.set(ev.id, wanting);
   }
 
+  // Fetch Matrica overlay once per tick — single SQL query covering every
+  // owner address in the batch. Lets the message builders substitute
+  // @username for truncated addresses and detect internal transfers (both
+  // sides resolve to the same Matrica user). Returns {} on error/empty input.
+  const ownerAddrs = new Set<string>();
+  for (const ev of events) {
+    if (ev.old_owner) ownerAddrs.add(ev.old_owner);
+    if (ev.new_owner) ownerAddrs.add(ev.new_owner);
+  }
+  const matrica =
+    ownerAddrs.size > 0 ? matricaProfilesForAddrs(Array.from(ownerAddrs)) : ({} as MatricaOverlay);
+
   // Dispatch returns the set of event ids actually delivered to this bucket.
   // (Currently every bucket sends exactly one message containing all its
   //  capped events, so on success the whole bucket is delivered; on failure,
@@ -294,7 +353,7 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
   const dispatch = async (bucket: Bucket): Promise<Set<number>> => {
     const allIds = new Set(bucket.eventIds);
     if (bucket.channel === 'telegram') {
-      const args = buildTelegramMessage(bucket.events, bucket.representative);
+      const args = buildTelegramMessage(bucket.events, bucket.representative, matrica);
       const r = await sendMessage(args);
       if (r.ok) {
         recordDeliverySuccess(bucket.channel, bucket.channelTarget);
@@ -302,10 +361,13 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
       }
       const dead = r.error.kind === 'blocked';
       recordDeliveryFailure(bucket.channel, bucket.channelTarget, dead);
-      log.warn('notify/telegram', 'send failed', { target: hashTarget(bucket.channelTarget), error: r.error });
+      log.warn('notify/telegram', 'send failed', {
+        target: hashTarget(bucket.channelTarget),
+        error: r.error,
+      });
       return new Set();
     }
-    const embeds = buildDiscordEmbeds(bucket.events, bucket.representative);
+    const embeds = buildDiscordEmbeds(bucket.events, bucket.representative, matrica);
     const r = await postWebhook(bucket.channelTarget, { embeds });
     if (r.ok) {
       recordDeliverySuccess(bucket.channel, bucket.channelTarget);
@@ -313,7 +375,10 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
     }
     const dead = r.error.kind === 'dead' || r.error.kind === 'invalid-url';
     recordDeliveryFailure(bucket.channel, bucket.channelTarget, dead);
-    log.warn('notify/discord', 'post failed', { target: hashTarget(bucket.channelTarget), error: r.error });
+    log.warn('notify/discord', 'post failed', {
+      target: hashTarget(bucket.channelTarget),
+      error: r.error,
+    });
     return new Set();
   };
 
