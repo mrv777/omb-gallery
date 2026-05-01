@@ -78,11 +78,18 @@ function parseArgs(argv) {
     maxEvents: null,
     verbose: false,
     auditSold: false,
+    includeCooperative: false,
   };
   for (const a of argv) {
     if (a === '--dry-run') out.dryRun = true;
     else if (a === '--verbose') out.verbose = true;
-    else if (a === '--audit-sold') {
+    else if (a === '--include-cooperative') {
+      // Layer 2: enable the cooperative-trade dominance heuristic for events
+      // where ACP detection doesn't fire. Lower precision than ACP — flagged
+      // rows are tagged raw_json.source='onchain-coop-heuristic' so they can
+      // be audited (or rolled back) separately.
+      out.includeCooperative = true;
+    } else if (a === '--audit-sold') {
       // Cross-source validation mode: include `sold` rows in the work set and
       // compare the heuristic's classification against existing sale_price_sats.
       // Forces dry-run — never writes. Used to verify the detector recognizes
@@ -302,10 +309,17 @@ function* iterateScriptPushes(hex) {
 // payment must clear a dust floor.
 const MIN_SALE_PRICE_SATS = 10_000; // 0.0001 BTC; below this is padding/dust
 
+// Layer 2 thresholds for cooperative SIGHASH_ALL detection (opt-in via
+// --include-cooperative). Calibrated against 300 random ord.net-known sales:
+// at these values, ~76% of non-PSBT sales agree with DB price exactly, ~3%
+// produce wrong predictions, ~21% are safely skipped.
+const COOP_MIN_RATIO = 10; // dominant external must be ≥10× the second-largest
+const COOP_MIN_PRICE_SATS = 100_000; // 0.001 BTC absolute floor
+
 // Returns a classification object for one event:
-//   { kind: 'sale', flag, sigSource, carryIdx, sellerAddr, salePriceSats }
+//   { kind: 'sale', layer, flag?, sigSource?, carryIdx, sellerAddr, salePriceSats, dominanceRatio? }
 //   { kind: 'skip', reason: <string> }
-async function classifyEvent(event) {
+async function classifyEvent(event, ctx = {}) {
   let tx;
   try {
     tx = await rpc('getrawtransaction', [event.txid, 2]);
@@ -319,7 +333,8 @@ async function classifyEvent(event) {
     return { kind: 'skip', reason: 'coinbase' };
   }
 
-  // Find all inputs with at least one ACP-flagged signature.
+  // ----- Layer 1: ACP sighash detection (high precision) -----
+
   const acpInputs = [];
   for (let i = 0; i < tx.vin.length; i++) {
     const vin = tx.vin[i];
@@ -330,41 +345,119 @@ async function classifyEvent(event) {
     const prevAddr = addressFromScriptPubKey(vin.prevout?.scriptPubKey);
     acpInputs.push({ idx: i, flag: acp.flag, source: acp.source, prevAddr });
   }
-  if (acpInputs.length === 0) return { kind: 'skip', reason: 'no-acp-sighash' };
 
-  // Identify the seller's input. Strong path: match prevAddr to old_owner.
-  // Fallback: if the tx has exactly one ACP-signed input, accept it (single-
-  // listing case where old_owner may be null or in a non-comparable format).
-  let match = null;
-  if (event.old_owner) {
-    match = acpInputs.find(a => a.prevAddr === event.old_owner) ?? null;
+  if (acpInputs.length > 0) {
+    let match = null;
+    if (event.old_owner) {
+      match = acpInputs.find(a => a.prevAddr === event.old_owner) ?? null;
+    }
+    if (!match && acpInputs.length === 1) match = acpInputs[0];
+
+    if (match) {
+      const paymentVout = tx.vout[match.idx];
+      if (!paymentVout) return { kind: 'skip', reason: 'no-payment-vout' };
+      const sellerAddr = addressFromScriptPubKey(paymentVout.scriptPubKey);
+      if (!sellerAddr) return { kind: 'skip', reason: 'unparseable-payment-spk' };
+      if (event.new_owner && sellerAddr === event.new_owner) {
+        return { kind: 'skip', reason: 'pays-buyer' };
+      }
+      const salePriceSats = Number(btcToSats(paymentVout.value));
+      if (salePriceSats < MIN_SALE_PRICE_SATS) {
+        return { kind: 'skip', reason: `dust-payment (${salePriceSats} sats)` };
+      }
+      return {
+        kind: 'sale',
+        layer: 'acp',
+        flag: match.flag,
+        sigSource: match.source,
+        carryIdx: match.idx,
+        sellerAddr,
+        salePriceSats,
+      };
+    }
+    // Multiple ACP inputs but none matches old_owner — ambiguous, skip.
+    if (!ctx.includeCooperative) {
+      return { kind: 'skip', reason: 'no-matching-acp-input' };
+    }
+    // Fall through to Layer 2 for ambiguous-ACP cases too.
   }
-  if (!match) {
-    if (acpInputs.length === 1) match = acpInputs[0];
-    else return { kind: 'skip', reason: 'no-matching-acp-input' };
+
+  if (!ctx.includeCooperative) {
+    return { kind: 'skip', reason: 'no-acp-sighash' };
   }
 
-  const paymentVout = tx.vout[match.idx];
-  if (!paymentVout) return { kind: 'skip', reason: 'no-payment-vout' };
-  const sellerAddr = addressFromScriptPubKey(paymentVout.scriptPubKey);
-  if (!sellerAddr) return { kind: 'skip', reason: 'unparseable-payment-spk' };
+  // ----- Layer 2: cooperative-trade dominance heuristic -----
+  //
+  // No ACP signature on a matchable input. If old_owner != new_owner, the
+  // tx might still be a cooperatively-built sale (both parties signing
+  // SIGHASH_ALL). Identify the seller's input by old_owner prevAddr match,
+  // then look at the output flow: the largest "external" output (not to a
+  // buyer-cluster address, not the inscription destination) is the candidate
+  // sale price — provided it dominates other externals (≥10×) and clears a
+  // 100k-sat floor. Falls back to skip when ambiguous (multi-inscription
+  // batched fills, sole-external fee-only patterns, weak ratios).
 
-  if (event.new_owner && sellerAddr === event.new_owner) {
-    return { kind: 'skip', reason: 'pays-buyer' };
+  if (!event.old_owner || !event.new_owner) {
+    return { kind: 'skip', reason: 'coop:no-owners' };
+  }
+  if (event.old_owner === event.new_owner) {
+    return { kind: 'skip', reason: 'coop:self-transfer' };
   }
 
-  const salePriceSats = Number(btcToSats(paymentVout.value));
-  if (salePriceSats < MIN_SALE_PRICE_SATS) {
-    return { kind: 'skip', reason: `dust-payment (${salePriceSats} sats)` };
+  // Find the seller's input (any input from old_owner). Required for
+  // building the buyer cluster correctly.
+  const sellerVin = tx.vin.findIndex(
+    v => addressFromScriptPubKey(v.prevout?.scriptPubKey) === event.old_owner
+  );
+  if (sellerVin < 0) return { kind: 'skip', reason: 'coop:no-seller-input' };
+
+  // Build buyer-input cluster (all input addresses except seller's).
+  const buyerCluster = new Set();
+  for (let i = 0; i < tx.vin.length; i++) {
+    const a = addressFromScriptPubKey(tx.vin[i].prevout?.scriptPubKey);
+    if (!a || a === event.old_owner) continue;
+    buyerCluster.add(a);
+  }
+  buyerCluster.add(event.new_owner);
+
+  // External outputs = not paid to a buyer-cluster addr, not the inscription
+  // destination.
+  const externals = [];
+  for (let i = 0; i < tx.vout.length; i++) {
+    const o = tx.vout[i];
+    const a = addressFromScriptPubKey(o.scriptPubKey);
+    if (!a || buyerCluster.has(a)) continue;
+    externals.push({ idx: i, addr: a, sats: Number(btcToSats(o.value)) });
+  }
+  externals.sort((x, y) => y.sats - x.sats);
+  const top = externals[0];
+  const second = externals[1];
+
+  // Multi-inscription batched-fill guard: if other event rows reference the
+  // same txid, we can't disaggregate per-inscription pricing from outputs.
+  const otherEventsThisTx = ctx.countEventsForTxid?.(event.txid, event.id) ?? 0;
+  if (otherEventsThisTx > 0) {
+    return { kind: 'skip', reason: 'coop:multi-inscription-tx' };
+  }
+
+  if (!top) return { kind: 'skip', reason: 'coop:no-externals' };
+  if (top.sats < COOP_MIN_PRICE_SATS) {
+    return { kind: 'skip', reason: `coop:below-floor (${top.sats})` };
+  }
+  if (!second) return { kind: 'skip', reason: 'coop:sole-external' };
+  const ratio = top.sats / Math.max(second.sats, 1);
+  if (ratio < COOP_MIN_RATIO) {
+    return { kind: 'skip', reason: `coop:weak-ratio (${ratio.toFixed(1)}x)` };
   }
 
   return {
     kind: 'sale',
-    flag: match.flag,
-    sigSource: match.source,
-    carryIdx: match.idx,
-    sellerAddr,
-    salePriceSats,
+    layer: 'coop',
+    carryIdx: top.idx,
+    sellerAddr: top.addr,
+    salePriceSats: top.sats,
+    dominanceRatio: ratio,
+    externalCount: externals.length,
   };
 }
 
@@ -491,6 +584,21 @@ async function main() {
   let auditFalseFlag = 0; // detector flagged a row DB has as 'transferred'
   const auditDeltaSamples = [];
 
+  // Per-layer counters (informational, in audit & live runs).
+  let detectedAcp = 0;
+  let detectedCoop = 0;
+
+  // ctx for classifier: lets Layer 2's multi-inscription guard query the DB
+  // for siblings sharing the same txid.
+  const countEventsForTxidStmt = db.prepare(
+    `SELECT COUNT(*) AS n FROM events WHERE txid = ? AND id != ?`
+  );
+  const ctx = {
+    includeCooperative: ARGS.includeCooperative,
+    countEventsForTxid: (txid, selfId) =>
+      countEventsForTxidStmt.get(txid, selfId)?.n ?? 0,
+  };
+
   function flushPending() {
     if (pendingBatch.length === 0) return;
     if (ARGS.dryRun) {
@@ -509,11 +617,13 @@ async function main() {
       const i = next++;
       const ev = targets[i];
       try {
-        const verdict = await classifyEvent(ev);
+        const verdict = await classifyEvent(ev, ctx);
         if (ARGS.auditSold) {
           // Audit mode: compare verdict against the row's existing event_type.
           if (ev.event_type === 'sold') {
             if (verdict.kind === 'sale') {
+              if (verdict.layer === 'coop') detectedCoop++;
+              else detectedAcp++;
               const dbPrice = ev.sale_price_sats ?? 0;
               const delta = verdict.salePriceSats - dbPrice;
               if (Math.abs(delta) <= 1) auditAgree++;
@@ -523,6 +633,7 @@ async function main() {
                   auditDeltaSamples.push({
                     n: ev.inscription_number,
                     txid: ev.txid.slice(0, 16),
+                    layer: verdict.layer,
                     heur: verdict.salePriceSats,
                     db: dbPrice,
                     delta,
@@ -535,6 +646,8 @@ async function main() {
             }
           } else if (verdict.kind === 'sale') {
             auditFalseFlag++;
+            if (verdict.layer === 'coop') detectedCoop++;
+            else detectedAcp++;
           } else {
             reasons[`xfer-skip:${verdict.reason}`] =
               (reasons[`xfer-skip:${verdict.reason}`] ?? 0) + 1;
@@ -544,21 +657,43 @@ async function main() {
         }
         if (verdict.kind === 'sale') {
           detected++;
-          const rawJson = JSON.stringify({
-            source: 'onchain-heuristic',
-            sighash: '0x' + verdict.flag.toString(16).padStart(2, '0'),
-            sig_source: verdict.sigSource,
-            carry_idx: verdict.carryIdx,
-            seller_payout_addr: verdict.sellerAddr,
-            inscription_holder_addr: ev.old_owner,
-            buyer_addr: ev.new_owner,
-            price_sats: verdict.salePriceSats,
-            detector_version: DETECTOR_VERSION,
-          });
+          if (verdict.layer === 'coop') detectedCoop++;
+          else detectedAcp++;
+          const rawJson = JSON.stringify(
+            verdict.layer === 'coop'
+              ? {
+                  source: 'onchain-coop-heuristic',
+                  confidence: 'medium',
+                  carry_idx: verdict.carryIdx,
+                  dominance_ratio: Number(verdict.dominanceRatio.toFixed(2)),
+                  external_count: verdict.externalCount,
+                  seller_payout_addr: verdict.sellerAddr,
+                  inscription_holder_addr: ev.old_owner,
+                  buyer_addr: ev.new_owner,
+                  price_sats: verdict.salePriceSats,
+                  detector_version: DETECTOR_VERSION,
+                }
+              : {
+                  source: 'onchain-heuristic',
+                  confidence: 'high',
+                  sighash: '0x' + verdict.flag.toString(16).padStart(2, '0'),
+                  sig_source: verdict.sigSource,
+                  carry_idx: verdict.carryIdx,
+                  seller_payout_addr: verdict.sellerAddr,
+                  inscription_holder_addr: ev.old_owner,
+                  buyer_addr: ev.new_owner,
+                  price_sats: verdict.salePriceSats,
+                  detector_version: DETECTOR_VERSION,
+                }
+          );
           if (ARGS.verbose || detected <= 20) {
+            const tag =
+              verdict.layer === 'coop'
+                ? `COOP(${verdict.dominanceRatio.toFixed(1)}x)`
+                : `ACP(0x${verdict.flag.toString(16)})`;
             console.log(
-              `[onchain-heuristic] SALE #${ev.inscription_number} txid=${ev.txid.slice(0, 16)}… ` +
-                `sighash=0x${verdict.flag.toString(16)} carry=${verdict.carryIdx} ` +
+              `[onchain-heuristic] SALE [${tag}] #${ev.inscription_number} txid=${ev.txid.slice(0, 16)}… ` +
+                `carry=${verdict.carryIdx} ` +
                 `price=${verdict.salePriceSats} sats (${(verdict.salePriceSats / 1e8).toFixed(4)} BTC)`
             );
           }
@@ -609,7 +744,8 @@ async function main() {
     const totalSold = auditAgree + auditPriceMismatch + auditMissedSale;
     const totalXfer = processed - totalSold;
     console.log(
-      `[onchain-heuristic] AUDIT DONE in ${elapsed}s — sold-rows=${totalSold} xfer-rows=${totalXfer}`
+      `[onchain-heuristic] AUDIT DONE in ${elapsed}s — sold-rows=${totalSold} xfer-rows=${totalXfer}` +
+        (ARGS.includeCooperative ? ' (with --include-cooperative)' : '')
     );
     console.log(
       `  on existing 'sold' rows:   agree=${auditAgree}  price-mismatch=${auditPriceMismatch}  missed=${auditMissedSale}`
@@ -617,6 +753,7 @@ async function main() {
     console.log(
       `  on existing 'transferred': would-flip-to-sold=${auditFalseFlag}  left-alone=${totalXfer - auditFalseFlag}`
     );
+    console.log(`  detector layers:           acp=${detectedAcp}  coop=${detectedCoop}`);
     if (auditDeltaSamples.length) {
       console.log('  price-mismatch samples:');
       for (const d of auditDeltaSamples) console.log('   ', d);
@@ -625,7 +762,8 @@ async function main() {
   } else {
     console.log(
       `[onchain-heuristic] DONE in ${elapsed}s — ` +
-        `processed=${processed} detected=${detected} upgraded=${upgradedTotal} err=${errors}` +
+        `processed=${processed} detected=${detected} (acp=${detectedAcp} coop=${detectedCoop}) ` +
+        `upgraded=${upgradedTotal} err=${errors}` +
         (ARGS.dryRun ? ' (DRY RUN — no writes)' : '')
     );
     console.log('[onchain-heuristic] skip reasons:', reasons);
