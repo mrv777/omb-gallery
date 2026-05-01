@@ -13,12 +13,24 @@ import type { ApiHolder } from '@/components/Activity/types';
 import { colorParamForSql, parseColorParam } from '@/lib/colorFilter';
 import HolderDistributionHistogram from '@/components/Charts/HolderDistributionHistogram';
 import HoldingDurationHistogram from '@/components/Charts/HoldingDurationHistogram';
+import { SITE_NAME, buildSocial } from '@/lib/metadata';
 
-export const metadata: Metadata = {
-  title: 'Explorer · OMB Archive',
-  description:
-    'Leaderboards for the Ordinal Maxi Biz collection: most-transferred, longest-unmoved, top sale volume, top holders.',
-};
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<{ color?: string }>;
+}): Promise<Metadata> {
+  const sp = await searchParams;
+  const color = parseColorParam(sp.color);
+  const colorLabel = color !== 'all' ? `${color[0].toUpperCase()}${color.slice(1)} ` : '';
+  const title = `${colorLabel}Explorer`;
+  const description = `Leaderboards for ${colorLabel ? `${colorLabel.trim().toLowerCase()} ` : 'the '}Ordinal Maxi Biz${colorLabel ? '' : ' collection'}: most-transferred, longest-unmoved, top sale volume, top holders.`;
+  return {
+    title,
+    description,
+    ...buildSocial({ title: `${title} · ${SITE_NAME}`, description }),
+  };
+}
 
 // Skip build-time pre-rendering — getDb() can't open /data/app.db in the build
 // container. Per-request SSR is fast (~25ms for 5 SELECTs against a 9k-row

@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
       'All subscriptions removed',
       `<h1 class="ok">Removed ${n} subscription${n === 1 ? '' : 's'}</h1>
        <p>This ${row.channel === 'telegram' ? 'Telegram chat' : 'Discord channel'} will no longer receive OMB notifications.</p>
-       <p><a href="/">Back to the archive</a></p>`
+       <p><a href="/">Back to the wiki</a></p>`
     );
   }
 
@@ -58,6 +58,6 @@ export async function GET(req: NextRequest) {
     'Unsubscribed',
     `<h1 class="ok">Unsubscribed</h1>
      <p>You'll no longer get alerts for this watch.</p>
-     <p><a href="/notifications">Manage all subscriptions</a> · <a href="/">Back to the archive</a></p>`
+     <p><a href="/notifications">Manage all subscriptions</a> · <a href="/">Back to the wiki</a></p>`
   );
 }

@@ -7,10 +7,14 @@ import Slideshow, {
   type Order,
   type Speed,
 } from '@/components/Slideshow/Slideshow';
+import { SITE_NAME, buildSocial } from '@/lib/metadata';
+
+const SLIDESHOW_DESCRIPTION = 'Play through OMB inscriptions in sequence.';
 
 export const metadata: Metadata = {
-  title: 'Slideshow · OMB Archive',
-  description: 'Play through OMB inscriptions in sequence.',
+  title: 'Slideshow',
+  description: SLIDESHOW_DESCRIPTION,
+  ...buildSocial({ title: `Slideshow · ${SITE_NAME}`, description: SLIDESHOW_DESCRIPTION }),
 };
 
 function parseSpeed(raw: string | undefined): Speed {

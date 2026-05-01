@@ -8,6 +8,7 @@ import Slideshow, {
   type Order,
   type Speed,
 } from '@/components/Slideshow/Slideshow';
+import { buildSocial } from '@/lib/metadata';
 
 function parseSpeed(raw: string | undefined): Speed {
   if (!raw) return DEFAULT_SPEED;
@@ -37,17 +38,27 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const row = getSlideshow(slug);
-  if (!row) return { title: 'Slideshow · OMB Archive' };
+  if (!row) return { title: 'Slideshow' };
   const label = row.title ? `"${row.title}"` : 'OMB Slideshow';
   const description = `${label} — ${row.image_count} inscription${row.image_count === 1 ? '' : 's'}.`;
   const title = row.title
     ? `${row.title} · OMB Slideshow`
     : `OMB Slideshow · ${row.image_count} image${row.image_count === 1 ? '' : 's'}`;
+  // First inscription in the snapshot drives the share image. If every id
+  // in the payload is absent from images.json (shouldn't happen in steady
+  // state but is defensible), buildSocial falls back to the site default.
+  const { images } = resolveSlideshowImages(row.ids);
+  const first = images[0]?.src;
   return {
-    title,
+    title: { absolute: title },
     description,
-    openGraph: { title, description, type: 'website' },
-    twitter: { card: 'summary', title, description },
+    ...buildSocial({
+      title,
+      description,
+      customImage: first
+        ? { url: first, width: 336, height: 336, alt: label }
+        : undefined,
+    }),
   };
 }
 

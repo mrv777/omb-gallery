@@ -12,11 +12,24 @@ import { matricaProfilesForEvents } from '@/lib/matricaOverlay';
 import type { InitialActivity } from '@/components/Activity/useActivityFeed';
 import type { ColorFilter } from '@/lib/types';
 import { colorParamForSql, parseColorParam } from '@/lib/colorFilter';
+import { SITE_NAME, buildSocial } from '@/lib/metadata';
 
-export const metadata: Metadata = {
-  title: 'Activity · OMB Archive',
-  description: 'On-chain activity for Ordinal Maxi Biz: transfers, sales, and inscriptions.',
-};
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<{ color?: string }>;
+}): Promise<Metadata> {
+  const sp = await searchParams;
+  const color = parseColorParam(sp.color);
+  const colorLabel = color !== 'all' ? `${color[0].toUpperCase()}${color.slice(1)} ` : '';
+  const title = `${colorLabel}Activity`;
+  const description = `On-chain activity for ${colorLabel ? `${colorLabel.trim().toLowerCase()} ` : ''}Ordinal Maxi Biz: transfers, sales, and inscriptions.`;
+  return {
+    title,
+    description,
+    ...buildSocial({ title: `${title} · ${SITE_NAME}`, description }),
+  };
+}
 
 // Skip build-time pre-rendering — DB lives at /data/app.db, not present in
 // the build container. Per-request SSR is fast and the client refreshHead

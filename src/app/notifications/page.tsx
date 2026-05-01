@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export const metadata: Metadata = {
-  title: 'Notifications · OMB Archive',
+  title: 'Notifications',
   description: 'Manage your notification subscriptions for OMB inscriptions.',
   robots: { index: false, follow: false },
 };

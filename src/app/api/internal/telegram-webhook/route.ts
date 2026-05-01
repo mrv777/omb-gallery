@@ -56,9 +56,9 @@ async function handleStart(chatId: number, payload: string): Promise<void> {
     if (result.reason === 'cap-exceeded') {
       body = `You've reached the maximum of ${PER_TARGET_LIMIT} watches. Use /list to see your subscriptions and /unwatch &lt;id&gt; to drop one before adding another.`;
     } else if (result.reason === 'expired') {
-      body = `<b>Welcome to OMB Archive alerts.</b>\n\nThat link expired (claims must be used within an hour). Visit <a href="https://ordinalmaxibiz.wiki">the archive</a> to set up a fresh watch.`;
+      body = `<b>Welcome to OMB Wiki alerts.</b>\n\nThat link expired (claims must be used within an hour). Visit <a href="https://ordinalmaxibiz.wiki">the wiki</a> to set up a fresh watch.`;
     } else {
-      body = `<b>Welcome to OMB Archive alerts.</b>\n\nThat link is no longer valid. Visit <a href="https://ordinalmaxibiz.wiki">the archive</a> to set up a watch.`;
+      body = `<b>Welcome to OMB Wiki alerts.</b>\n\nThat link is no longer valid. Visit <a href="https://ordinalmaxibiz.wiki">the wiki</a> to set up a watch.`;
     }
     await sendMessage({ chatId, text: body });
     return;
@@ -80,7 +80,7 @@ async function handleList(chatId: number): Promise<void> {
   if (subs.length === 0) {
     await sendMessage({
       chatId,
-      text: 'You have no active watches. Visit <a href="https://ordinalmaxibiz.wiki">the archive</a> to set one up.',
+      text: 'You have no active watches. Visit <a href="https://ordinalmaxibiz.wiki">the wiki</a> to set one up.',
     });
     return;
   }
@@ -118,7 +118,7 @@ async function handleManage(chatId: number): Promise<void> {
   if (subs.length === 0) {
     await sendMessage({
       chatId,
-      text: 'You have no active watches yet. Visit <a href="https://ordinalmaxibiz.wiki">the archive</a> to set one up.',
+      text: 'You have no active watches yet. Visit <a href="https://ordinalmaxibiz.wiki">the wiki</a> to set one up.',
     });
     return;
   }
@@ -210,7 +210,7 @@ export async function POST(req: NextRequest) {
         else
           await sendMessage({
             chatId,
-            text: 'Welcome to OMB Archive alerts. Visit <a href="https://ordinalmaxibiz.wiki">the archive</a> to set up a watch.',
+            text: 'Welcome to OMB Wiki alerts. Visit <a href="https://ordinalmaxibiz.wiki">the wiki</a> to set up a watch.',
           });
       } else if (text === '/list') {
         await handleList(chatId);
@@ -222,7 +222,7 @@ export async function POST(req: NextRequest) {
       } else if (text === '/help') {
         await sendMessage({
           chatId,
-          text: `<b>OMB Archive alerts</b>\n\n/list — show your watches\n/unwatch &lt;id&gt; — mute a watch\n/manage — get a magic link to manage from the web (any device)\n\nSet up new watches at <a href="https://ordinalmaxibiz.wiki">the archive</a>.`,
+          text: `<b>OMB Wiki alerts</b>\n\n/list — show your watches\n/unwatch &lt;id&gt; — mute a watch\n/manage — get a magic link to manage from the web (any device)\n\nSet up new watches at <a href="https://ordinalmaxibiz.wiki">the wiki</a>.`,
         });
       }
     }

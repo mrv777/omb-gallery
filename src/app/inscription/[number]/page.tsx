@@ -4,19 +4,27 @@ import { getStmts, type EventRow, type InscriptionRow } from '@/lib/db';
 import { lookupInscription } from '@/lib/inscriptionLookup';
 import SubpageShell from '@/components/SubpageShell';
 import InscriptionDetail from '@/components/InscriptionDetail/InscriptionDetail';
+import { buildSocial } from '@/lib/metadata';
 
 type Params = { number: string };
 
 export async function generateMetadata({ params }: { params: Promise<Params> }): Promise<Metadata> {
   const { number } = await params;
   const num = parseInt(number, 10);
-  if (!Number.isFinite(num)) return { title: 'Inscription · OMB Archive' };
+  if (!Number.isFinite(num)) return { title: 'Inscription' };
   const hit = lookupInscription(num);
+  const description = hit?.description
+    ? `OMB #${num} — ${hit.description}`
+    : `On-chain history for OMB inscription #${num}.`;
+  const title = `OMB #${num}`;
   return {
-    title: `#${num} · OMB Archive`,
-    description: hit?.description
-      ? `OMB #${num} — ${hit.description}`
-      : `On-chain history for OMB inscription #${num}.`,
+    title: `#${num}`,
+    description,
+    ...buildSocial({
+      title,
+      description,
+      customImage: hit ? { url: hit.full, width: 336, height: 336, alt: title } : undefined,
+    }),
   };
 }
 

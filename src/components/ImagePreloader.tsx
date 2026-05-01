@@ -106,7 +106,7 @@ export default function ImagePreloader({
     <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-ink-0 text-bone font-mono">
       <div className="text-center px-4">
         <div className="text-[11px] tracking-[0.24em] text-bone-dim uppercase mb-6">
-          omb archive / loading
+          omb wiki / loading
         </div>
 
         <div className="text-base tracking-[0.12em] text-bone">

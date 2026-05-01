@@ -8,6 +8,7 @@ import { getStmts, type GroupedHolderRow, type InscriptionRow } from '@/lib/db';
 import type { ApiHolder, ApiInscription } from '@/components/Activity/types';
 import type { LeaderboardItem } from '@/components/Explorer/useLeaderboardFeed';
 import { colorParamForSql, parseColorParam } from '@/lib/colorFilter';
+import { SITE_NAME, buildSocial } from '@/lib/metadata';
 
 const VALID: LeaderboardKey[] = [
   'most-transferred',
@@ -26,15 +27,22 @@ export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({
   params,
+  searchParams,
 }: {
   params: Promise<{ type: string }>;
+  searchParams: Promise<{ color?: string }>;
 }): Promise<Metadata> {
   const { type } = await params;
   const meta = LEADERBOARDS[type as LeaderboardKey];
-  if (!meta) return { title: 'Explorer · OMB Archive' };
+  if (!meta) return { title: 'Explorer' };
+  const sp = await searchParams;
+  const color = parseColorParam(sp.color);
+  const colorLabel = color !== 'all' ? `${color[0].toUpperCase()}${color.slice(1)} ` : '';
+  const title = `${colorLabel}${meta.title}`;
   return {
-    title: `${meta.title} · OMB Archive`,
+    title,
     description: meta.blurb,
+    ...buildSocial({ title: `${title} · ${SITE_NAME}`, description: meta.blurb }),
   };
 }
 

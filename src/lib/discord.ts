@@ -93,7 +93,7 @@ export async function pingWebhook(
   opts: { manageLink: string; burnLink: string; targetLabel: string }
 ): Promise<DiscordPostResult> {
   return postWebhook(url, {
-    username: 'OMB Archive',
+    username: 'OMB Wiki',
     embeds: [
       {
         title: 'Subscribed to OMB alerts',

@@ -908,6 +908,7 @@ type Stmts = {
   getAllInscriptionEvents: ReturnType<DB['prepare']>;
   otherInscriptionsByOwner: ReturnType<DB['prepare']>;
   getInscriptionsByOwner: ReturnType<DB['prepare']>;
+  firstInscriptionByOwner: ReturnType<DB['prepare']>;
   getEventsByAddress: ReturnType<DB['prepare']>;
   getEventsByAddressBefore: ReturnType<DB['prepare']>;
   countEventsByAddress: ReturnType<DB['prepare']>;
@@ -1275,6 +1276,18 @@ export function getStmts(): Stmts {
       WHERE current_owner = @owner
         AND collection_slug = @collection
       ORDER BY inscription_number ASC
+    `),
+
+    // Holder OG-image fast-path: lowest-numbered inscription this address
+    // owns in a given collection. Same access pattern as getInscriptionsByOwner
+    // but returns one row, one column — used by /holder/[address] metadata
+    // generation when no Matrica avatar is available.
+    firstInscriptionByOwner: db.prepare(`
+      SELECT inscription_number FROM inscriptions
+      WHERE current_owner = @owner
+        AND collection_slug = @collection
+      ORDER BY inscription_number ASC
+      LIMIT 1
     `),
 
     // Holder profile: events where the address shows up on either side of a

@@ -9,6 +9,8 @@ import {
   type WalletLinkRow,
 } from '@/lib/db';
 import { truncateAddr } from '@/lib/format';
+import { lookupInscription } from '@/lib/inscriptionLookup';
+import { buildSocial } from '@/lib/metadata';
 import { lookupWalletLabel } from '@/lib/walletLabels';
 import {
   encodeCursor,
@@ -53,9 +55,32 @@ export async function generateMetadata({ params }: { params: Promise<Params> }):
     : link?.username && !looksLikeAddress(link.username)
       ? link.username
       : truncateAddr(address, 8, 6);
+
+  // OG image cascade: Matrica avatar → first OMB the wallet holds → site
+  // default. Only hit the inscriptions table when the avatar is missing,
+  // which keeps the metadata cost to one indexed LIMIT-1 SELECT in the rare
+  // branch. For aggregated Matrica users we look up holdings on the URL-param
+  // address only — the goal is "an OMB this wallet holds" for preview, not
+  // a canonical pick across siblings.
+  let ogImage: string | null = link?.avatar_url ?? null;
+  if (!ogImage) {
+    const first = stmts.firstInscriptionByOwner.get({
+      owner: address,
+      collection: 'omb',
+    }) as { inscription_number: number } | undefined;
+    const hit = first ? lookupInscription(first.inscription_number) : null;
+    if (hit) ogImage = hit.full;
+  }
+
+  const description = `Holdings and on-chain activity for ${display}.`;
   return {
-    title: `${display} · OMB Archive`,
-    description: `Holdings and on-chain activity for ${display}.`,
+    title: display,
+    description,
+    ...buildSocial({
+      title: display,
+      description,
+      customImage: ogImage ? { url: ogImage, alt: display } : undefined,
+    }),
   };
 }
 
