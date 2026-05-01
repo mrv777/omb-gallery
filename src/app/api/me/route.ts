@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  discordWebhookSummaries,
-  parseSessionV2,
-  readCookieRaw,
-} from '@/lib/subscriberSession';
+import { discordWebhookSummaries, parseSessionV2, readCookieRaw } from '@/lib/subscriberSession';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';

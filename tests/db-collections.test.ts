@@ -46,9 +46,7 @@ describe('schema — collections + backfill_state + poll_state composite PK + ty
   it('creates idx_events_type_ts_id covering the typed activity feed sort', () => {
     const db = dbModule.getDb();
     const idx = db
-      .prepare(
-        `SELECT name FROM sqlite_master WHERE type='index' AND name='idx_events_type_ts_id'`
-      )
+      .prepare(`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_events_type_ts_id'`)
       .get();
     expect(idx).toBeDefined();
   });
@@ -74,9 +72,7 @@ describe('schema — collections + backfill_state + poll_state composite PK + ty
     const stmts = dbModule.getStmts();
     // Pick an arbitrary OMB row + Bravocados row, assign them the same fake owner.
     const omb = db
-      .prepare(
-        `SELECT inscription_number FROM inscriptions WHERE collection_slug='omb' LIMIT 1`
-      )
+      .prepare(`SELECT inscription_number FROM inscriptions WHERE collection_slug='omb' LIMIT 1`)
       .get() as { inscription_number: number };
     const bra = db
       .prepare(

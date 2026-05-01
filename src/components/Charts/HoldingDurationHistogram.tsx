@@ -1,13 +1,7 @@
 import type { HoldingDurationBucketRow } from '@/lib/db';
 import { shortenCount } from './chartUtils';
 
-const BUCKETS: HoldingDurationBucketRow['bucket'][] = [
-  '<1mo',
-  '1-6mo',
-  '6-12mo',
-  '1-2y',
-  '2y+',
-];
+const BUCKETS: HoldingDurationBucketRow['bucket'][] = ['<1mo', '1-6mo', '6-12mo', '1-2y', '2y+'];
 
 const VB_W = 320;
 const VB_H = 140;

@@ -107,9 +107,7 @@ export function HolderRow({ row, rank }: { row: ApiHolder; rank: number }) {
   // win over user-set Matrica handles. For ApiHolder rows the label is
   // looked up against any of the rolled-up wallets (typically just one).
   const manual =
-    lookupWalletLabel(primaryWallet) ??
-    row.wallets.map(lookupWalletLabel).find(Boolean) ??
-    null;
+    lookupWalletLabel(primaryWallet) ?? row.wallets.map(lookupWalletLabel).find(Boolean) ?? null;
   const showsUsername = !manual && row.is_user && row.username && !looksLikeAddress(row.username);
   const tooltip = manual
     ? `${manual.name}${manual.subtitle ? ` — ${manual.subtitle}` : ''}\n${primaryWallet}`
@@ -135,25 +133,25 @@ export function HolderRow({ row, rank }: { row: ApiHolder; rank: number }) {
           )}
         </span>
         <Tooltip content={tooltip}>
-        <span className="font-mono text-xs text-bone truncate">
-          {manual ? (
-            <>
-              <span className="text-accent-orange">{manual.name}</span>
-              {manual.subtitle && (
-                <span className="ml-1.5 text-[10px] text-bone-dim normal-case tracking-normal">
-                  {manual.subtitle}
-                </span>
-              )}
-            </>
-          ) : showsUsername ? (
-            row.username
-          ) : (
-            truncateAddr(primaryWallet, 8, 6)
-          )}
-          {!manual && row.is_user && row.wallets.length > 1 && (
-            <span className="ml-1.5 text-[10px] text-bone-dim">×{row.wallets.length}</span>
-          )}
-        </span>
+          <span className="font-mono text-xs text-bone truncate">
+            {manual ? (
+              <>
+                <span className="text-accent-orange">{manual.name}</span>
+                {manual.subtitle && (
+                  <span className="ml-1.5 text-[10px] text-bone-dim normal-case tracking-normal">
+                    {manual.subtitle}
+                  </span>
+                )}
+              </>
+            ) : showsUsername ? (
+              row.username
+            ) : (
+              truncateAddr(primaryWallet, 8, 6)
+            )}
+            {!manual && row.is_user && row.wallets.length > 1 && (
+              <span className="ml-1.5 text-[10px] text-bone-dim">×{row.wallets.length}</span>
+            )}
+          </span>
         </Tooltip>
         <span className="font-mono text-xs text-bone tabular-nums whitespace-nowrap">
           {row.inscription_count.toLocaleString()}

@@ -2,12 +2,7 @@ import type { Metadata } from 'next';
 import ActivityFeed from '@/components/Activity/ActivityFeed';
 import SubpageShell from '@/components/SubpageShell';
 import HeaderColorSwatches from '@/components/HeaderColorSwatches';
-import {
-  getStmts,
-  type EventRow,
-  type PollStateRow,
-  type TransferActivityDayRow,
-} from '@/lib/db';
+import { getStmts, type EventRow, type PollStateRow, type TransferActivityDayRow } from '@/lib/db';
 import { matricaProfilesForEvents } from '@/lib/matricaOverlay';
 import type { InitialActivity } from '@/components/Activity/useActivityFeed';
 import type { ColorFilter } from '@/lib/types';

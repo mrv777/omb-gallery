@@ -24,9 +24,7 @@ export function WalletsList({ wallets }: { wallets: string[] }) {
             onClick={() => setExpanded(v => !v)}
             className="text-[10px] tracking-[0.12em] uppercase text-bone-dim hover:text-bone"
           >
-            {expanded
-              ? 'show less'
-              : `show all (${wallets.length}) ↓`}
+            {expanded ? 'show less' : `show all (${wallets.length}) ↓`}
           </button>
         )}
       </div>

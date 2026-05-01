@@ -45,12 +45,15 @@ export default function TransferActivitySparkline({
     return `${x.toFixed(2)},${y.toFixed(2)}`;
   });
   const linePath = `M ${points.join(' L ')}`;
-  const areaPath =
-    `M 0,${VB_H} ` + points.map(p => `L ${p}`).join(' ') + ` L ${VB_W},${VB_H} Z`;
+  const areaPath = `M 0,${VB_H} ` + points.map(p => `L ${p}`).join(' ') + ` L ${VB_W},${VB_H} Z`;
 
   return (
     <div className="border border-ink-2 bg-ink-1 px-3 py-2 font-mono">
-      <Header total={total} todayLabel={last ? shortDate(last.date) : '—'} todayCount={last?.count} />
+      <Header
+        total={total}
+        todayLabel={last ? shortDate(last.date) : '—'}
+        todayCount={last?.count}
+      />
       <svg
         viewBox={`0 0 ${VB_W} ${VB_H}`}
         preserveAspectRatio="none"
@@ -118,7 +121,7 @@ function Header({
  * underlying timeseries has irregular gaps (it doesn't here, but stays robust). */
 function evenDateTicks(
   rows: TransferActivityDayRow[],
-  count: number,
+  count: number
 ): Array<{ pct: number; label: string }> {
   if (rows.length === 0 || count < 2) return [];
   const out: Array<{ pct: number; label: string }> = [];

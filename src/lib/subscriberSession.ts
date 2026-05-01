@@ -96,7 +96,11 @@ function parseV2Payload(payload: string): SubscriberSession[] | null {
   for (const s of (parsed as { sessions: unknown[] }).sessions) {
     if (!s || typeof s !== 'object') continue;
     const o = s as { c?: unknown; t?: unknown; i?: unknown };
-    if ((o.c !== 'telegram' && o.c !== 'discord') || typeof o.t !== 'string' || typeof o.i !== 'number') {
+    if (
+      (o.c !== 'telegram' && o.c !== 'discord') ||
+      typeof o.t !== 'string' ||
+      typeof o.i !== 'number'
+    ) {
       continue;
     }
     if (Date.now() / 1000 - o.i > COOKIE_MAX_AGE_SEC) continue;
@@ -139,7 +143,10 @@ export function mintSessionV2(sessions: SubscriberSession[]): string | null {
   return `${b64uEncode(payloadB)}.${b64uEncode(sig)}`;
 }
 
-export function mintSession(channel: SubscriberSession['channel'], channelTarget: string): string | null {
+export function mintSession(
+  channel: SubscriberSession['channel'],
+  channelTarget: string
+): string | null {
   return mintSessionV2([{ channel, channelTarget, issuedAt: Math.floor(Date.now() / 1000) }]);
 }
 
@@ -153,7 +160,7 @@ export function mintSession(channel: SubscriberSession['channel'], channelTarget
 export function addBinding(
   existingRaw: string | undefined | null,
   channel: SubscriberSession['channel'],
-  channelTarget: string,
+  channelTarget: string
 ): string | null {
   const existing = parseSessionV2(existingRaw);
   const now = Math.floor(Date.now() / 1000);
@@ -177,7 +184,7 @@ export function addBinding(
 export function findBinding(
   v2: SubscriberSessionV2 | null,
   channel: SubscriberSession['channel'],
-  channelTarget: string,
+  channelTarget: string
 ): SubscriberSession | undefined {
   if (!v2) return undefined;
   return v2.sessions.find(s => s.channel === channel && s.channelTarget === channelTarget);
@@ -185,7 +192,7 @@ export function findBinding(
 
 export function findBindingByChannel(
   v2: SubscriberSessionV2 | null,
-  channel: SubscriberSession['channel'],
+  channel: SubscriberSession['channel']
 ): SubscriberSession | undefined {
   if (!v2) return undefined;
   // Last binding for that channel wins (most recently added).
@@ -213,7 +220,7 @@ export function discordWebhookParts(url: string): { id: string; tokenSuffix: str
 // Iterates from the END so the most recent token wins for any duplicate ids
 // (defense for pre-existing dupes; addBinding now prevents new ones).
 export function discordWebhookSummaries(
-  v2: SubscriberSessionV2 | null,
+  v2: SubscriberSessionV2 | null
 ): Array<{ id: string; tokenSuffix: string }> {
   if (!v2) return [];
   const out: Array<{ id: string; tokenSuffix: string }> = [];
@@ -235,7 +242,7 @@ export function discordWebhookSummaries(
 
 export function findBindingByDiscordWebhookId(
   v2: SubscriberSessionV2 | null,
-  webhookId: string,
+  webhookId: string
 ): SubscriberSession | undefined {
   if (!v2) return undefined;
   if (!/^\d{10,25}$/.test(webhookId)) return undefined;
@@ -251,12 +258,7 @@ export function findBindingByDiscordWebhookId(
 
 export function cookieAttributes(): string {
   const isProd = process.env.NODE_ENV === 'production';
-  const parts = [
-    `Path=/`,
-    `Max-Age=${COOKIE_MAX_AGE_SEC}`,
-    `HttpOnly`,
-    `SameSite=Lax`,
-  ];
+  const parts = [`Path=/`, `Max-Age=${COOKIE_MAX_AGE_SEC}`, `HttpOnly`, `SameSite=Lax`];
   if (isProd) parts.push('Secure');
   return parts.join('; ');
 }

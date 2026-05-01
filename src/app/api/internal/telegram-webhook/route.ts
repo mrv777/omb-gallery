@@ -1,10 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  answerCallbackQuery,
-  sendMessage,
-  verifyWebhookSecret,
-  escapeHtml,
-} from '@/lib/telegram';
+import { answerCallbackQuery, sendMessage, verifyWebhookSecret, escapeHtml } from '@/lib/telegram';
 import {
   claimByToken,
   eventMaskLabel,

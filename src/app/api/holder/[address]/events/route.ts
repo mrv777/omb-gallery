@@ -15,10 +15,7 @@ const MAX_ADDR_LEN = 100;
 
 type Params = { address: string };
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<Params> }
-) {
+export async function GET(req: NextRequest, { params }: { params: Promise<Params> }) {
   const { address } = await params;
   if (!address || address.length > MAX_ADDR_LEN) {
     return NextResponse.json({ error: 'invalid address' }, { status: 400 });

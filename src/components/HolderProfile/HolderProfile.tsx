@@ -253,35 +253,35 @@ function OmbTile({ number }: { number: number }) {
   const tileBg = hit?.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
   return (
     <Tooltip content={`#${number}`}>
-    <Link
-      href={`/inscription/${number}`}
-      prefetch={false}
-      className={`block w-20 h-20 sm:w-24 sm:h-24 ${tileBg} overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors`}
-      // content-visibility:auto skips layout + paint for offscreen tiles;
-      // contain-intrinsic-size reserves the right slot so the flex-wrap
-      // layout still resolves up-front and scroll position stays stable.
-      // 96px matches the sm:w-24 tile (we use the larger value so the
-      // mobile-rendered 80px tiles still land within the reserved box).
-      style={{
-        contentVisibility: 'auto',
-        containIntrinsicSize: '96px 96px',
-      }}
-    >
-      {hit ? (
-        /* eslint-disable-next-line @next/next/no-img-element */
-        <img
-          src={hit.thumbnail}
-          alt={`#${number}`}
-          loading="lazy"
-          decoding="async"
-          className="w-full h-full object-cover"
-        />
-      ) : (
-        <div className="w-full h-full flex items-center justify-center font-mono text-[10px] text-bone-dim">
-          #{number}
-        </div>
-      )}
-    </Link>
+      <Link
+        href={`/inscription/${number}`}
+        prefetch={false}
+        className={`block w-20 h-20 sm:w-24 sm:h-24 ${tileBg} overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors`}
+        // content-visibility:auto skips layout + paint for offscreen tiles;
+        // contain-intrinsic-size reserves the right slot so the flex-wrap
+        // layout still resolves up-front and scroll position stays stable.
+        // 96px matches the sm:w-24 tile (we use the larger value so the
+        // mobile-rendered 80px tiles still land within the reserved box).
+        style={{
+          contentVisibility: 'auto',
+          containIntrinsicSize: '96px 96px',
+        }}
+      >
+        {hit ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={hit.thumbnail}
+            alt={`#${number}`}
+            loading="lazy"
+            decoding="async"
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center font-mono text-[10px] text-bone-dim">
+            #{number}
+          </div>
+        )}
+      </Link>
     </Tooltip>
   );
 }
@@ -298,9 +298,7 @@ function BravocadosTile({
   const href = inscriptionId
     ? `https://ordinals.com/inscription/${inscriptionId}`
     : `https://ordinals.com/inscription/${number}`;
-  const src = inscriptionId
-    ? `https://ordinals.com/content/${inscriptionId}`
-    : null;
+  const src = inscriptionId ? `https://ordinals.com/content/${inscriptionId}` : null;
   return (
     <Tooltip content={`Bravocados #${number}`}>
       <a
@@ -334,4 +332,3 @@ function Stat({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-

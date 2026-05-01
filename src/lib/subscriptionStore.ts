@@ -297,7 +297,10 @@ export function getExistingUnsubToken(
 
 export type CreatePendingArgs = Omit<CreateArgs, 'channelTarget'> & { placeholderTarget?: string };
 
-export function createPending(args: CreatePendingArgs): { row: SubscriptionRow; claimToken: string } {
+export function createPending(args: CreatePendingArgs): {
+  row: SubscriptionRow;
+  claimToken: string;
+} {
   const s = getStmts();
   const claimToken = newToken(16);
   const now = Math.floor(Date.now() / 1000);
@@ -396,7 +399,10 @@ export function findByUnsubToken(token: string): SubscriptionRow | null {
 }
 
 export function listByTarget(channel: Channel, channelTarget: string): SubscriptionRow[] {
-  return getStmts().listByTarget.all({ channel, channel_target: channelTarget }) as SubscriptionRow[];
+  return getStmts().listByTarget.all({
+    channel,
+    channel_target: channelTarget,
+  }) as SubscriptionRow[];
 }
 
 export function setStatus(id: number, status: SubStatus): void {
@@ -443,7 +449,11 @@ export function findMatchesForEvent(input: {
   }) as SubscriptionRow[];
 }
 
-export function recordDeliveryFailure(channel: Channel, channelTarget: string, dead: boolean): void {
+export function recordDeliveryFailure(
+  channel: Channel,
+  channelTarget: string,
+  dead: boolean
+): void {
   const s = getStmts();
   if (dead) {
     s.setStatusForTarget.run({ channel, channel_target: channelTarget, status: 'failed' });
@@ -452,7 +462,10 @@ export function recordDeliveryFailure(channel: Channel, channelTarget: string, d
   s.bumpFailCount.run({ channel, channel_target: channelTarget });
   // After 3 strikes, mark all subs for this target as failed. Done here as a
   // separate query so the bump is atomic in the row sense.
-  const row = getStmts().listByTarget.all({ channel, channel_target: channelTarget }) as SubscriptionRow[];
+  const row = getStmts().listByTarget.all({
+    channel,
+    channel_target: channelTarget,
+  }) as SubscriptionRow[];
   if (row.length && row[0].fail_count >= 3) {
     s.setStatusForTarget.run({ channel, channel_target: channelTarget, status: 'failed' });
   }

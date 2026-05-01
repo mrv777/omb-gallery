@@ -40,9 +40,11 @@ let updated = 0;
 let stillNull = 0;
 let parseFail = 0;
 
-const tx = DRY ? null : db.transaction(items => {
-  for (const it of items) update.run(it);
-});
+const tx = DRY
+  ? null
+  : db.transaction(items => {
+      for (const it of items) update.run(it);
+    });
 
 const pending = [];
 
@@ -77,9 +79,7 @@ for (const row of rows) {
 
 if (!DRY && pending.length > 0) tx(pending);
 
-console.log(
-  `done: updated=${updated} stillNull=${stillNull} parseFail=${parseFail} dry=${DRY}`
-);
+console.log(`done: updated=${updated} stillNull=${stillNull} parseFail=${parseFail} dry=${DRY}`);
 
 db.close();
 

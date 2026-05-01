@@ -17,12 +17,6 @@ export default function SafeImg({ src, fallback = null, alt = '', ...rest }: Pro
   if (!src || failed) return <>{fallback}</>;
   return (
     /* eslint-disable-next-line @next/next/no-img-element */
-    <img
-      key={src}
-      src={src}
-      alt={alt}
-      onError={() => setFailed(true)}
-      {...rest}
-    />
+    <img key={src} src={src} alt={alt} onError={() => setFailed(true)} {...rest} />
   );
 }

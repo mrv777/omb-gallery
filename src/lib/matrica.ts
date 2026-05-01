@@ -1,9 +1,6 @@
 import 'server-only';
 
-const MATRICA_BASE = (process.env.MATRICA_BASE_URL ?? 'https://api.matrica.io').replace(
-  /\/+$/,
-  ''
-);
+const MATRICA_BASE = (process.env.MATRICA_BASE_URL ?? 'https://api.matrica.io').replace(/\/+$/, '');
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_RETRIES = 5;
 
@@ -80,17 +77,18 @@ function normalizeWalletProfile(addr: string, json: unknown): MatricaWalletProfi
   if (!userId) return null;
 
   const username = pickString(userObj, ['username', 'vanityURL', 'handle']) ?? addr;
-  const profile = (userObj.profile && typeof userObj.profile === 'object'
-    ? userObj.profile
-    : null) as Record<string, unknown> | null;
+  const profile = (
+    userObj.profile && typeof userObj.profile === 'object' ? userObj.profile : null
+  ) as Record<string, unknown> | null;
   const rawPfp = profile ? pickString(profile, ['pfp']) : null;
   // Matrica returns a default-square placeholder for users who never set a
   // pfp. Treat it as "no avatar" so the UI can fall back cleanly.
   const avatar_url = rawPfp && !rawPfp.includes('default_square') ? rawPfp : null;
 
-  const network = obj.network && typeof obj.network === 'object'
-    ? (pickString(obj.network as Record<string, unknown>, ['symbol']) ?? 'UNKNOWN')
-    : 'UNKNOWN';
+  const network =
+    obj.network && typeof obj.network === 'object'
+      ? (pickString(obj.network as Record<string, unknown>, ['symbol']) ?? 'UNKNOWN')
+      : 'UNKNOWN';
 
   return {
     wallet_addr: addr,

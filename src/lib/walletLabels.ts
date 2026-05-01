@@ -3,10 +3,8 @@
 // source of truth for owners we want to suppress from aggregate views
 // (leaderboards, charts, activity) so they don't drown out community data.
 
-export const ORANGE_MINT_ADDRESS =
-  'bc1p4a29gzwlear4csc9sz6ll97j9yl7877tasy75evq8wm6r3admtqq3m72k0';
-export const TREASURY_ADDRESS =
-  'bc1pd6l0a8zg58wgvn30ef46mqmyrtdhwkeqz78kwhe52rk3nl48txhq05ke8f';
+export const ORANGE_MINT_ADDRESS = 'bc1p4a29gzwlear4csc9sz6ll97j9yl7877tasy75evq8wm6r3admtqq3m72k0';
+export const TREASURY_ADDRESS = 'bc1pd6l0a8zg58wgvn30ef46mqmyrtdhwkeqz78kwhe52rk3nl48txhq05ke8f';
 
 export type WalletLabel = {
   name: string;

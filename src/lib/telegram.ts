@@ -10,7 +10,9 @@ export type TelegramSendError =
   | { kind: 'http'; status: number; description: string }
   | { kind: 'network'; message: string };
 
-export type TelegramSendResult = { ok: true; messageId: number } | { ok: false; error: TelegramSendError };
+export type TelegramSendResult =
+  | { ok: true; messageId: number }
+  | { ok: false; error: TelegramSendError };
 
 type ApiResponse<T> = {
   ok: boolean;
@@ -47,7 +49,10 @@ export type SendArgs = {
   replyMarkup?: { inline_keyboard: InlineKeyboard };
 };
 
-async function callApi<T>(method: string, payload: Record<string, unknown>): Promise<TelegramSendResult & { raw?: T }> {
+async function callApi<T>(
+  method: string,
+  payload: Record<string, unknown>
+): Promise<TelegramSendResult & { raw?: T }> {
   const t = token();
   if (!t) return { ok: false, error: { kind: 'config' } };
   // 4s per call — fanout dispatches concurrently inside a 30s cron budget.
@@ -72,11 +77,17 @@ async function callApi<T>(method: string, payload: Record<string, unknown>): Pro
       return { ok: false, error: { kind: 'blocked', status: res.status, description: desc } };
     }
     if (res.status === 429) {
-      return { ok: false, error: { kind: 'rate-limit', retryAfterSec: json.parameters?.retry_after ?? 1 } };
+      return {
+        ok: false,
+        error: { kind: 'rate-limit', retryAfterSec: json.parameters?.retry_after ?? 1 },
+      };
     }
     return { ok: false, error: { kind: 'http', status: res.status, description: desc } };
   } catch (e) {
-    return { ok: false, error: { kind: 'network', message: e instanceof Error ? e.message : String(e) } };
+    return {
+      ok: false,
+      error: { kind: 'network', message: e instanceof Error ? e.message : String(e) },
+    };
   } finally {
     clearTimeout(timer);
   }
@@ -121,8 +132,5 @@ export function verifyWebhookSecret(headerValue: string | null): boolean {
 
 // HTML-escape a string for parse_mode=HTML.
 export function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }

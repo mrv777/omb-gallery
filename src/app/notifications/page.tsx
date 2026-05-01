@@ -1,10 +1,6 @@
 import { headers } from 'next/headers';
 import type { Metadata } from 'next';
-import {
-  discordWebhookParts,
-  parseSessionV2,
-  readCookieRaw,
-} from '@/lib/subscriberSession';
+import { discordWebhookParts, parseSessionV2, readCookieRaw } from '@/lib/subscriberSession';
 import { listByTarget, type SubscriptionRow } from '@/lib/subscriptionStore';
 import SubpageShell from '@/components/SubpageShell';
 import NotificationsList from '@/components/Notifications/NotificationsList';
@@ -51,9 +47,7 @@ export default async function NotificationsPage() {
   if (sessionV2) {
     for (const binding of sessionV2.sessions) {
       const parts =
-        binding.channel === 'discord'
-          ? discordWebhookParts(binding.channelTarget)
-          : null;
+        binding.channel === 'discord' ? discordWebhookParts(binding.channelTarget) : null;
       for (const s of listByTarget(binding.channel, binding.channelTarget)) {
         if (seen.has(s.id)) continue;
         seen.add(s.id);
@@ -72,9 +66,7 @@ export default async function NotificationsPage() {
     }
   }
 
-  const channels = sessionV2
-    ? Array.from(new Set(sessionV2.sessions.map(s => s.channel)))
-    : [];
+  const channels = sessionV2 ? Array.from(new Set(sessionV2.sessions.map(s => s.channel))) : [];
 
   return (
     <SubpageShell>
@@ -82,11 +74,7 @@ export default async function NotificationsPage() {
         <h1 className="font-mono text-sm uppercase tracking-[0.12em] text-bone mb-6">
           Notifications
         </h1>
-        <NotificationsList
-          hasSession={!!sessionV2}
-          channels={channels}
-          subs={subs}
-        />
+        <NotificationsList hasSession={!!sessionV2} channels={channels} subs={subs} />
       </div>
     </SubpageShell>
   );

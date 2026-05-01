@@ -43,7 +43,7 @@ export function fullDate(unix: number): string {
 export function timeTicks(
   tMin: number,
   tMax: number,
-  count: number,
+  count: number
 ): Array<{ t: number; pct: number; label: string }> {
   if (count < 2) return [];
   const span = Math.max(1, tMax - tMin);

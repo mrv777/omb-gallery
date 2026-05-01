@@ -51,7 +51,7 @@ export function fetchHolderEventsPage(
   const perWallet = limit * Math.max(2, wallets.length);
   const merged = new Map<number, EventRow>();
   for (const w of wallets) {
-    const rows = (
+    const rows =
       cursor == null
         ? (stmts.getEventsByAddress.all({ owner: w, limit: perWallet }) as EventRow[])
         : (stmts.getEventsByAddressBefore.all({
@@ -59,8 +59,7 @@ export function fetchHolderEventsPage(
             cursor_ts: cursor.ts,
             cursor_id: cursor.id,
             limit: perWallet,
-          }) as EventRow[])
-    );
+          }) as EventRow[]);
     for (const r of rows) merged.set(r.id, r);
   }
   const sorted = Array.from(merged.values()).sort(
@@ -119,10 +118,7 @@ export function fetchHolderColorHighlights(wallets: string[]): HolderColorHighli
   // event_id → accumulated rows. We collect all rows first so a multi-wallet
   // identity can sum cross-wallet deltas (one wallet contributes -1, another
   // contributes +1 → internal, net 0 → drop).
-  const byEvent = new Map<
-    number,
-    { rows: HolderColorHighlightRow[]; net: number }
-  >();
+  const byEvent = new Map<number, { rows: HolderColorHighlightRow[]; net: number }>();
   for (const w of wallets) {
     const rows = stmts.holderColorHighlights.all({ owner: w }) as HolderColorHighlightRow[];
     for (const r of rows) {

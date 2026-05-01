@@ -34,11 +34,18 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const token = url.searchParams.get('token');
   const burn = url.searchParams.get('burn') === '1';
-  if (!token) return htmlPage('Missing token', '<h1 class="err">Missing token</h1><p>This link is malformed.</p>');
+  if (!token)
+    return htmlPage(
+      'Missing token',
+      '<h1 class="err">Missing token</h1><p>This link is malformed.</p>'
+    );
 
   const row = findByUnsubToken(token);
   if (!row) {
-    return htmlPage('Not found', '<h1 class="err">Not found</h1><p>This subscription token is no longer valid.</p>');
+    return htmlPage(
+      'Not found',
+      '<h1 class="err">Not found</h1><p>This subscription token is no longer valid.</p>'
+    );
   }
 
   if (burn) {

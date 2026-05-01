@@ -69,7 +69,8 @@ function readKindAndTarget(body: Body): { kind: SubKind; targetKey: string } | {
   const targetKey = body.targetKey;
   if (kind === 'inscription' && !INSCRIPTION_RE.test(targetKey)) return { error: 'target-invalid' };
   if (kind === 'color' && !VALID_COLORS.has(targetKey)) return { error: 'target-invalid' };
-  if (kind === 'collection' && !VALID_COLLECTIONS.has(targetKey)) return { error: 'target-invalid' };
+  if (kind === 'collection' && !VALID_COLLECTIONS.has(targetKey))
+    return { error: 'target-invalid' };
   return { kind, targetKey };
 }
 
@@ -237,9 +238,7 @@ export async function POST(req: NextRequest) {
   const linkSession = mintSession('discord', webhookUrl);
 
   const ping = await pingWebhook(webhookUrl, {
-    manageLink: linkSession
-      ? manageLink(linkSession)
-      : `${siteUrl()}/notifications`,
+    manageLink: linkSession ? manageLink(linkSession) : `${siteUrl()}/notifications`,
     burnLink: burnLink(unsubToken),
     targetLabel: targetLabel(kind, targetKey),
   });

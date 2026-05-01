@@ -17,8 +17,7 @@ export default function ColorPortfolioBar({ holdings }: { holdings: InscriptionR
       <div className="flex items-baseline justify-between mb-2">
         <h3 className="text-[11px] tracking-[0.12em] uppercase text-bone">color spread</h3>
         <span className="text-[9px] tracking-[0.08em] uppercase text-bone-dim">
-          {total.toLocaleString()} OMBs · {totals.length}{' '}
-          {totals.length === 1 ? 'color' : 'colors'}
+          {total.toLocaleString()} OMBs · {totals.length} {totals.length === 1 ? 'color' : 'colors'}
         </span>
       </div>
       <div className="flex w-full h-6 border border-ink-2 overflow-hidden">

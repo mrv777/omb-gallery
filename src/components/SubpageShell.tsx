@@ -22,12 +22,7 @@ const NAV: { key: 'gallery' | 'activity' | 'explorer'; label: string; href: stri
   { key: 'explorer', label: 'explorer', href: '/explorer' },
 ];
 
-export default function SubpageShell({
-  active,
-  color = 'all',
-  headerControls,
-  children,
-}: Props) {
+export default function SubpageShell({ active, color = 'all', headerControls, children }: Props) {
   return (
     <div className="h-screen w-full overflow-y-auto bg-ink-0 text-bone">
       <header className="sticky top-0 z-10 bg-ink-1/95 backdrop-blur border-b border-ink-2">

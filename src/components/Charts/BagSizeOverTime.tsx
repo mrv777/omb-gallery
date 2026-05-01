@@ -257,13 +257,7 @@ function markerClasses(h: HolderColorHighlight): string {
   return `bg-ink-1 border-2 ${palette.border}`;
 }
 
-function Frame({
-  children,
-  hasHighlights,
-}: {
-  children: React.ReactNode;
-  hasHighlights: boolean;
-}) {
+function Frame({ children, hasHighlights }: { children: React.ReactNode; hasHighlights: boolean }) {
   return (
     <div className="border border-ink-2 bg-ink-1 px-3 py-3 font-mono mb-12">
       <div className="flex items-baseline justify-between mb-2">

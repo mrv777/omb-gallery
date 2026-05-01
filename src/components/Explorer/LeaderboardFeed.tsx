@@ -64,11 +64,7 @@ export default function LeaderboardFeed({ type, color, initial }: Props) {
       <ol className="grid grid-cols-1 md:grid-cols-2 md:gap-x-4 md:divide-y-0 divide-y divide-ink-2">
         {items.map((item, i) =>
           isHolders ? (
-            <HolderRow
-              key={(item as ApiHolder).group_key}
-              row={item as ApiHolder}
-              rank={i + 1}
-            />
+            <HolderRow key={(item as ApiHolder).group_key} row={item as ApiHolder} rank={i + 1} />
           ) : (
             <InscriptionRow
               key={(item as ApiInscription).inscription_number}

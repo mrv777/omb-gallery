@@ -238,26 +238,26 @@ export default function InscriptionDetail({
                 : 'bg-ink-2';
               return (
                 <Tooltip key={n} content={`#${n}`}>
-                <Link
-                  href={`/inscription/${n}`}
-                  prefetch={false}
-                  className={`block w-16 h-16 ${otherTileBg} overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors`}
-                >
-                  {otherHit ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img
-                      src={otherHit.thumbnail}
-                      alt={`#${n}`}
-                      loading="lazy"
-                      decoding="async"
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center font-mono text-[9px] text-bone-dim">
-                      #{n}
-                    </div>
-                  )}
-                </Link>
+                  <Link
+                    href={`/inscription/${n}`}
+                    prefetch={false}
+                    className={`block w-16 h-16 ${otherTileBg} overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors`}
+                  >
+                    {otherHit ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={otherHit.thumbnail}
+                        alt={`#${n}`}
+                        loading="lazy"
+                        decoding="async"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center font-mono text-[9px] text-bone-dim">
+                        #{n}
+                      </div>
+                    )}
+                  </Link>
                 </Tooltip>
               );
             })}

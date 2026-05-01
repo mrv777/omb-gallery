@@ -3,7 +3,8 @@ import 'server-only';
 // Strict shape match against the public Discord webhook surface. Server-side
 // enforcement is the SSRF defense — never relax this regex without thinking
 // hard about what an attacker could point us at.
-const WEBHOOK_RE = /^https:\/\/(discord\.com|discordapp\.com|canary\.discord\.com|ptb\.discord\.com)\/api\/webhooks\/\d{10,25}\/[\w-]{40,200}$/;
+const WEBHOOK_RE =
+  /^https:\/\/(discord\.com|discordapp\.com|canary\.discord\.com|ptb\.discord\.com)\/api\/webhooks\/\d{10,25}\/[\w-]{40,200}$/;
 
 export function isValidWebhookUrl(raw: string): boolean {
   return typeof raw === 'string' && WEBHOOK_RE.test(raw);
@@ -75,7 +76,10 @@ export async function postWebhook(url: string, body: Body): Promise<DiscordPostR
     const txt = await res.text().catch(() => '');
     return { ok: false, error: { kind: 'http', status: res.status, body: txt.slice(0, 200) } };
   } catch (e) {
-    return { ok: false, error: { kind: 'network', message: e instanceof Error ? e.message : String(e) } };
+    return {
+      ok: false,
+      error: { kind: 'network', message: e instanceof Error ? e.message : String(e) },
+    };
   } finally {
     clearTimeout(timer);
   }

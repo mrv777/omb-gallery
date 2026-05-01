@@ -55,9 +55,7 @@ export async function generateMetadata({
     ...buildSocial({
       title,
       description,
-      customImage: first
-        ? { url: first, width: 336, height: 336, alt: label }
-        : undefined,
+      customImage: first ? { url: first, width: 336, height: 336, alt: label } : undefined,
     }),
   };
 }

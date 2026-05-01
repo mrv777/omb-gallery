@@ -124,21 +124,21 @@ const ImageModal = memo(function ImageModal({
               className="h-11 w-11 flex items-center justify-center text-bone-dim hover:text-bone transition-colors"
               aria-label="Open detail page in new tab"
             >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.25"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <circle cx="8" cy="8" r="6.5" />
-              <line x1="8" y1="7" x2="8" y2="11.5" />
-              <line x1="8" y1="4.75" x2="8" y2="4.75" />
-            </svg>
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.25"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="8" cy="8" r="6.5" />
+                <line x1="8" y1="7" x2="8" y2="11.5" />
+                <line x1="8" y1="4.75" x2="8" y2="4.75" />
+              </svg>
             </a>
           </Tooltip>
           <NotificationButton
@@ -215,10 +215,7 @@ const ImageModal = memo(function ImageModal({
         onClick={e => e.stopPropagation()}
       >
         <Tooltip content={image.caption} side="top" align="start">
-          <div
-            className="text-bone uppercase max-w-3xl line-clamp-2"
-            style={{ minHeight: '2lh' }}
-          >
+          <div className="text-bone uppercase max-w-3xl line-clamp-2" style={{ minHeight: '2lh' }}>
             {image.caption ? `"${image.caption}"` : ''}
           </div>
         </Tooltip>

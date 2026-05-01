@@ -126,18 +126,20 @@ export default function NotificationButton({ kind, targetKey, label, className }
     let cancelled = false;
     fetch('/api/me')
       .then(r => r.json())
-      .then((j: {
-        hasSession?: boolean;
-        channels?: Channel[];
-        discordWebhooks?: DiscordWebhookSummary[];
-      }) => {
-        if (cancelled) return;
-        setSession({
-          hasSession: !!j.hasSession,
-          channels: Array.isArray(j.channels) ? j.channels : [],
-          discordWebhooks: Array.isArray(j.discordWebhooks) ? j.discordWebhooks : [],
-        });
-      })
+      .then(
+        (j: {
+          hasSession?: boolean;
+          channels?: Channel[];
+          discordWebhooks?: DiscordWebhookSummary[];
+        }) => {
+          if (cancelled) return;
+          setSession({
+            hasSession: !!j.hasSession,
+            channels: Array.isArray(j.channels) ? j.channels : [],
+            discordWebhooks: Array.isArray(j.discordWebhooks) ? j.discordWebhooks : [],
+          });
+        }
+      )
       .catch(() => {
         if (!cancelled) setSession({ hasSession: false, channels: [], discordWebhooks: [] });
       });
@@ -212,7 +214,9 @@ export default function NotificationButton({ kind, targetKey, label, className }
             return;
           }
           try {
-            const r = await fetch(`/api/subscribe/status?claim=${encodeURIComponent(j.claimToken)}`);
+            const r = await fetch(
+              `/api/subscribe/status?claim=${encodeURIComponent(j.claimToken)}`
+            );
             if (r.status === 200) {
               const sj = (await r.json()) as { status?: string };
               if (sj.status === 'claimed') {
@@ -221,8 +225,8 @@ export default function NotificationButton({ kind, targetKey, label, className }
                 setSession(prev =>
                   withChannel(
                     prev ?? { hasSession: false, channels: [], discordWebhooks: [] },
-                    'telegram',
-                  ),
+                    'telegram'
+                  )
                 );
               }
             }
@@ -281,12 +285,17 @@ export default function NotificationButton({ kind, targetKey, label, className }
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
         const msg =
-          j?.error === 'webhook-invalid' ? 'That Discord webhook URL looks wrong.' :
-          j?.error === 'webhook-unreachable' ? 'Could not reach that webhook — is it deleted?' :
-          j?.error === 'turnstile-failed' ? 'Verification failed — try again.' :
-          j?.error === 'rate-limited' ? 'Too many requests — wait a minute.' :
-          j?.error === 'cap-exceeded' ? 'This webhook already has the maximum number of watches (50).' :
-          j?.error ?? `Failed (${res.status}).`;
+          j?.error === 'webhook-invalid'
+            ? 'That Discord webhook URL looks wrong.'
+            : j?.error === 'webhook-unreachable'
+              ? 'Could not reach that webhook — is it deleted?'
+              : j?.error === 'turnstile-failed'
+                ? 'Verification failed — try again.'
+                : j?.error === 'rate-limited'
+                  ? 'Too many requests — wait a minute.'
+                  : j?.error === 'cap-exceeded'
+                    ? 'This webhook already has the maximum number of watches (50).'
+                    : (j?.error ?? `Failed (${res.status}).`);
         setState({ kind: 'error', message: msg });
         if (window.turnstile && tsId.current) window.turnstile.reset(tsId.current);
         setTsToken('');
@@ -347,7 +356,7 @@ export default function NotificationButton({ kind, targetKey, label, className }
         setState({ kind: 'error', message: 'Network error. Try again.' });
       }
     },
-    [session, kind, targetKey],
+    [session, kind, targetKey]
   );
 
   // Decide whether the URL the user's currently typing is one we already
@@ -506,9 +515,7 @@ export default function NotificationButton({ kind, targetKey, label, className }
                     onClick={startDiscordForm}
                     className="h-10 px-3 text-bone border border-ink-2 hover:border-bone transition-colors"
                   >
-                    {session?.channels.includes('discord')
-                      ? 'Add Discord webhook'
-                      : 'Discord'}
+                    {session?.channels.includes('discord') ? 'Add Discord webhook' : 'Discord'}
                   </button>
                 </div>
                 <p className="text-bone-dim normal-case tracking-normal mt-4 text-[11px]">
@@ -549,7 +556,8 @@ export default function NotificationButton({ kind, targetKey, label, className }
             {state.kind === 'discord-form' && (
               <>
                 <p className="text-bone-dim normal-case tracking-normal mb-3">
-                  Paste a Discord webhook URL. Create one in your server: Channel settings → Integrations → Webhooks.
+                  Paste a Discord webhook URL. Create one in your server: Channel settings →
+                  Integrations → Webhooks.
                 </p>
                 <input
                   type="url"
@@ -588,7 +596,8 @@ export default function NotificationButton({ kind, targetKey, label, className }
             {state.kind === 'success' && (
               <>
                 <p className="text-bone normal-case tracking-normal mb-4">
-                  ✅ Subscribed. You&rsquo;ll get alerts via {state.channel === 'telegram' ? 'Telegram' : 'Discord'} for {desc}.
+                  ✅ Subscribed. You&rsquo;ll get alerts via{' '}
+                  {state.channel === 'telegram' ? 'Telegram' : 'Discord'} for {desc}.
                 </p>
                 <div className="flex justify-end">
                   <button

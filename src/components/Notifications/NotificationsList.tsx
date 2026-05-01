@@ -164,10 +164,7 @@ export default function NotificationsList({ hasSession, channels, subs: initial 
   return (
     <div className="font-mono">
       <p className="text-[11px] text-bone-dim uppercase tracking-[0.08em] mb-4">
-        Sending to ·{' '}
-        {channels.length === 0
-          ? '—'
-          : channels.map(c => CHANNEL_LABEL[c]).join(' + ')}
+        Sending to · {channels.length === 0 ? '—' : channels.map(c => CHANNEL_LABEL[c]).join(' + ')}
       </p>
       <ul className="space-y-2">
         {subs.map(s => {

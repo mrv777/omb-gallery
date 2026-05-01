@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  findBinding,
-  parseSessionV2,
-  readCookieRaw,
-} from '@/lib/subscriberSession';
+import { findBinding, parseSessionV2, readCookieRaw } from '@/lib/subscriberSession';
 import {
   deleteSubscriptionById,
   MASK_LISTED,
@@ -29,13 +25,18 @@ type SubRow = {
   kind: 'inscription' | 'color' | 'collection';
 };
 
-function loadAndAuthorize(req: NextRequest, idParam: string): {
-  ok: true;
-  row: SubRow;
-} | {
-  ok: false;
-  res: NextResponse;
-} {
+function loadAndAuthorize(
+  req: NextRequest,
+  idParam: string
+):
+  | {
+      ok: true;
+      row: SubRow;
+    }
+  | {
+      ok: false;
+      res: NextResponse;
+    } {
   const id = parseInt(idParam, 10);
   if (!Number.isFinite(id)) {
     return { ok: false, res: NextResponse.json({ error: 'invalid-id' }, { status: 400 }) };
@@ -65,10 +66,7 @@ function loadAndAuthorize(req: NextRequest, idParam: string): {
 //   { status: 'active'|'muted'|'failed' }   → flip status
 //   { eventMask: number }                    → update event_mask (bits 1|2|4)
 // Either or both fields can be present in the same request.
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: idParam } = await params;
   const auth = loadAndAuthorize(req, idParam);
   if (!auth.ok) return auth.res;
@@ -135,10 +133,7 @@ export async function POST(
 // Permanent removal. Reversible only by re-subscribing from scratch (which is
 // fine — the unsub_token route already does the same destructive thing via
 // ?burn=1; this is just a per-row peer for the manage UI).
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: idParam } = await params;
   const auth = loadAndAuthorize(req, idParam);
   if (!auth.ok) return auth.res;

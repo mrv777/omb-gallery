@@ -168,9 +168,7 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
       <HolderProfile
         address={address}
         wallets={wallets}
-        username={
-          link?.username && !looksLikeAddress(link.username) ? link.username : null
-        }
+        username={link?.username && !looksLikeAddress(link.username) ? link.username : null}
         avatarUrl={link?.avatar_url ?? null}
         ombHoldings={ombHoldings}
         bravoHoldings={bravoHoldings}

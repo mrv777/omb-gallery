@@ -18,13 +18,7 @@ const COLOR_TILE_BG: Record<string, string> = {
   black: 'bg-accent-black/10',
 };
 
-export default function HolderEventRow({
-  event,
-  wallets,
-}: {
-  event: EventRow;
-  wallets: string[];
-}) {
+export default function HolderEventRow({ event, wallets }: { event: EventRow; wallets: string[] }) {
   const hit = lookupInscription(event.inscription_number);
   const tileBg = hit?.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
 
@@ -79,26 +73,26 @@ export default function HolderEventRow({
       }`}
     >
       <Tooltip content={`#${event.inscription_number}`}>
-      <Link
-        href={inscriptionLink}
-        prefetch={false}
-        className={`block w-12 h-12 ${tileBg} overflow-hidden border border-ink-2 hover:border-bone-dim shrink-0`}
-      >
-        {hit ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            src={hit.thumbnail}
-            alt={`#${event.inscription_number}`}
-            loading="lazy"
-            decoding="async"
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center font-mono text-[9px] text-bone-dim">
-            #{event.inscription_number}
-          </div>
-        )}
-      </Link>
+        <Link
+          href={inscriptionLink}
+          prefetch={false}
+          className={`block w-12 h-12 ${tileBg} overflow-hidden border border-ink-2 hover:border-bone-dim shrink-0`}
+        >
+          {hit ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={hit.thumbnail}
+              alt={`#${event.inscription_number}`}
+              loading="lazy"
+              decoding="async"
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center font-mono text-[9px] text-bone-dim">
+              #{event.inscription_number}
+            </div>
+          )}
+        </Link>
       </Tooltip>
 
       <Link

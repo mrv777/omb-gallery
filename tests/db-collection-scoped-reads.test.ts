@@ -82,7 +82,11 @@ describe('reader stmts scope to @collection', () => {
     const omb = stmts.getRecentEvents.all({ limit: 50, collection: 'omb', color: null }) as Array<{
       inscription_id: string;
     }>;
-    const bra = stmts.getRecentEvents.all({ limit: 50, collection: 'bravocados', color: null }) as Array<{
+    const bra = stmts.getRecentEvents.all({
+      limit: 50,
+      collection: 'bravocados',
+      color: null,
+    }) as Array<{
       inscription_id: string;
     }>;
 
@@ -98,9 +102,13 @@ describe('reader stmts scope to @collection', () => {
     const stmts = dbModule.getStmts();
 
     expect((stmts.countEvents.get({ collection: 'omb', color: null }) as { n: number }).n).toBe(1);
-    expect((stmts.countEvents.get({ collection: 'bravocados', color: null }) as { n: number }).n).toBe(1);
+    expect(
+      (stmts.countEvents.get({ collection: 'bravocados', color: null }) as { n: number }).n
+    ).toBe(1);
     expect((stmts.countHolders.get({ collection: 'omb', color: null }) as { n: number }).n).toBe(1);
-    expect((stmts.countHolders.get({ collection: 'bravocados', color: null }) as { n: number }).n).toBe(1);
+    expect(
+      (stmts.countHolders.get({ collection: 'bravocados', color: null }) as { n: number }).n
+    ).toBe(1);
   });
 
   it('topByTransfers and topHolders only see rows from the requested collection', () => {
@@ -108,10 +116,18 @@ describe('reader stmts scope to @collection', () => {
     seedFixtureRows(db);
     const stmts = dbModule.getStmts();
 
-    const ombTop = stmts.topByTransfers.all({ limit: 10, collection: 'omb', color: null }) as Array<{
+    const ombTop = stmts.topByTransfers.all({
+      limit: 10,
+      collection: 'omb',
+      color: null,
+    }) as Array<{
       collection_slug: string;
     }>;
-    const braTop = stmts.topByTransfers.all({ limit: 10, collection: 'bravocados', color: null }) as Array<{
+    const braTop = stmts.topByTransfers.all({
+      limit: 10,
+      collection: 'bravocados',
+      color: null,
+    }) as Array<{
       collection_slug: string;
     }>;
     expect(ombTop.length).toBe(1);
@@ -119,7 +135,11 @@ describe('reader stmts scope to @collection', () => {
     expect(ombTop[0].collection_slug).toBe('omb');
     expect(braTop[0].collection_slug).toBe('bravocados');
 
-    const ombHolders = stmts.topHolders.all({ limit: 10, collection: 'omb', color: null }) as Array<{
+    const ombHolders = stmts.topHolders.all({
+      limit: 10,
+      collection: 'omb',
+      color: null,
+    }) as Array<{
       wallet_addr: string;
     }>;
     expect(ombHolders.map(h => h.wallet_addr)).toEqual(['owner-omb']);
@@ -153,8 +173,14 @@ describe('reader stmts scope to @collection', () => {
     seedFixtureRows(db);
     const stmts = dbModule.getStmts();
 
-    expect(stmts.getRecentEvents.all({ limit: 50, collection: 'unknown', color: null }).length).toBe(0);
-    expect((stmts.countEvents.get({ collection: 'unknown', color: null }) as { n: number }).n).toBe(0);
-    expect(stmts.topByTransfers.all({ limit: 10, collection: 'unknown', color: null }).length).toBe(0);
+    expect(
+      stmts.getRecentEvents.all({ limit: 50, collection: 'unknown', color: null }).length
+    ).toBe(0);
+    expect((stmts.countEvents.get({ collection: 'unknown', color: null }) as { n: number }).n).toBe(
+      0
+    );
+    expect(stmts.topByTransfers.all({ limit: 10, collection: 'unknown', color: null }).length).toBe(
+      0
+    );
   });
 });

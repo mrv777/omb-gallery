@@ -147,12 +147,7 @@ export default function ActivityFeed({ initial, dailyTransfers, sparklineDays = 
       {events.length > 0 && (
         <div className="border border-ink-2 bg-ink-0">
           {events.map((ev, i) => (
-            <ActivityRow
-              key={ev.id}
-              event={ev}
-              groupedWithPrev={grouped[i]}
-              matrica={matrica}
-            />
+            <ActivityRow key={ev.id} event={ev} groupedWithPrev={grouped[i]} matrica={matrica} />
           ))}
         </div>
       )}

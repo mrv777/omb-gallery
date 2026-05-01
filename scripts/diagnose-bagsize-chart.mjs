@@ -101,9 +101,14 @@ SELECT
 
 const cols = analysis.split('|').map(s => parseInt(s, 10));
 const [
-  rawRows, eventRows, internalDropped, sumDeltas,
-  minPartialCurrent, maxPartialCurrent,
-  minPartialProposed, maxPartialProposed,
+  rawRows,
+  eventRows,
+  internalDropped,
+  sumDeltas,
+  minPartialCurrent,
+  maxPartialCurrent,
+  minPartialProposed,
+  maxPartialProposed,
   mixedBlocks,
 ] = cols;
 
@@ -117,8 +122,18 @@ console.log('currentBagSize    :', currentBagSize, '(OMB only)');
 console.log();
 console.log('raw rows / events / internal dropped:', rawRows, '/', eventRows, '/', internalDropped);
 console.log('sumDeltas:', sumDeltas, '  baseline (currentBag - sum):', baseline);
-console.log('current sort  -> running min/max:', baseline + minPartialCurrent, '/', baseline + maxPartialCurrent);
-console.log('proposed sort -> running min/max:', baseline + minPartialProposed, '/', baseline + maxPartialProposed);
+console.log(
+  'current sort  -> running min/max:',
+  baseline + minPartialCurrent,
+  '/',
+  baseline + maxPartialCurrent
+);
+console.log(
+  'proposed sort -> running min/max:',
+  baseline + minPartialProposed,
+  '/',
+  baseline + maxPartialProposed
+);
 console.log('same-block in/out blocks:', mixedBlocks);
 
 // 4. Per-inscription audit: find inscriptions where our recorded deltas
@@ -166,7 +181,9 @@ if (!audit) {
 } else {
   for (const line of audit.split('\n')) {
     const [num, recv, sent, owned, disc] = line.split('|');
-    console.log(`#${num.padEnd(10)} | ${recv.padStart(4)} | ${sent.padStart(4)} | ${owned.padStart(9)} | ${disc.padStart(11)}`);
+    console.log(
+      `#${num.padEnd(10)} | ${recv.padStart(4)} | ${sent.padStart(4)} | ${owned.padStart(9)} | ${disc.padStart(11)}`
+    );
   }
 }
 

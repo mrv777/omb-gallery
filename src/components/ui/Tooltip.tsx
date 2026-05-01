@@ -54,11 +54,7 @@ export function Tooltip({
           style={{ transformOrigin: 'var(--radix-tooltip-content-transform-origin)' }}
         >
           {content}
-          <TooltipPrimitive.Arrow
-            className="fill-ink-1 stroke-bone-dim/30"
-            width={8}
-            height={4}
-          />
+          <TooltipPrimitive.Arrow className="fill-ink-1 stroke-bone-dim/30" width={8} height={4} />
         </TooltipPrimitive.Content>
       </TooltipPrimitive.Portal>
     </TooltipPrimitive.Root>
