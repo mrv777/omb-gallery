@@ -423,14 +423,27 @@ async function classifyEvent(event, ctx = {}) {
   );
   if (sellerVin < 0) return { kind: 'skip', reason: 'coop:no-seller-input' };
 
-  // Build buyer-input cluster (all input addresses except seller's).
+  // Build buyer-input cluster (all input addresses except seller's), and
+  // total up the value buyers contributed. A real sale requires money flowing
+  // FROM a buyer; without that we're looking at a self-spend / custodial
+  // redistribution where the inscription rode along — and the "largest
+  // external output" is just an unrelated payout, not a sale price.
   const buyerCluster = new Set();
+  let buyerInputSats = 0n;
+  let buyerInputCount = 0;
   for (let i = 0; i < tx.vin.length; i++) {
-    const a = addressFromScriptPubKey(tx.vin[i].prevout?.scriptPubKey);
+    const vin = tx.vin[i];
+    const a = addressFromScriptPubKey(vin.prevout?.scriptPubKey);
     if (!a || a === event.old_owner) continue;
     buyerCluster.add(a);
+    buyerInputSats += btcToSats(vin.prevout?.value ?? 0);
+    buyerInputCount++;
   }
   buyerCluster.add(event.new_owner);
+
+  if (buyerInputCount === 0) {
+    return { kind: 'skip', reason: 'coop:no-buyer-input' };
+  }
 
   // External outputs = not paid to a buyer-cluster addr, not the inscription
   // destination.
@@ -459,6 +472,15 @@ async function classifyEvent(event, ctx = {}) {
   if (top.sats < minPrice) {
     return { kind: 'skip', reason: `coop:below-floor (${top.sats})` };
   }
+
+  // Buyer-can't-overpay guard: a buyer can't send out more than they put in.
+  // If the predicted price exceeds buyer's total input value, the "external"
+  // output isn't actually buyer money — usually a coinjoin / payout / flow
+  // tx where the inscription rode along.
+  if (Number(buyerInputSats) < top.sats) {
+    return { kind: 'skip', reason: 'coop:price-exceeds-buyer-input' };
+  }
+
   if (!second) return { kind: 'skip', reason: 'coop:sole-external' };
   const ratio = top.sats / Math.max(second.sats, 1);
   if (ratio < minRatio) {
@@ -473,6 +495,8 @@ async function classifyEvent(event, ctx = {}) {
     salePriceSats: top.sats,
     dominanceRatio: ratio,
     externalCount: externals.length,
+    buyerInputCount,
+    buyerInputSats: Number(buyerInputSats),
   };
 }
 
@@ -691,6 +715,8 @@ async function main() {
                   carry_idx: verdict.carryIdx,
                   dominance_ratio: Number(verdict.dominanceRatio.toFixed(2)),
                   external_count: verdict.externalCount,
+                  buyer_input_count: verdict.buyerInputCount,
+                  buyer_input_sats: verdict.buyerInputSats,
                   seller_payout_addr: verdict.sellerAddr,
                   inscription_holder_addr: ev.old_owner,
                   buyer_addr: ev.new_owner,
