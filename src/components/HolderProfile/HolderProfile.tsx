@@ -196,7 +196,11 @@ export default function HolderProfile({
 
       {ombHoldings.length > 0 && <ColorPortfolioBar holdings={ombHoldings} />}
 
-      <BagSizeOverTime deltas={ownershipDeltas} highlights={colorHighlights} />
+      <BagSizeOverTime
+        deltas={ownershipDeltas}
+        highlights={colorHighlights}
+        currentBagSize={ombHoldings.length}
+      />
 
       {/* Bravocados — secondary surface, intentionally muted */}
       {bravoHoldings.length > 0 && (

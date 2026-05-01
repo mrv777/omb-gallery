@@ -1667,22 +1667,29 @@ export function getStmts(): Stmts {
       ORDER BY date ASC
     `),
 
-    // Charts: bag-size-over-time deltas for one address. Each event involving
-    // this address contributes +1 (when address received) and/or -1 (when it
-    // sent). For internal transfers (same address on both sides) the +1/-1
-    // cancel correctly on the chart side. No cap — full history is small (a
-    // single number/timestamp pair per row) and we want the chart to span
-    // mint→now. Excludes 'listed' (no real ownership change). `event_id` is
-    // exposed so the chart can correlate highlight markers (see
-    // `holderColorHighlights`) to the running-total at that exact event.
+    // Charts: bag-size-over-time deltas for one address. Each OMB event
+    // involving this address contributes +1 (when address received) and/or
+    // -1 (when it sent). For internal transfers (same address on both sides)
+    // the +1/-1 cancel correctly on the chart side. Filtered to collection
+    // 'omb' so the chart matches the OMB count shown elsewhere on the page;
+    // bravocados movements would otherwise inflate the running total against
+    // a denominator the chart never names. No cap — full history is small
+    // and we want the chart to span first-event→now. Excludes 'listed'
+    // (no real ownership change). `event_id` is exposed so the chart can
+    // correlate highlight markers (see `holderColorHighlights`) to the
+    // running-total at that exact event.
     ownershipChangesByAddress: db.prepare(`
-      SELECT id AS event_id, block_timestamp, +1 AS delta
-      FROM events
-      WHERE new_owner = @owner AND event_type != 'listed'
+      SELECT e.id AS event_id, e.block_timestamp, +1 AS delta
+      FROM events e
+      JOIN inscriptions i ON i.inscription_number = e.inscription_number
+      WHERE e.new_owner = @owner AND e.event_type != 'listed'
+        AND i.collection_slug = 'omb'
       UNION ALL
-      SELECT id AS event_id, block_timestamp, -1 AS delta
-      FROM events
-      WHERE old_owner = @owner AND event_type != 'listed'
+      SELECT e.id AS event_id, e.block_timestamp, -1 AS delta
+      FROM events e
+      JOIN inscriptions i ON i.inscription_number = e.inscription_number
+      WHERE e.old_owner = @owner AND e.event_type != 'listed'
+        AND i.collection_slug = 'omb'
       ORDER BY block_timestamp ASC, event_id ASC
     `),
 

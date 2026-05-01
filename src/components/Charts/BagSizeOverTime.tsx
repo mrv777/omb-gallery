@@ -9,10 +9,14 @@ const TICK_COUNT = 5;
 
 /**
  * Step-line of bag size over time, derived from on-chain receive/send events.
- * Walks deltas chronologically, accumulating a running count. Each delta moves
- * the line up (+1) or down (-1) at the event's timestamp. The series is
- * "what we know from indexed events" — non-sale transfers from before the ord
- * poller started are missing, so the chart shows only the post-indexing window.
+ * Walks deltas chronologically, accumulating a running count.
+ *
+ * The line is *anchored* to the wallet's current OMB count: baseline is set so
+ * that after walking every delta we land exactly on `currentBagSize`. This
+ * matters because the indexer window is finite — non-sale transfers from
+ * before the ord poller started aren't in the events table — so a naive walk
+ * from 0 underreports holders whose bag predates the indexer. The line shape
+ * (timing of each in/out) is still accurate; only the baseline is inferred.
  *
  * Optional `highlights` overlays markers at red/blue OMB events: filled circle
  * for received, hollow stroke for sent. Markers sit on the line at the running
@@ -25,9 +29,12 @@ const TICK_COUNT = 5;
 export default function BagSizeOverTime({
   deltas,
   highlights = [],
+  currentBagSize,
 }: {
   deltas: OwnershipDeltaRow[];
   highlights?: HolderColorHighlight[];
+  /** Current OMB count for the wallet set; the line's right edge ends here. */
+  currentBagSize: number;
 }) {
   if (deltas.length === 0) {
     return (
@@ -46,7 +53,14 @@ export default function BagSizeOverTime({
   const sorted = [...deltas].sort(
     (a, b) => a.block_timestamp - b.block_timestamp || a.event_id - b.event_id
   );
-  let running = 0;
+  // baseline = bag size *before* the first indexed delta. By construction
+  // baseline + sum(deltas) === currentBagSize, so the walk ends on the right
+  // value. In pathological data (sumDeltas > currentBagSize, e.g. a missing
+  // outbound transfer) baseline can go negative; we don't clamp here since
+  // any clamp would silently break the end-anchoring invariant.
+  const sumDeltas = sorted.reduce((acc, d) => acc + d.delta, 0);
+  const baseline = currentBagSize - sumDeltas;
+  let running = baseline;
   const points: { t: number; v: number }[] = [];
   // event_id → running bag size *after* applying that event. For multi-row
   // events (internal transfers, where +1 and -1 land under the same id from
@@ -55,7 +69,6 @@ export default function BagSizeOverTime({
   const runningByEvent = new Map<number, number>();
   for (const d of sorted) {
     running += d.delta;
-    if (running < 0) running = 0;
     points.push({ t: d.block_timestamp, v: running });
     runningByEvent.set(d.event_id, running);
   }
@@ -65,13 +78,16 @@ export default function BagSizeOverTime({
   // eslint-disable-next-line react-hooks/purity
   const tMax = Math.max(sorted[sorted.length - 1].block_timestamp, Math.floor(Date.now() / 1000));
   const tSpan = Math.max(1, tMax - tMin);
-  const vMax = Math.max(1, ...points.map(p => p.v));
+  // vMax has to cover baseline, every running point, and currentBagSize. The
+  // last is redundant in the happy path (final running === currentBagSize)
+  // but defends the y-scale if we ever feed a sumDeltas > currentBagSize set.
+  const vMax = Math.max(1, baseline, currentBagSize, ...points.map(p => p.v));
 
   const x = (t: number) => ((t - tMin) / tSpan) * VB_W;
   const y = (v: number) => VB_H - (v / vMax) * VB_H;
 
-  let d = `M ${x(tMin).toFixed(2)},${y(0).toFixed(2)}`;
-  let prevV = 0;
+  let d = `M ${x(tMin).toFixed(2)},${y(baseline).toFixed(2)}`;
+  let prevV = baseline;
   for (const p of points) {
     d += ` L ${x(p.t).toFixed(2)},${y(prevV).toFixed(2)}`;
     d += ` L ${x(p.t).toFixed(2)},${y(p.v).toFixed(2)}`;
