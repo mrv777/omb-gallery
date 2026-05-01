@@ -1099,9 +1099,11 @@ export function getStmts(): Stmts {
     // sources. Used when satflow's `fillTx` (marketplace order tx) does not
     // match the actual UTXO-moving txid that ord observes — without this, the
     // primary (inscription_id, txid) lookup misses and we end up with a
-    // (transferred, sold) duplicate pair for the same effective transfer.
-    // Block_timestamp is part of the key to avoid mismatching an A→B→A→B owner
-    // cycle to an older event.
+    // duplicate row for the same effective transfer. Block_timestamp is part
+    // of the key to avoid mismatching an A→B→A→B owner cycle to an older
+    // event. Returns whichever event_type is present so callers can branch:
+    // a 'sold' match means already-counted (skip), a 'transferred' match
+    // means upgrade-in-place. Prefers 'sold' if both exist (degenerate state).
     findEventByMovement: db.prepare(`
       SELECT id, event_type, inscription_number, txid, block_height
       FROM events
@@ -1109,7 +1111,8 @@ export function getStmts(): Stmts {
         AND old_owner       IS @old_owner
         AND new_owner       IS @new_owner
         AND block_timestamp = @block_timestamp
-        AND event_type      = @event_type
+        AND event_type IN ('transferred','sold')
+      ORDER BY CASE event_type WHEN 'sold' THEN 0 ELSE 1 END
       LIMIT 1
     `),
 

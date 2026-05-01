@@ -672,28 +672,32 @@ function applyOrdStates(
         block_timestamp: ev.block_timestamp,
       });
 
-      // Secondary match: Satflow may have inserted a standalone 'sold' row
-      // earlier (with its `fillTx`, which differs from ord's UTXO-moving
-      // txid). If so, enrich that row with ord's authoritative txid +
-      // block_height + new_satpoint instead of inserting a duplicate
-      // 'transferred'. Aggregates were already bumped (sale_count) at the
-      // satflow standalone-insert; do not re-bump or re-notify here.
-      const existingSold = stmts.findEventByMovement.get({
+      // Secondary match: an event for this movement may already exist —
+      // either a 'sold' row that satflow inserted standalone earlier (with
+      // a synthetic fillTx that didn't match the UTXO-moving txid), or a
+      // 'transferred' row from a previous tick. In the 'sold' case, enrich
+      // it with ord's authoritative txid + block_height + new_satpoint and
+      // skip the insert. In the 'transferred' case, the row is already
+      // there (UNIQUE(inscription_id,txid) would no-op the insert anyway);
+      // skip explicitly to avoid re-bumping aggregates / re-notifying.
+      const existingMovement = stmts.findEventByMovement.get({
         inscription_id: ev.inscription_id,
         old_owner: ev.old_owner,
         new_owner: ev.new_owner,
         block_timestamp: ev.block_timestamp,
-        event_type: 'sold',
       }) as { id: number; event_type: string; inscription_number: number } | undefined;
 
-      if (existingSold) {
-        stmts.mergeOrdEnrichmentIntoSold.run({
-          id: existingSold.id,
-          txid: ev.txid,
-          block_height: ev.block_height,
-          block_timestamp: ev.block_timestamp,
-          new_satpoint: ev.new_satpoint,
-        });
+      if (existingMovement) {
+        if (existingMovement.event_type === 'sold') {
+          stmts.mergeOrdEnrichmentIntoSold.run({
+            id: existingMovement.id,
+            txid: ev.txid,
+            block_height: ev.block_height,
+            block_timestamp: ev.block_timestamp,
+            new_satpoint: ev.new_satpoint,
+          });
+        }
+        // 'transferred' branch: nothing to do — row already exists.
       } else {
         const r = stmts.insertEvent.run(ev);
         if (r.changes > 0) {
@@ -1306,19 +1310,19 @@ function applySalesTransaction(
       // Secondary match: Satflow's `fillTx` (marketplace order tx) sometimes
       // differs from the actual UTXO-moving txid that ord observes. The
       // primary (inscription_id, txid) lookup misses, but the same effective
-      // movement is already in the events table as a 'transferred' row from
-      // ord. Match by (inscription_id, owners, block_timestamp) and upgrade
-      // in-place — keep ord's authoritative txid + block_height; only stamp
-      // marketplace + price + raw_json.
+      // movement is already in the events table — either as a 'transferred'
+      // row from ord (upgrade in-place) or as a previously-merged 'sold' row
+      // whose txid was rewritten to ord's authoritative one (skip; a satflow
+      // re-poll with the original fillTx would otherwise reinsert).
       const movementMatch = stmts.findEventByMovement.get({
         inscription_id: sale.inscription_id,
         old_owner: sale.seller,
         new_owner: sale.buyer,
         block_timestamp: sale.block_timestamp,
-        event_type: 'transferred',
       }) as { id: number; event_type: string; inscription_number: number } | undefined;
 
       if (movementMatch) {
+        if (movementMatch.event_type === 'sold') continue;
         const r = stmts.upgradeEventToSoldById.run({
           id: movementMatch.id,
           marketplace: sale.marketplace,
