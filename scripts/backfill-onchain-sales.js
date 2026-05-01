@@ -366,6 +366,27 @@ async function classifyEvent(event, ctx = {}) {
     if (!match && acpInputs.length === 1) match = acpInputs[0];
 
     if (match) {
+      // Buyer-input guard (mirrors the coop layer's check at line ~444). A real
+      // sale needs money flowing in from outside the seller's wallet. Multisig
+      // wallets that sign each input independently for collaborative assembly
+      // routinely emit ANYONECANPAY witnesses on self-spends; without this
+      // guard those look identical to a marketplace PSBT and the largest
+      // self-output gets misread as a sale price (e.g. tx 3a41894a — 8.29 BTC
+      // self-consolidation flagged as a sale).
+      if (event.old_owner) {
+        let hasBuyerInput = false;
+        for (const v of tx.vin) {
+          const a = addressFromScriptPubKey(v.prevout?.scriptPubKey);
+          if (a && a !== event.old_owner) {
+            hasBuyerInput = true;
+            break;
+          }
+        }
+        if (!hasBuyerInput) {
+          return { kind: 'skip', reason: 'acp:no-buyer-input' };
+        }
+      }
+
       const paymentVout = tx.vout[match.idx];
       if (!paymentVout) return { kind: 'skip', reason: 'no-payment-vout' };
       const sellerAddr = addressFromScriptPubKey(paymentVout.scriptPubKey);
