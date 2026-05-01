@@ -1,7 +1,7 @@
 import type { HolderDistributionBucketRow } from '@/lib/db';
 import { shortenCount } from './chartUtils';
 
-const BUCKETS: HolderDistributionBucketRow['bucket'][] = ['1', '2-5', '6-10', '11-25', '26+'];
+const BUCKETS: HolderDistributionBucketRow['bucket'][] = ['1', '2', '3', '4', '5', '6+'];
 
 const VB_W = 320;
 const VB_H = 140;

@@ -1770,10 +1770,11 @@ export function getStmts(): Stmts {
         SELECT
           CASE
             WHEN cnt = 1 THEN '1'
-            WHEN cnt BETWEEN 2 AND 5 THEN '2-5'
-            WHEN cnt BETWEEN 6 AND 10 THEN '6-10'
-            WHEN cnt BETWEEN 11 AND 25 THEN '11-25'
-            ELSE '26+'
+            WHEN cnt = 2 THEN '2'
+            WHEN cnt = 3 THEN '3'
+            WHEN cnt = 4 THEN '4'
+            WHEN cnt = 5 THEN '5'
+            ELSE '6+'
           END AS bucket
         FROM (
           SELECT COUNT(*) AS cnt
@@ -2035,7 +2036,7 @@ export type GroupedHolderRow = {
 };
 
 export type HolderDistributionBucketRow = {
-  bucket: '1' | '2-5' | '6-10' | '11-25' | '26+';
+  bucket: '1' | '2' | '3' | '4' | '5' | '6+';
   wallet_count: number;
 };
 
