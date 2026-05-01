@@ -22,7 +22,7 @@ export default function HolderDistributionHistogram({
   const max = Math.max(1, ...counts);
 
   if (total === 0) {
-    return <ChartFrame title="holder distribution" subtitle="wallets by # held" empty />;
+    return <ChartFrame title="holder distribution" subtitle="holders by # held" empty />;
   }
 
   const innerW = VB_W - PAD_L - PAD_R;
@@ -31,12 +31,12 @@ export default function HolderDistributionHistogram({
   const barW = slot - BAR_GAP;
 
   return (
-    <ChartFrame title="holder distribution" subtitle="wallets by # held">
+    <ChartFrame title="holder distribution" subtitle="holders by # held">
       <svg
         viewBox={`0 0 ${VB_W} ${VB_H}`}
         className="w-full h-[140px] block"
         role="img"
-        aria-label="Histogram of wallets by inscription count held"
+        aria-label="Histogram of holders by inscription count held"
       >
         {/* Baseline */}
         <line
