@@ -887,6 +887,9 @@ type Stmts = {
   markInscriptionPolled: ReturnType<DB['prepare']>;
   // satflow event lookup
   findEventByInscriptionAndTxid: ReturnType<DB['prepare']>;
+  findEventByMovement: ReturnType<DB['prepare']>;
+  upgradeEventToSoldById: ReturnType<DB['prepare']>;
+  mergeOrdEnrichmentIntoSold: ReturnType<DB['prepare']>;
   listInscriptionIdToNumber: ReturnType<DB['prepare']>;
   // poll_state
   getPollState: ReturnType<DB['prepare']>;
@@ -1090,6 +1093,49 @@ export function getStmts(): Stmts {
       SELECT id, event_type, inscription_number
       FROM events
       WHERE inscription_id = @inscription_id AND txid = @txid
+    `),
+
+    // Secondary match for the same on-chain movement when txid differs across
+    // sources. Used when satflow's `fillTx` (marketplace order tx) does not
+    // match the actual UTXO-moving txid that ord observes — without this, the
+    // primary (inscription_id, txid) lookup misses and we end up with a
+    // (transferred, sold) duplicate pair for the same effective transfer.
+    // Block_timestamp is part of the key to avoid mismatching an A→B→A→B owner
+    // cycle to an older event.
+    findEventByMovement: db.prepare(`
+      SELECT id, event_type, inscription_number, txid, block_height
+      FROM events
+      WHERE inscription_id  = @inscription_id
+        AND old_owner       IS @old_owner
+        AND new_owner       IS @new_owner
+        AND block_timestamp = @block_timestamp
+        AND event_type      = @event_type
+      LIMIT 1
+    `),
+
+    // Used by satflow's secondary-match path: an existing 'transferred' row
+    // already has ord's authoritative txid + block_height. We only stamp
+    // marketplace + price + raw_json onto it; ord's chain data is preserved.
+    upgradeEventToSoldById: db.prepare(`
+      UPDATE events
+      SET event_type      = 'sold',
+          marketplace     = @marketplace,
+          sale_price_sats = @sale_price_sats,
+          raw_json        = COALESCE(@raw_json, raw_json)
+      WHERE id = @id AND event_type = 'transferred'
+    `),
+
+    // Used by ord's secondary-match path: a 'sold' row was inserted standalone
+    // by satflow earlier (with a synthetic fillTx). Replace the satflow txid
+    // with ord's authoritative on-chain txid + block_height + new_satpoint.
+    // Preserves marketplace / sale_price_sats / raw_json.
+    mergeOrdEnrichmentIntoSold: db.prepare(`
+      UPDATE events
+      SET txid            = @txid,
+          block_height    = @block_height,
+          block_timestamp = @block_timestamp,
+          new_satpoint    = COALESCE(@new_satpoint, new_satpoint)
+      WHERE id = @id AND event_type = 'sold'
     `),
 
     // Used by the satflow tick to resolve `inscription_id` (returned by

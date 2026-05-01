@@ -672,17 +672,41 @@ function applyOrdStates(
         block_timestamp: ev.block_timestamp,
       });
 
-      const r = stmts.insertEvent.run(ev);
-      if (r.changes > 0) {
-        inserted++;
-        stmts.bumpInscriptionAggregates.run({
-          inscription_number: ev.inscription_number,
-          event_type: ev.event_type,
-          sale_price_sats: ev.sale_price_sats,
+      // Secondary match: Satflow may have inserted a standalone 'sold' row
+      // earlier (with its `fillTx`, which differs from ord's UTXO-moving
+      // txid). If so, enrich that row with ord's authoritative txid +
+      // block_height + new_satpoint instead of inserting a duplicate
+      // 'transferred'. Aggregates were already bumped (sale_count) at the
+      // satflow standalone-insert; do not re-bump or re-notify here.
+      const existingSold = stmts.findEventByMovement.get({
+        inscription_id: ev.inscription_id,
+        old_owner: ev.old_owner,
+        new_owner: ev.new_owner,
+        block_timestamp: ev.block_timestamp,
+        event_type: 'sold',
+      }) as { id: number; event_type: string; inscription_number: number } | undefined;
+
+      if (existingSold) {
+        stmts.mergeOrdEnrichmentIntoSold.run({
+          id: existingSold.id,
+          txid: ev.txid,
+          block_height: ev.block_height,
           block_timestamp: ev.block_timestamp,
+          new_satpoint: ev.new_satpoint,
         });
-        // ord transfer detection is always live (no historical replay path).
-        stmts.enqueueNotify.run(r.lastInsertRowid as number);
+      } else {
+        const r = stmts.insertEvent.run(ev);
+        if (r.changes > 0) {
+          inserted++;
+          stmts.bumpInscriptionAggregates.run({
+            inscription_number: ev.inscription_number,
+            event_type: ev.event_type,
+            sale_price_sats: ev.sale_price_sats,
+            block_timestamp: ev.block_timestamp,
+          });
+          // ord transfer detection is always live (no historical replay path).
+          stmts.enqueueNotify.run(r.lastInsertRowid as number);
+        }
       }
       // Always update current state, even if event already existed (e.g. satflow
       // already inserted a 'sold' for this txid — we still need to track location).
@@ -1275,6 +1299,39 @@ function applySalesTransaction(
           // them to see the type change. Backfill upgrades are historical and
           // must NOT replay as fresh alerts.
           if (live) stmts.enqueueNotify.run(existing.id);
+        }
+        continue;
+      }
+
+      // Secondary match: Satflow's `fillTx` (marketplace order tx) sometimes
+      // differs from the actual UTXO-moving txid that ord observes. The
+      // primary (inscription_id, txid) lookup misses, but the same effective
+      // movement is already in the events table as a 'transferred' row from
+      // ord. Match by (inscription_id, owners, block_timestamp) and upgrade
+      // in-place — keep ord's authoritative txid + block_height; only stamp
+      // marketplace + price + raw_json.
+      const movementMatch = stmts.findEventByMovement.get({
+        inscription_id: sale.inscription_id,
+        old_owner: sale.seller,
+        new_owner: sale.buyer,
+        block_timestamp: sale.block_timestamp,
+        event_type: 'transferred',
+      }) as { id: number; event_type: string; inscription_number: number } | undefined;
+
+      if (movementMatch) {
+        const r = stmts.upgradeEventToSoldById.run({
+          id: movementMatch.id,
+          marketplace: sale.marketplace,
+          sale_price_sats: sale.sale_price_sats,
+          raw_json: sale.raw_json,
+        });
+        if (r.changes > 0) {
+          upgraded++;
+          stmts.unbumpTransferOnUpgrade.run({
+            inscription_number: movementMatch.inscription_number,
+            sale_price_sats: sale.sale_price_sats,
+          });
+          if (live) stmts.enqueueNotify.run(movementMatch.id);
         }
         continue;
       }
