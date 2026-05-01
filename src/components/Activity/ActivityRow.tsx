@@ -13,6 +13,7 @@ import {
   truncateAddr,
 } from '@/lib/format';
 import { lookupWalletLabel } from '@/lib/walletLabels';
+import SafeImg from '@/components/SafeImg';
 import { Tooltip } from '../ui/Tooltip';
 
 const COLOR_TILE_BG: Record<string, string> = {
@@ -33,7 +34,13 @@ type Props = {
 
 const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev, matrica }: Props) {
   const hit = lookupInscription(event.inscription_number);
-  const inscriptionLink = `/inscription/${event.inscription_number}`;
+  const isExternal = hit?.external ?? false;
+  // Non-OMB inscriptions don't have a /inscription/[n] page yet — link out
+  // to ordinals.com for those.
+  const inscriptionLink =
+    isExternal && hit?.inscriptionId
+      ? `https://ordinals.com/inscription/${hit.inscriptionId}`
+      : `/inscription/${event.inscription_number}`;
   const tileBg = hit && hit.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
 
   const isSold = event.event_type === 'sold';
@@ -62,38 +69,53 @@ const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev, matrica 
     >
       {/* Thumbnail (faded if same inscription as previous row) */}
       <Tooltip content={`#${event.inscription_number}`}>
-        <Link
+        <ThumbLink
           href={inscriptionLink}
-          prefetch={false}
+          isExternal={isExternal}
           className={`block w-12 h-12 ${tileBg} overflow-hidden border border-ink-2 hover:border-bone-dim transition-opacity ${
             groupedWithPrev ? 'opacity-25 hover:opacity-100' : ''
           }`}
         >
           {hit ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img
-              src={hit.thumbnail}
-              alt={`#${event.inscription_number}`}
-              loading="lazy"
-              decoding="async"
-              className="w-full h-full object-cover"
-            />
+            isExternal ? (
+              <SafeImg
+                src={hit.thumbnail}
+                alt={`#${event.inscription_number}`}
+                loading="lazy"
+                decoding="async"
+                className="w-full h-full object-cover"
+                fallback={
+                  <div className="w-full h-full flex items-center justify-center font-mono text-[9px] text-bone-dim">
+                    #{event.inscription_number}
+                  </div>
+                }
+              />
+            ) : (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={hit.thumbnail}
+                alt={`#${event.inscription_number}`}
+                loading="lazy"
+                decoding="async"
+                className="w-full h-full object-cover"
+              />
+            )
           ) : (
             <div className="w-full h-full flex items-center justify-center font-mono text-[9px] text-bone-dim">
               #{event.inscription_number}
             </div>
           )}
-        </Link>
+        </ThumbLink>
       </Tooltip>
 
       {/* Inscription number — fixed width so columns line up */}
-      <Link
+      <ThumbLink
         href={inscriptionLink}
-        prefetch={false}
+        isExternal={isExternal}
         className="font-mono text-xs text-bone tabular-nums hover:text-accent-orange w-20 shrink-0"
       >
         #{event.inscription_number}
-      </Link>
+      </ThumbLink>
 
       {/* Event type pill + price */}
       <div className="flex items-center gap-2 shrink-0">
@@ -146,6 +168,33 @@ const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev, matrica 
 });
 
 export default ActivityRow;
+
+/** Renders an internal `<Link>` for OMB rows and an external `<a target=_blank>`
+ * for non-OMB rows (which don't have a /inscription/[n] page yet). */
+function ThumbLink({
+  href,
+  isExternal,
+  className,
+  children,
+}: {
+  href: string;
+  isExternal: boolean;
+  className: string;
+  children: React.ReactNode;
+}) {
+  if (isExternal) {
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" className={className}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <Link href={href} prefetch={false} className={className}>
+      {children}
+    </Link>
+  );
+}
 
 /** Renders an address slot in the activity feed: links to /holder/[addr],
  * shows the Matrica `@username` when the address has a non-default profile,

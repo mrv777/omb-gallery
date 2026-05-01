@@ -202,9 +202,10 @@ export default function HolderProfile({
         currentBagSize={ombHoldings.length}
       />
 
-      {/* Bravocados — secondary surface, intentionally muted */}
+      {/* Bravocados — secondary surface; smaller header keeps the visual
+          hierarchy under the OMB section even with 64px tiles. */}
       {bravoHoldings.length > 0 && (
-        <div className="mb-12 opacity-90">
+        <div className="mb-12">
           <div className="flex items-baseline justify-between mb-3">
             <h2 className="font-mono text-[11px] tracking-[0.12em] uppercase text-bone-dim">
               also holds bravocados{' '}
@@ -305,7 +306,7 @@ function BravocadosTile({
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className="block w-10 h-10 bg-ink-2 overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors"
+        className="block w-16 h-16 bg-ink-2 overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors"
       >
         <SafeImg
           src={src}
@@ -314,7 +315,7 @@ function BravocadosTile({
           decoding="async"
           className="w-full h-full object-cover"
           fallback={
-            <div className="w-full h-full flex items-center justify-center font-mono text-[8px] text-bone-dim">
+            <div className="w-full h-full flex items-center justify-center font-mono text-[9px] text-bone-dim">
               #{number}
             </div>
           }

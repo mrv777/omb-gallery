@@ -8,6 +8,7 @@ import {
   memepoolTxLink,
   truncateAddr,
 } from '@/lib/format';
+import SafeImg from '@/components/SafeImg';
 import { Tooltip } from '../ui/Tooltip';
 
 const COLOR_TILE_BG: Record<string, string> = {
@@ -21,6 +22,7 @@ const COLOR_TILE_BG: Record<string, string> = {
 export default function HolderEventRow({ event, wallets }: { event: EventRow; wallets: string[] }) {
   const hit = lookupInscription(event.inscription_number);
   const tileBg = hit?.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
+  const isExternal = hit?.external ?? false;
 
   const isSold = event.event_type === 'sold';
   const isTransferred = event.event_type === 'transferred';
@@ -64,7 +66,48 @@ export default function HolderEventRow({ event, wallets }: { event: EventRow; wa
   const priceStr = isSold ? formatBtc(event.sale_price_sats) : '';
   const market = isSold ? marketplaceLabel(event.marketplace) : '';
   const txLink = memepoolTxLink(event.txid);
-  const inscriptionLink = `/inscription/${event.inscription_number}`;
+  // Non-OMB inscriptions don't have a /inscription/[n] page yet (the route is
+  // OMB-scoped at the DB layer). Link out to ordinals.com for those.
+  const inscriptionLink =
+    isExternal && hit?.inscriptionId
+      ? `https://ordinals.com/inscription/${hit.inscriptionId}`
+      : `/inscription/${event.inscription_number}`;
+  const tooltipLabel =
+    hit?.kind === 'bravocados' ? `Bravocados #${event.inscription_number}` : `#${event.inscription_number}`;
+
+  const thumb = hit ? (
+    isExternal ? (
+      <SafeImg
+        src={hit.thumbnail}
+        alt={tooltipLabel}
+        loading="lazy"
+        decoding="async"
+        className="w-full h-full object-cover"
+        fallback={
+          <div className="w-full h-full flex items-center justify-center font-mono text-[9px] text-bone-dim">
+            #{event.inscription_number}
+          </div>
+        }
+      />
+    ) : (
+      /* eslint-disable-next-line @next/next/no-img-element */
+      <img
+        src={hit.thumbnail}
+        alt={tooltipLabel}
+        loading="lazy"
+        decoding="async"
+        className="w-full h-full object-cover"
+      />
+    )
+  ) : (
+    <div className="w-full h-full flex items-center justify-center font-mono text-[9px] text-bone-dim">
+      #{event.inscription_number}
+    </div>
+  );
+
+  const thumbClass = `block w-12 h-12 ${tileBg} overflow-hidden border border-ink-2 hover:border-bone-dim shrink-0`;
+  const numberClass =
+    'font-mono text-xs text-bone tabular-nums hover:text-accent-orange w-20 shrink-0';
 
   return (
     <div
@@ -72,36 +115,37 @@ export default function HolderEventRow({ event, wallets }: { event: EventRow; wa
         isSold ? 'bg-accent-green/[0.03]' : ''
       }`}
     >
-      <Tooltip content={`#${event.inscription_number}`}>
-        <Link
-          href={inscriptionLink}
-          prefetch={false}
-          className={`block w-12 h-12 ${tileBg} overflow-hidden border border-ink-2 hover:border-bone-dim shrink-0`}
-        >
-          {hit ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img
-              src={hit.thumbnail}
-              alt={`#${event.inscription_number}`}
-              loading="lazy"
-              decoding="async"
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center font-mono text-[9px] text-bone-dim">
-              #{event.inscription_number}
-            </div>
-          )}
-        </Link>
+      <Tooltip content={tooltipLabel}>
+        {isExternal ? (
+          <a
+            href={inscriptionLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={thumbClass}
+          >
+            {thumb}
+          </a>
+        ) : (
+          <Link href={inscriptionLink} prefetch={false} className={thumbClass}>
+            {thumb}
+          </Link>
+        )}
       </Tooltip>
 
-      <Link
-        href={inscriptionLink}
-        prefetch={false}
-        className="font-mono text-xs text-bone tabular-nums hover:text-accent-orange w-20 shrink-0"
-      >
-        #{event.inscription_number}
-      </Link>
+      {isExternal ? (
+        <a
+          href={inscriptionLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={numberClass}
+        >
+          #{event.inscription_number}
+        </a>
+      ) : (
+        <Link href={inscriptionLink} prefetch={false} className={numberClass}>
+          #{event.inscription_number}
+        </Link>
+      )}
 
       <div className="flex items-center gap-2 shrink-0">
         <span

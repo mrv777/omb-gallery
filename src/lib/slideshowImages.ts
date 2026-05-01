@@ -21,7 +21,7 @@ export function resolveSlideshowImages(ids: string[]): {
       continue;
     }
     const hit = lookupInscription(num);
-    if (!hit) {
+    if (!hit || hit.kind !== 'omb' || !hit.color) {
       missing++;
       continue;
     }

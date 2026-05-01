@@ -11,6 +11,7 @@ import {
   ordinalsLink,
   truncateAddr,
 } from '@/lib/format';
+import SafeImg from '@/components/SafeImg';
 import { Tooltip } from '../ui/Tooltip';
 
 const COLOR_TILE_BG: Record<string, string> = {
@@ -25,9 +26,12 @@ type Props = { event: ApiEvent };
 
 const ActivityCard = memo(function ActivityCard({ event }: Props) {
   const hit = lookupInscription(event.inscription_number);
-  const inGallery = !!hit;
-  const link = inGallery ? hit.full : ordinalsLink(event.inscription_id, event.inscription_number);
-  const tileBg = inGallery && hit.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
+  const isOmb = hit?.kind === 'omb';
+  const isExternal = hit?.external ?? false;
+  // OMB hits open the full local image; bravocado / unknown rows open the
+  // ordinals.com inscription page in a new tab.
+  const link = isOmb ? hit.full : ordinalsLink(event.inscription_id, event.inscription_number);
+  const tileBg = hit && hit.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
 
   const eventLabel =
     event.event_type === 'sold'
@@ -52,14 +56,31 @@ const ActivityCard = memo(function ActivityCard({ event }: Props) {
       <a href={link} target="_blank" rel="noopener noreferrer" className="block">
         <div className={`relative aspect-square ${tileBg} overflow-hidden`}>
           {hit ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img
-              src={hit.thumbnail}
-              alt={`Inscription ${event.inscription_number}`}
-              loading="lazy"
-              decoding="async"
-              className="w-full h-full object-cover"
-            />
+            isExternal ? (
+              <SafeImg
+                src={hit.thumbnail}
+                alt={`Inscription ${event.inscription_number}`}
+                loading="lazy"
+                decoding="async"
+                className="w-full h-full object-cover"
+                fallback={
+                  <div className="w-full h-full flex items-center justify-center">
+                    <span className="font-mono text-bone-dim text-xs tracking-[0.12em]">
+                      #{event.inscription_number}
+                    </span>
+                  </div>
+                }
+              />
+            ) : (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={hit.thumbnail}
+                alt={`Inscription ${event.inscription_number}`}
+                loading="lazy"
+                decoding="async"
+                className="w-full h-full object-cover"
+              />
+            )
           ) : (
             <div className="w-full h-full flex items-center justify-center">
               <span className="font-mono text-bone-dim text-xs tracking-[0.12em]">

@@ -68,18 +68,29 @@ export function InscriptionRow({
   type: LeaderboardKey;
 }) {
   const hit = lookupInscription(row.inscription_number);
-  const link = `/inscription/${row.inscription_number}`;
+  const isExternal = hit?.external ?? false;
+  // Non-OMB rows can surface here (e.g. bravocados leaderboards). They don't
+  // have a /inscription/[n] page yet — link out to ordinals.com instead.
+  const link =
+    isExternal && hit?.inscriptionId
+      ? `https://ordinals.com/inscription/${hit.inscriptionId}`
+      : `/inscription/${row.inscription_number}`;
   const metric = renderInscriptionMetric(row, type);
-  return (
-    <li>
-      <Link
-        href={link}
-        prefetch={false}
-        className="grid grid-cols-[1.5rem_2.5rem_1fr_auto] items-center gap-3 px-4 py-2 hover:bg-ink-2 transition-colors"
-      >
-        <span className="font-mono text-[11px] text-bone-dim tabular-nums">{rank}</span>
-        <span className="block w-10 h-10 bg-ink-2 overflow-hidden">
-          {hit && (
+  const innerClass =
+    'grid grid-cols-[1.5rem_2.5rem_1fr_auto] items-center gap-3 px-4 py-2 hover:bg-ink-2 transition-colors';
+  const inner = (
+    <>
+      <span className="font-mono text-[11px] text-bone-dim tabular-nums">{rank}</span>
+      <span className="block w-10 h-10 bg-ink-2 overflow-hidden">
+        {hit &&
+          (isExternal ? (
+            <SafeImg
+              src={hit.thumbnail}
+              alt={`Inscription ${row.inscription_number}`}
+              loading="lazy"
+              className="w-full h-full object-cover"
+            />
+          ) : (
             /* eslint-disable-next-line @next/next/no-img-element */
             <img
               src={hit.thumbnail}
@@ -87,13 +98,25 @@ export function InscriptionRow({
               loading="lazy"
               className="w-full h-full object-cover"
             />
-          )}
-        </span>
-        <span className="font-mono text-xs text-bone tabular-nums truncate">
-          #{row.inscription_number}
-        </span>
-        <span className="font-mono text-xs text-bone tabular-nums whitespace-nowrap">{metric}</span>
-      </Link>
+          ))}
+      </span>
+      <span className="font-mono text-xs text-bone tabular-nums truncate">
+        #{row.inscription_number}
+      </span>
+      <span className="font-mono text-xs text-bone tabular-nums whitespace-nowrap">{metric}</span>
+    </>
+  );
+  return (
+    <li>
+      {isExternal ? (
+        <a href={link} target="_blank" rel="noopener noreferrer" className={innerClass}>
+          {inner}
+        </a>
+      ) : (
+        <Link href={link} prefetch={false} className={innerClass}>
+          {inner}
+        </Link>
+      )}
     </li>
   );
 }

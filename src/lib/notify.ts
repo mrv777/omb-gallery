@@ -230,7 +230,9 @@ function buildDiscordEmbeds(
       title: titleBits.join(' '),
       url: eventLinkUrl(ev),
       color: colorHex(ev.color),
-      thumbnail: lookup ? { url: `${siteUrl()}${lookup.thumbnail}` } : undefined,
+      thumbnail: lookup
+        ? { url: lookup.external ? lookup.thumbnail : `${siteUrl()}${lookup.thumbnail}` }
+        : undefined,
       fields,
       footer: {
         text: `${sub.kind === 'collection' ? 'all OMB' : sub.kind === 'color' ? `${sub.target_key} OMBs` : `OMB #${sub.target_key}`} · tx ${ev.txid.slice(0, 10)}…`,
