@@ -1058,16 +1058,16 @@ export function getStmts(): Stmts {
     `),
 
     // Update current_owner from a Satflow standalone-insert sale, but only if
-    // the sale is at least as recent as anything we already know about. Run
+    // the sale is strictly newer than anything we already know about. Run
     // BEFORE bumpInscriptionAggregates (which advances last_movement_at).
-    // This keeps backfill (asc-sorted, oldest-first) from clobbering a more
-    // recent owner already set by ord or a later satflow row.
+    // Strict `>` (not `>=`) so a backfilled historical sale can't clobber the
+    // chain-final owner when sale + transfer share a block (timestamps tie).
     setInscriptionOwnerIfNewer: db.prepare(`
       UPDATE inscriptions
       SET current_owner = @new_owner
       WHERE inscription_number = @inscription_number
         AND @new_owner IS NOT NULL
-        AND (last_movement_at IS NULL OR @block_timestamp >= last_movement_at)
+        AND (last_movement_at IS NULL OR @block_timestamp > last_movement_at)
     `),
 
     listInscriptionsForPoll: db.prepare(`

@@ -310,7 +310,7 @@ async function main() {
        SET current_owner = @new_owner
      WHERE inscription_number = @inscription_number
        AND @new_owner IS NOT NULL
-       AND (last_movement_at IS NULL OR @block_timestamp >= last_movement_at)
+       AND (last_movement_at IS NULL OR @block_timestamp > last_movement_at)
   `);
   const bumpAggregatesSold = db.prepare(`
     UPDATE inscriptions SET
