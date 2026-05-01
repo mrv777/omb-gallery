@@ -445,7 +445,11 @@ async function main() {
         });
         reasons[reason] = (reasons[reason] ?? 0) + 1;
         if (events.length > 0) {
-          const r = flush(events);
+          // .immediate() forces BEGIN IMMEDIATE so the SELECT-then-INSERT/UPDATE
+          // window can't race against the live diff-poll cron writing to the
+          // same DB. Without it, a UNIQUE collision rolls back the entire
+          // per-inscription flush.
+          const r = flush.immediate(events);
           totalInserted += r.inserted;
           totalUpdated += r.updated;
         }
