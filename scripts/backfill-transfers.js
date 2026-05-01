@@ -245,27 +245,34 @@ async function walkInscription({ inscription_id, inscription_number, satpoint, h
     const oldOwner = addressFromScriptPubKey(carryVin.prevout?.scriptPubKey);
 
     let height = null;
-    let timestamp = tx.blocktime ?? tx.time ?? null;
+    let timestamp = null;
     if (tx.blockhash) {
+      timestamp = tx.blocktime ?? tx.time ?? null;
       try {
         const h = await getHeader(tx.blockhash);
         height = h.height;
         if (timestamp == null) timestamp = h.time;
       } catch {
-        /* unconfirmed or pruned-header: leave null */
+        /* pruned-header (shouldn't happen with unpruned bitcoind): leave null */
       }
     }
 
-    events.push({
-      inscription_id,
-      inscription_number,
-      txid: cur.txid,
-      block_height: height,
-      block_timestamp: timestamp ?? 0,
-      new_owner: newOwner,
-      old_owner: oldOwner,
-      new_satpoint: `${cur.txid}:${cur.vout}:${cur.offset.toString()}`,
-    });
+    // Skip writing an event for an unconfirmed (mempool) tx: events.block_timestamp
+    // is NOT NULL and we'd be making up a value. The diff-poller will catch
+    // this transfer once it confirms. We still continue walking backward so
+    // earlier confirmed transfers in the chain get captured.
+    if (timestamp != null) {
+      events.push({
+        inscription_id,
+        inscription_number,
+        txid: cur.txid,
+        block_height: height,
+        block_timestamp: timestamp,
+        new_owner: newOwner,
+        old_owner: oldOwner,
+        new_satpoint: `${cur.txid}:${cur.vout}:${cur.offset.toString()}`,
+      });
+    }
     hops.value++;
 
     cur = {
@@ -284,14 +291,39 @@ async function main() {
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000');
 
+  // Two paths:
+  //   1) New event (no existing row for inscription_id+txid): INSERT a fresh
+  //      'transferred' row tagged with source='ord-history-backfill' in
+  //      raw_json. Bump aggregates.
+  //   2) Existing event: UPDATE old_owner / new_owner / block_height /
+  //      block_timestamp / new_satpoint with backwalk values (the chain is
+  //      authoritative; the diff-poll's old_owner can be stale by N hops if
+  //      multiple transfers happened between ticks). DO NOT touch event_type,
+  //      marketplace, sale_price_sats, raw_json — those carry satflow-only
+  //      metadata for `sold` events that backfill cannot regenerate.
+  //      DO NOT bump aggregates (already counted at original insert time).
+  const lookupEvent = db.prepare(`
+    SELECT id, old_owner, new_owner, block_height, block_timestamp, new_satpoint
+      FROM events WHERE inscription_id = @inscription_id AND txid = @txid
+  `);
   const insertEvent = db.prepare(`
-    INSERT OR IGNORE INTO events (
+    INSERT INTO events (
       inscription_id, inscription_number, event_type, block_height, block_timestamp,
       new_satpoint, old_owner, new_owner, marketplace, sale_price_sats, txid, raw_json
     ) VALUES (
       @inscription_id, @inscription_number, 'transferred', @block_height, @block_timestamp,
-      @new_satpoint, @old_owner, @new_owner, NULL, NULL, @txid, NULL
+      @new_satpoint, @old_owner, @new_owner, NULL, NULL, @txid,
+      json_object('source','ord-history-backfill')
     )
+  `);
+  const updateEvent = db.prepare(`
+    UPDATE events SET
+      old_owner       = @old_owner,
+      new_owner       = @new_owner,
+      block_height    = @block_height,
+      block_timestamp = @block_timestamp,
+      new_satpoint    = @new_satpoint
+    WHERE id = @id
   `);
   const bumpAggregates = db.prepare(`
     UPDATE inscriptions SET
@@ -308,9 +340,35 @@ async function main() {
 
   const flush = db.transaction(rows => {
     let inserted = 0;
+    let updated = 0;
     for (const r of rows) {
-      const res = insertEvent.run(r);
-      if (res.changes > 0) {
+      const existing = lookupEvent.get({
+        inscription_id: r.inscription_id,
+        txid: r.txid,
+      });
+      if (existing) {
+        // Only UPDATE if any of the fields would actually change. Saves
+        // pointless writes on re-runs and keeps `created_at` stable for
+        // health/auditing.
+        const stale =
+          existing.old_owner !== r.old_owner ||
+          existing.new_owner !== r.new_owner ||
+          existing.block_height !== r.block_height ||
+          existing.block_timestamp !== r.block_timestamp ||
+          existing.new_satpoint !== r.new_satpoint;
+        if (stale) {
+          updateEvent.run({
+            id: existing.id,
+            old_owner: r.old_owner,
+            new_owner: r.new_owner,
+            block_height: r.block_height,
+            block_timestamp: r.block_timestamp,
+            new_satpoint: r.new_satpoint,
+          });
+          updated++;
+        }
+      } else {
+        insertEvent.run(r);
         inserted++;
         bumpAggregates.run({
           inscription_number: r.inscription_number,
@@ -322,7 +380,7 @@ async function main() {
         });
       }
     }
-    return inserted;
+    return { inserted, updated };
   });
 
   // Test RPC + ord up front so we fail fast.
@@ -363,6 +421,7 @@ async function main() {
   let processed = 0;
   let totalHops = 0;
   let totalInserted = 0;
+  let totalUpdated = 0;
   let errors = 0;
   const reasons = Object.create(null);
   const startedAt = Date.now();
@@ -386,8 +445,9 @@ async function main() {
         });
         reasons[reason] = (reasons[reason] ?? 0) + 1;
         if (events.length > 0) {
-          const inserted = flush(events);
-          totalInserted += inserted;
+          const r = flush(events);
+          totalInserted += r.inserted;
+          totalUpdated += r.updated;
         }
         totalHops += hopsCounter.value;
       } catch (e) {
@@ -403,7 +463,7 @@ async function main() {
         const eta = Math.round((targets.length - processed) / rate);
         console.log(
           `[backfill] ${processed}/${targets.length} ` +
-            `inserted=${totalInserted} hops=${totalHops} err=${errors} ` +
+            `inserted=${totalInserted} updated=${totalUpdated} hops=${totalHops} err=${errors} ` +
             `${rate.toFixed(1)}/s eta=${eta}s`
         );
       }
@@ -414,7 +474,7 @@ async function main() {
 
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
   console.log(
-    `[backfill] DONE in ${elapsed}s — inserted=${totalInserted} hops=${totalHops} err=${errors}`
+    `[backfill] DONE in ${elapsed}s — inserted=${totalInserted} updated=${totalUpdated} hops=${totalHops} err=${errors}`
   );
   console.log('[backfill] reasons:', reasons);
 
