@@ -21,7 +21,9 @@
 //   --dry-run                 Don't write to the DB. Reports what would change.
 //   --max-pages=N             Stop after N pages (default: walk to end).
 //   --from-height=H           Forge a starting cursor at block height H.
-//   --rps=R                   Requests per second cap (default 0.5 = one per 2s).
+//   --rps=R                   Requests per second cap (default 2 = one per 500ms).
+//                             ord.net's dev confirmed this is fine — pages are
+//                             cached at the edge so we're not hammering origin.
 //   --early-exit-streak=N     Stop after N consecutive pages with zero new
 //                             writes. Default 3. Lets re-runs finish quickly
 //                             once we've reached the satflow-API era we
@@ -45,7 +47,7 @@ function parseArgs(argv) {
     dryRun: false,
     maxPages: null,
     fromHeight: null,
-    rps: 0.5,
+    rps: 2,
     earlyExitStreak: 3,
   };
   for (const a of argv) {
