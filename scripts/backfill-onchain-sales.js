@@ -77,11 +77,19 @@ function parseArgs(argv) {
     until: null,
     maxEvents: null,
     verbose: false,
+    auditSold: false,
   };
   for (const a of argv) {
     if (a === '--dry-run') out.dryRun = true;
     else if (a === '--verbose') out.verbose = true;
-    else if (a.startsWith('--inscription-number=')) {
+    else if (a === '--audit-sold') {
+      // Cross-source validation mode: include `sold` rows in the work set and
+      // compare the heuristic's classification against existing sale_price_sats.
+      // Forces dry-run — never writes. Used to verify the detector recognizes
+      // known-good sales before trusting it on `transferred` rows.
+      out.auditSold = true;
+      out.dryRun = true;
+    } else if (a.startsWith('--inscription-number=')) {
       const n = parseInt(a.slice('--inscription-number='.length), 10);
       if (Number.isFinite(n)) out.inscriptionNumber = n;
     } else if (a.startsWith('--since=')) out.since = parseInt(a.slice('--since='.length), 10);
@@ -145,23 +153,6 @@ function addressFromScriptPubKey(spk) {
   if (typeof spk.address === 'string' && spk.address.length > 0) return spk.address;
   if (Array.isArray(spk.addresses) && typeof spk.addresses[0] === 'string') return spk.addresses[0];
   return null;
-}
-
-// new_satpoint format: <txid>:<vout>:<offset>
-function parseSatpoint(s) {
-  if (!s || typeof s !== 'string') return null;
-  const parts = s.split(':');
-  if (parts.length < 3) return null;
-  const vout = parseInt(parts[1], 10);
-  let offset;
-  try {
-    offset = BigInt(parts[2]);
-  } catch {
-    return null;
-  }
-  if (!/^[0-9a-f]{64}$/i.test(parts[0])) return null;
-  if (!Number.isFinite(vout) || vout < 0) return null;
-  return { txid: parts[0].toLowerCase(), vout, offset };
 }
 
 // ---------------- sighash detection ----------------
@@ -294,37 +285,27 @@ function* iterateScriptPushes(hex) {
   }
 }
 
-// ---------------- carryIdx + classification ----------------
+// ---------------- classification ----------------
 
-// Compute which input index of `tx` carries the inscription described by
-// `(vout, offset)`. Mirrors the absOffset walk in backfill-transfers.js.
-function findCarryIdx(tx, vout, offset) {
-  if (!Array.isArray(tx.vin) || !Array.isArray(tx.vout)) return null;
-  if (vout >= tx.vout.length) return null;
-  let absOffset = offset;
-  for (let i = 0; i < vout; i++) {
-    absOffset += btcToSats(tx.vout[i].value);
-  }
-  let acc = 0n;
-  for (let i = 0; i < tx.vin.length; i++) {
-    const vin = tx.vin[i];
-    if (!vin.prevout) return { reason: 'no-prevout' };
-    const v = btcToSats(vin.prevout.value);
-    if (absOffset < acc + v) {
-      return { idx: i };
-    }
-    acc += v;
-  }
-  return { reason: 'sat-not-in-inputs' };
-}
+// Marketplace listings on Bitcoin ordinals (ME, OKX, Magisat, Satflow) commit
+// the seller's input with SIGHASH_SINGLE | ANYONECANPAY (0x83), which binds
+// vout[carryIdx] as the seller's payment. We identify the seller's input by
+// scanning all inputs for an ACP-flagged signature and matching the input's
+// prevout address against `event.old_owner` (the inscription's previous
+// holder, populated by the chain walker / live diff-poller). This sidesteps
+// the satpoint-offset ambiguity that breaks `txid:vout` two-part satpoints.
+//
+// Sellers commonly route the payout to a different address than their
+// inscription-holding wallet (e.g. P2SH payout vs P2TR holding for ME), so
+// vout[carryIdx]'s recipient is NOT compared to old_owner. Instead the
+// recipient must NOT equal `event.new_owner` (don't pay the buyer) and the
+// payment must clear a dust floor.
+const MIN_SALE_PRICE_SATS = 10_000; // 0.0001 BTC; below this is padding/dust
 
 // Returns a classification object for one event:
 //   { kind: 'sale', flag, sigSource, carryIdx, sellerAddr, salePriceSats }
 //   { kind: 'skip', reason: <string> }
 async function classifyEvent(event) {
-  const sat = parseSatpoint(event.new_satpoint);
-  if (!sat) return { kind: 'skip', reason: 'bad-satpoint' };
-
   let tx;
   try {
     tx = await rpc('getrawtransaction', [event.txid, 2]);
@@ -338,42 +319,50 @@ async function classifyEvent(event) {
     return { kind: 'skip', reason: 'coinbase' };
   }
 
-  const carry = findCarryIdx(tx, sat.vout, sat.offset);
-  if (!carry || carry.reason) {
-    return { kind: 'skip', reason: carry?.reason ?? 'no-carry' };
+  // Find all inputs with at least one ACP-flagged signature.
+  const acpInputs = [];
+  for (let i = 0; i < tx.vin.length; i++) {
+    const vin = tx.vin[i];
+    if (!vin) continue;
+    const cands = extractSighashCandidates(vin.txinwitness, vin.scriptSig?.hex);
+    const acp = cands.find(c => isAcpFlag(c.flag));
+    if (!acp) continue;
+    const prevAddr = addressFromScriptPubKey(vin.prevout?.scriptPubKey);
+    acpInputs.push({ idx: i, flag: acp.flag, source: acp.source, prevAddr });
   }
-  const carryIdx = carry.idx;
+  if (acpInputs.length === 0) return { kind: 'skip', reason: 'no-acp-sighash' };
 
-  const sellerInput = tx.vin[carryIdx];
-  const candidates = extractSighashCandidates(sellerInput.txinwitness, sellerInput.scriptSig?.hex);
-  const acpHit = candidates.find(c => isAcpFlag(c.flag));
-  if (!acpHit) return { kind: 'skip', reason: 'no-acp-sighash' };
+  // Identify the seller's input. Strong path: match prevAddr to old_owner.
+  // Fallback: if the tx has exactly one ACP-signed input, accept it (single-
+  // listing case where old_owner may be null or in a non-comparable format).
+  let match = null;
+  if (event.old_owner) {
+    match = acpInputs.find(a => a.prevAddr === event.old_owner) ?? null;
+  }
+  if (!match) {
+    if (acpInputs.length === 1) match = acpInputs[0];
+    else return { kind: 'skip', reason: 'no-matching-acp-input' };
+  }
 
-  // The signed input commits to the same-index output as the seller's payment
-  // (SIGHASH_SINGLE-style). Confirm shape: that output must go to old_owner.
-  const paymentVout = tx.vout[carryIdx];
+  const paymentVout = tx.vout[match.idx];
   if (!paymentVout) return { kind: 'skip', reason: 'no-payment-vout' };
   const sellerAddr = addressFromScriptPubKey(paymentVout.scriptPubKey);
   if (!sellerAddr) return { kind: 'skip', reason: 'unparseable-payment-spk' };
 
-  if (carryIdx === sat.vout) {
-    // Inscription would land in the seller's payment output → contradiction.
-    return { kind: 'skip', reason: 'carry-eq-vout' };
-  }
-  if (!event.old_owner) return { kind: 'skip', reason: 'null-old-owner' };
-  if (sellerAddr !== event.old_owner) {
-    return {
-      kind: 'skip',
-      reason: `seller-mismatch (${sellerAddr.slice(0, 12)}…≠${event.old_owner.slice(0, 12)}…)`,
-    };
+  if (event.new_owner && sellerAddr === event.new_owner) {
+    return { kind: 'skip', reason: 'pays-buyer' };
   }
 
   const salePriceSats = Number(btcToSats(paymentVout.value));
+  if (salePriceSats < MIN_SALE_PRICE_SATS) {
+    return { kind: 'skip', reason: `dust-payment (${salePriceSats} sats)` };
+  }
+
   return {
     kind: 'sale',
-    flag: acpHit.flag,
-    sigSource: acpHit.source,
-    carryIdx,
+    flag: match.flag,
+    sigSource: match.source,
+    carryIdx: match.idx,
     sellerAddr,
     salePriceSats,
   };
@@ -440,11 +429,12 @@ async function main() {
 
   // ---- target selection ----
 
-  const where = [
-    "e.event_type = 'transferred'",
-    'e.txid IS NOT NULL',
-    'e.new_satpoint IS NOT NULL',
-  ];
+  const where = ['e.txid IS NOT NULL'];
+  if (ARGS.auditSold) {
+    where.push("e.event_type IN ('transferred','sold')");
+  } else {
+    where.push("e.event_type = 'transferred'");
+  }
   const params = {};
   if (ARGS.inscriptionNumber != null) {
     where.push('e.inscription_number = @num');
@@ -458,19 +448,24 @@ async function main() {
     where.push('e.block_timestamp <= @until');
     params.until = ARGS.until;
   }
+  // In audit mode pull `event_type` and existing `sale_price_sats` so the
+  // worker can compare heuristic vs DB price; ORDER RANDOM so the sample is
+  // representative of the full corpus rather than time-skewed.
   let sql = `
     SELECT e.id, e.inscription_id, e.inscription_number, e.txid,
-           e.new_satpoint, e.old_owner, e.new_owner, e.block_timestamp
+           e.new_satpoint, e.old_owner, e.new_owner, e.block_timestamp,
+           e.event_type, e.sale_price_sats
       FROM events e
      WHERE ${where.join(' AND ')}
-     ORDER BY e.block_timestamp DESC, e.id DESC
+     ORDER BY ${ARGS.auditSold ? 'RANDOM()' : 'e.block_timestamp DESC, e.id DESC'}
   `;
   if (ARGS.maxEvents != null) sql += ` LIMIT ${ARGS.maxEvents}`;
   const targets = db.prepare(sql).all(params);
 
   console.log(
     `[onchain-heuristic] db=${DB_PATH} dryRun=${ARGS.dryRun} concurrency=${CONCURRENCY} ` +
-      `targets=${targets.length} (transferred-only)`
+      `targets=${targets.length} ` +
+      (ARGS.auditSold ? '(AUDIT MODE — transferred+sold)' : '(transferred-only)')
   );
   if (targets.length === 0) {
     console.log('[onchain-heuristic] nothing to do');
@@ -488,6 +483,13 @@ async function main() {
   const reasons = Object.create(null);
   const startedAt = Date.now();
   let pendingBatch = [];
+
+  // Audit-mode counters: agreement between heuristic and existing DB sales.
+  let auditAgree = 0;
+  let auditPriceMismatch = 0;
+  let auditMissedSale = 0; // detector skipped a row that DB already has as 'sold'
+  let auditFalseFlag = 0; // detector flagged a row DB has as 'transferred'
+  const auditDeltaSamples = [];
 
   function flushPending() {
     if (pendingBatch.length === 0) return;
@@ -508,6 +510,38 @@ async function main() {
       const ev = targets[i];
       try {
         const verdict = await classifyEvent(ev);
+        if (ARGS.auditSold) {
+          // Audit mode: compare verdict against the row's existing event_type.
+          if (ev.event_type === 'sold') {
+            if (verdict.kind === 'sale') {
+              const dbPrice = ev.sale_price_sats ?? 0;
+              const delta = verdict.salePriceSats - dbPrice;
+              if (Math.abs(delta) <= 1) auditAgree++;
+              else {
+                auditPriceMismatch++;
+                if (auditDeltaSamples.length < 10) {
+                  auditDeltaSamples.push({
+                    n: ev.inscription_number,
+                    txid: ev.txid.slice(0, 16),
+                    heur: verdict.salePriceSats,
+                    db: dbPrice,
+                    delta,
+                  });
+                }
+              }
+            } else {
+              auditMissedSale++;
+              reasons[`miss:${verdict.reason}`] = (reasons[`miss:${verdict.reason}`] ?? 0) + 1;
+            }
+          } else if (verdict.kind === 'sale') {
+            auditFalseFlag++;
+          } else {
+            reasons[`xfer-skip:${verdict.reason}`] =
+              (reasons[`xfer-skip:${verdict.reason}`] ?? 0) + 1;
+          }
+          processed++;
+          continue;
+        }
         if (verdict.kind === 'sale') {
           detected++;
           const rawJson = JSON.stringify({
@@ -515,7 +549,9 @@ async function main() {
             sighash: '0x' + verdict.flag.toString(16).padStart(2, '0'),
             sig_source: verdict.sigSource,
             carry_idx: verdict.carryIdx,
-            seller_addr: verdict.sellerAddr,
+            seller_payout_addr: verdict.sellerAddr,
+            inscription_holder_addr: ev.old_owner,
+            buyer_addr: ev.new_owner,
             price_sats: verdict.salePriceSats,
             detector_version: DETECTOR_VERSION,
           });
@@ -569,12 +605,31 @@ async function main() {
   flushPending();
 
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
-  console.log(
-    `[onchain-heuristic] DONE in ${elapsed}s — ` +
-      `processed=${processed} detected=${detected} upgraded=${upgradedTotal} err=${errors}` +
-      (ARGS.dryRun ? ' (DRY RUN — no writes)' : '')
-  );
-  console.log('[onchain-heuristic] skip reasons:', reasons);
+  if (ARGS.auditSold) {
+    const totalSold = auditAgree + auditPriceMismatch + auditMissedSale;
+    const totalXfer = processed - totalSold;
+    console.log(
+      `[onchain-heuristic] AUDIT DONE in ${elapsed}s — sold-rows=${totalSold} xfer-rows=${totalXfer}`
+    );
+    console.log(
+      `  on existing 'sold' rows:   agree=${auditAgree}  price-mismatch=${auditPriceMismatch}  missed=${auditMissedSale}`
+    );
+    console.log(
+      `  on existing 'transferred': would-flip-to-sold=${auditFalseFlag}  left-alone=${totalXfer - auditFalseFlag}`
+    );
+    if (auditDeltaSamples.length) {
+      console.log('  price-mismatch samples:');
+      for (const d of auditDeltaSamples) console.log('   ', d);
+    }
+    console.log('[onchain-heuristic] skip-reason histogram:', reasons);
+  } else {
+    console.log(
+      `[onchain-heuristic] DONE in ${elapsed}s — ` +
+        `processed=${processed} detected=${detected} upgraded=${upgradedTotal} err=${errors}` +
+        (ARGS.dryRun ? ' (DRY RUN — no writes)' : '')
+    );
+    console.log('[onchain-heuristic] skip reasons:', reasons);
+  }
 
   db.close();
 }
