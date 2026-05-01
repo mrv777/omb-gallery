@@ -5,6 +5,12 @@ import { Tooltip } from '../ui/Tooltip';
 
 const VB_W = 600;
 const VB_H = 140;
+// Bottom inset is larger than top because the y=0 gridline + path stroke both
+// land near the floor; without it, a 1.4px non-scaling stroke is half-clipped
+// by the viewBox edge and the line appears to disappear into the chart bottom.
+const PAD_TOP = 4;
+const PAD_BOTTOM = 6;
+const PLOT_H = VB_H - PAD_TOP - PAD_BOTTOM;
 const TICK_COUNT = 5;
 
 /**
@@ -46,13 +52,28 @@ export default function BagSizeOverTime({
     );
   }
 
-  // Sort by (timestamp ASC, event_id ASC) so internal-transfer +1/-1 pairs
-  // collapse to net 0 at exactly the same x position. event_id is the same
-  // for the +1 and -1 rows of an internal transfer (one row per direction
-  // per wallet), so the secondary sort keeps determinism across walks.
-  const sorted = [...deltas].sort(
-    (a, b) => a.block_timestamp - b.block_timestamp || a.event_id - b.event_id
-  );
+  // Aggregate deltas by event_id before walking. For multi-wallet identities
+  // (Matrica-linked sets), an internal transfer between two wallets in the
+  // set produces a +1 row from the receiver's query and a -1 row from the
+  // sender's query — same event_id, same block_timestamp. Without this
+  // aggregation, the path-string draws BOTH steps at the same x: a vertical
+  // line down to running-1 and back up. When pre-event running is 0 (early
+  // history), the dip lands below 0 and gets clipped by the viewBox bottom.
+  // Aggregating to net delta per event collapses internal transfers to 0
+  // (dropped) and yields one step per real ownership change.
+  const byEvent = new Map<number, { t: number; net: number }>();
+  for (const d of deltas) {
+    const slot = byEvent.get(d.event_id) ?? { t: d.block_timestamp, net: 0 };
+    slot.net += d.delta;
+    byEvent.set(d.event_id, slot);
+  }
+  const sorted = Array.from(byEvent, ([event_id, v]) => ({
+    event_id,
+    block_timestamp: v.t,
+    delta: v.net,
+  }))
+    .filter(d => d.delta !== 0)
+    .sort((a, b) => a.block_timestamp - b.block_timestamp || a.event_id - b.event_id);
   // baseline = bag size *before* the first indexed delta. By construction
   // baseline + sum(deltas) === currentBagSize, so the walk ends on the right
   // value. In pathological data (sumDeltas > currentBagSize, e.g. a missing
@@ -62,10 +83,8 @@ export default function BagSizeOverTime({
   const baseline = currentBagSize - sumDeltas;
   let running = baseline;
   const points: { t: number; v: number }[] = [];
-  // event_id → running bag size *after* applying that event. For multi-row
-  // events (internal transfers, where +1 and -1 land under the same id from
-  // different wallets), the latter overwrites — but we only consult this
-  // map for highlighted (non-internal) events, where the id appears once.
+  // event_id → running bag size *after* applying that event. After
+  // aggregation each id appears at most once, so this is now unambiguous.
   const runningByEvent = new Map<number, number>();
   for (const d of sorted) {
     running += d.delta;
@@ -73,10 +92,19 @@ export default function BagSizeOverTime({
     runningByEvent.set(d.event_id, running);
   }
 
-  const tMin = sorted[0].block_timestamp;
+  // Use the original (pre-aggregation) deltas to determine the time range,
+  // so an "all internal transfers" wallet still spans first→last activity
+  // (sorted may be empty in that case, leaving us with a flat line).
+  let tMinRaw = Infinity;
+  let tMaxRaw = 0;
+  for (const d of deltas) {
+    if (d.block_timestamp < tMinRaw) tMinRaw = d.block_timestamp;
+    if (d.block_timestamp > tMaxRaw) tMaxRaw = d.block_timestamp;
+  }
+  const tMin = tMinRaw;
   // SSR-only chart: server time is the right "now" for the right-edge marker.
   // eslint-disable-next-line react-hooks/purity
-  const tMax = Math.max(sorted[sorted.length - 1].block_timestamp, Math.floor(Date.now() / 1000));
+  const tMax = Math.max(tMaxRaw, Math.floor(Date.now() / 1000));
   const tSpan = Math.max(1, tMax - tMin);
   // vMax has to cover baseline, every running point, and currentBagSize. The
   // last is redundant in the happy path (final running === currentBagSize)
@@ -84,7 +112,13 @@ export default function BagSizeOverTime({
   const vMax = Math.max(1, baseline, currentBagSize, ...points.map(p => p.v));
 
   const x = (t: number) => ((t - tMin) / tSpan) * VB_W;
-  const y = (v: number) => VB_H - (v / vMax) * VB_H;
+  // y maps a bag-size value into the inset plot region [PAD_TOP, VB_H-PAD_BOTTOM].
+  // The inset gives the stroke (1.4px non-scaling) breathing room at v=0 and
+  // v=vMax so it isn't half-clipped by the viewBox edge.
+  const y = (v: number) => PAD_TOP + (1 - v / vMax) * PLOT_H;
+  // HTML overlays (y-axis labels, color markers) are positioned by % of the
+  // 140px container; this keeps them aligned with the in-SVG line.
+  const yPct = (v: number) => (y(v) / VB_H) * 100;
 
   let d = `M ${x(tMin).toFixed(2)},${y(baseline).toFixed(2)}`;
   let prevV = baseline;
@@ -108,11 +142,10 @@ export default function BagSizeOverTime({
       // each highlight has a corresponding +/-1 delta — but defensive.
       if (v == null) return null;
       const xPct = ((h.block_timestamp - tMin) / tSpan) * 100;
-      const yPct = ((vMax - v) / vMax) * 100;
       return {
         h,
         xPct: clamp(xPct, 0, 100),
-        yPct: clamp(yPct, 0, 100),
+        yPct: clamp(yPct(v), 0, 100),
       };
     })
     .filter((m): m is { h: HolderColorHighlight; xPct: number; yPct: number } => m != null);
@@ -121,18 +154,15 @@ export default function BagSizeOverTime({
     <Frame hasHighlights={highlights.length > 0}>
       <div className="flex">
         <div className="relative w-8 h-[140px] shrink-0 mr-1">
-          {yTicks.map(v => {
-            const topPct = ((vMax - v) / vMax) * 100;
-            return (
-              <span
-                key={v}
-                className="absolute right-1 text-[9px] tabular-nums text-bone-dim leading-none -translate-y-1/2"
-                style={{ top: `${topPct}%` }}
-              >
-                {v}
-              </span>
-            );
-          })}
+          {yTicks.map(v => (
+            <span
+              key={v}
+              className="absolute right-1 text-[9px] tabular-nums text-bone-dim leading-none -translate-y-1/2"
+              style={{ top: `${yPct(v)}%` }}
+            >
+              {v}
+            </span>
+          ))}
         </div>
         <div className="flex-1 relative">
           <svg
