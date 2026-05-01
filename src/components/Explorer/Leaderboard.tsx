@@ -58,7 +58,7 @@ export default function Leaderboard({ type, items, showSeeAll, color = 'all' }: 
   );
 }
 
-function InscriptionRow({
+export function InscriptionRow({
   row,
   rank,
   type,
@@ -98,7 +98,7 @@ function InscriptionRow({
   );
 }
 
-function HolderRow({ row, rank }: { row: ApiHolder; rank: number }) {
+export function HolderRow({ row, rank }: { row: ApiHolder; rank: number }) {
   // Linked Matrica user: deep-link to the first wallet (which then aggregates
   // across all linked wallets server-side). Unlinked wallet: link to itself.
   const primaryWallet = row.wallets[0] ?? row.group_key;

@@ -917,6 +917,14 @@ type Stmts = {
   topByVolume: ReturnType<DB['prepare']>;
   topByHighestSale: ReturnType<DB['prepare']>;
   topHolders: ReturnType<DB['prepare']>;
+  // leaderboards (cursor-paginated, with stable secondary sort by
+  // inscription_number for keyset pagination on the /explorer/[type] detail
+  // pages).
+  topByTransfersPaged: ReturnType<DB['prepare']>;
+  topByLongestUnmovedPaged: ReturnType<DB['prepare']>;
+  topByVolumePaged: ReturnType<DB['prepare']>;
+  topByHighestSalePaged: ReturnType<DB['prepare']>;
+  topHoldersGroupedPaged: ReturnType<DB['prepare']>;
   // listings
   upsertActiveListing: ReturnType<DB['prepare']>;
   deleteStaleListings: ReturnType<DB['prepare']>;
@@ -1361,6 +1369,72 @@ export function getStmts(): Stmts {
       LIMIT @limit
     `),
 
+    // Paged variants for /explorer/[type] infinite scroll. Ordering uses
+    // inscription_number as a unique secondary sort so keyset pagination is
+    // deterministic — without it, ties on the primary metric can cause rows
+    // to repeat or get skipped across page boundaries. Cursor pair is
+    // (primary metric, inscription_number); when @cursor_primary IS NULL the
+    // statement returns the first page.
+    topByTransfersPaged: db.prepare(`
+      SELECT * FROM inscriptions
+      WHERE (transfer_count + sale_count) > 0
+        AND collection_slug = @collection
+        AND (@color IS NULL OR color = @color)
+        AND (current_owner IS NULL OR current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
+        AND (
+          @cursor_primary IS NULL
+          OR (transfer_count + sale_count) < @cursor_primary
+          OR ((transfer_count + sale_count) = @cursor_primary AND inscription_number > @cursor_secondary)
+        )
+      ORDER BY (transfer_count + sale_count) DESC, inscription_number ASC
+      LIMIT @limit
+    `),
+
+    topByLongestUnmovedPaged: db.prepare(`
+      SELECT * FROM inscriptions
+      WHERE last_movement_at IS NOT NULL
+        AND collection_slug = @collection
+        AND (@color IS NULL OR color = @color)
+        AND (current_owner IS NULL OR current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
+        AND (
+          @cursor_primary IS NULL
+          OR last_movement_at > @cursor_primary
+          OR (last_movement_at = @cursor_primary AND inscription_number > @cursor_secondary)
+        )
+      ORDER BY last_movement_at ASC, inscription_number ASC
+      LIMIT @limit
+    `),
+
+    topByVolumePaged: db.prepare(`
+      SELECT * FROM inscriptions
+      WHERE total_volume_sats > 0
+        AND collection_slug = @collection
+        AND (@color IS NULL OR color = @color)
+        AND (current_owner IS NULL OR current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
+        AND (
+          @cursor_primary IS NULL
+          OR total_volume_sats < @cursor_primary
+          OR (total_volume_sats = @cursor_primary AND inscription_number > @cursor_secondary)
+        )
+      ORDER BY total_volume_sats DESC, inscription_number ASC
+      LIMIT @limit
+    `),
+
+    topByHighestSalePaged: db.prepare(`
+      SELECT * FROM inscriptions
+      WHERE highest_sale_sats > 0
+        AND collection_slug = @collection
+        AND (@color IS NULL OR color = @color)
+        AND (current_owner IS NULL OR current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
+        AND (
+          @cursor_primary IS NULL
+          OR highest_sale_sats < @cursor_primary
+          OR (highest_sale_sats = @cursor_primary AND inscription_number > @cursor_secondary)
+        )
+      ORDER BY highest_sale_sats DESC, inscription_number ASC
+      LIMIT @limit
+    `),
+
     topHolders: db.prepare(`
       SELECT current_owner AS wallet_addr,
              COUNT(*)      AS inscription_count,
@@ -1576,6 +1650,36 @@ export function getStmts(): Stmts {
         AND i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
       GROUP BY group_key
+      ORDER BY inscription_count DESC, group_key ASC
+      LIMIT @limit
+    `),
+
+    // Paged variant for the /explorer/top-holders detail page. group_key is
+    // unique (Matrica user_id or raw wallet address), so the existing ORDER
+    // BY pair is already a stable keyset; we just add the cursor predicate.
+    // The HAVING clause is what filters here because GROUP BY happens before
+    // WHERE-on-group can run — applying the cursor as HAVING avoids a
+    // wrapping subquery.
+    topHoldersGroupedPaged: db.prepare(`
+      SELECT
+        COALESCE(wl.matrica_user_id, i.current_owner)            AS group_key,
+        CASE WHEN wl.matrica_user_id IS NOT NULL THEN 1 ELSE 0 END AS is_user,
+        mu.username                                               AS username,
+        mu.avatar_url                                             AS avatar_url,
+        GROUP_CONCAT(DISTINCT i.current_owner)                    AS wallets_csv,
+        COUNT(*)                                                  AS inscription_count,
+        unixepoch()                                               AS updated_at
+      FROM inscriptions i
+      LEFT JOIN wallet_links  wl ON wl.wallet_addr = i.current_owner
+      LEFT JOIN matrica_users mu ON mu.user_id     = wl.matrica_user_id
+      WHERE i.current_owner IS NOT NULL
+        AND i.collection_slug = @collection
+        AND (@color IS NULL OR i.color = @color)
+      GROUP BY group_key
+      HAVING
+        @cursor_primary IS NULL
+        OR inscription_count < @cursor_primary
+        OR (inscription_count = @cursor_primary AND group_key > @cursor_secondary)
       ORDER BY inscription_count DESC, group_key ASC
       LIMIT @limit
     `),
