@@ -79,6 +79,8 @@ function parseArgs(argv) {
     verbose: false,
     auditSold: false,
     includeCooperative: false,
+    coopMinRatio: null,
+    coopMinPriceSats: null,
   };
   for (const a of argv) {
     if (a === '--dry-run') out.dryRun = true;
@@ -96,6 +98,12 @@ function parseArgs(argv) {
       // known-good sales before trusting it on `transferred` rows.
       out.auditSold = true;
       out.dryRun = true;
+    } else if (a.startsWith('--coop-min-ratio=')) {
+      const v = parseFloat(a.slice('--coop-min-ratio='.length));
+      if (Number.isFinite(v) && v > 0) out.coopMinRatio = v;
+    } else if (a.startsWith('--coop-min-price-sats=')) {
+      const v = parseInt(a.slice('--coop-min-price-sats='.length), 10);
+      if (Number.isFinite(v) && v > 0) out.coopMinPriceSats = v;
     } else if (a.startsWith('--inscription-number=')) {
       const n = parseInt(a.slice('--inscription-number='.length), 10);
       if (Number.isFinite(n)) out.inscriptionNumber = n;
@@ -313,8 +321,12 @@ const MIN_SALE_PRICE_SATS = 10_000; // 0.0001 BTC; below this is padding/dust
 // --include-cooperative). Calibrated against 300 random ord.net-known sales:
 // at these values, ~76% of non-PSBT sales agree with DB price exactly, ~3%
 // produce wrong predictions, ~21% are safely skipped.
-const COOP_MIN_RATIO = 10; // dominant external must be ≥10× the second-largest
-const COOP_MIN_PRICE_SATS = 100_000; // 0.001 BTC absolute floor
+const COOP_MIN_RATIO_DEFAULT = 10; // dominant external must be ≥10× the second-largest
+// Floor calibrated to the lowest plausible OMB sale (0.005 BTC = 500k sats);
+// per-corpus audit confirmed raising from 100k → 500k drops 65 noise candidates
+// without affecting price-mismatch count (which is structural, not threshold-
+// dependent at 265 across all configs).
+const COOP_MIN_PRICE_SATS_DEFAULT = 500_000;
 
 // Returns a classification object for one event:
 //   { kind: 'sale', layer, flag?, sigSource?, carryIdx, sellerAddr, salePriceSats, dominanceRatio? }
@@ -440,13 +452,16 @@ async function classifyEvent(event, ctx = {}) {
     return { kind: 'skip', reason: 'coop:multi-inscription-tx' };
   }
 
+  const minPrice = ctx.coopMinPriceSats ?? COOP_MIN_PRICE_SATS_DEFAULT;
+  const minRatio = ctx.coopMinRatio ?? COOP_MIN_RATIO_DEFAULT;
+
   if (!top) return { kind: 'skip', reason: 'coop:no-externals' };
-  if (top.sats < COOP_MIN_PRICE_SATS) {
+  if (top.sats < minPrice) {
     return { kind: 'skip', reason: `coop:below-floor (${top.sats})` };
   }
   if (!second) return { kind: 'skip', reason: 'coop:sole-external' };
   const ratio = top.sats / Math.max(second.sats, 1);
-  if (ratio < COOP_MIN_RATIO) {
+  if (ratio < minRatio) {
     return { kind: 'skip', reason: `coop:weak-ratio (${ratio.toFixed(1)}x)` };
   }
 
@@ -595,9 +610,18 @@ async function main() {
   );
   const ctx = {
     includeCooperative: ARGS.includeCooperative,
+    coopMinRatio: ARGS.coopMinRatio,
+    coopMinPriceSats: ARGS.coopMinPriceSats,
     countEventsForTxid: (txid, selfId) =>
       countEventsForTxidStmt.get(txid, selfId)?.n ?? 0,
   };
+  if (ARGS.includeCooperative) {
+    console.log(
+      `[onchain-heuristic] cooperative thresholds: ` +
+        `min_ratio=${ctx.coopMinRatio ?? COOP_MIN_RATIO_DEFAULT} ` +
+        `min_price_sats=${ctx.coopMinPriceSats ?? COOP_MIN_PRICE_SATS_DEFAULT}`
+    );
+  }
 
   function flushPending() {
     if (pendingBatch.length === 0) return;
