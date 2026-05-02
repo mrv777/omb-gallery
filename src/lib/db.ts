@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 
 // OMB-shape entry: filename = "<inscription_number>.jpg|webp", per-color groups.
 type ImageEntry = { filename: string; description: string; tags: string[] };
@@ -96,6 +96,7 @@ function migrate(db: DB): void {
         upgradeV13ToV14(db);
         upgradeV14ToV15(db);
         upgradeV15ToV16(db);
+        upgradeV16ToV17(db);
       } else {
         initSchemaLatest(db);
       }
@@ -115,6 +116,7 @@ function migrate(db: DB): void {
       if (current < 14) upgradeV13ToV14(db);
       if (current < 15) upgradeV14ToV15(db);
       if (current < 16) upgradeV15ToV16(db);
+      if (current < 17) upgradeV16ToV17(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -214,6 +216,11 @@ function initSchemaLatest(db: DB): void {
     -- lookups (UNION'd in SQL): one keyed by new_owner, one by old_owner.
     CREATE INDEX IF NOT EXISTS idx_events_new_owner_ts_id ON events (new_owner, block_timestamp DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_events_old_owner_ts_id ON events (old_owner, block_timestamp DESC, id DESC);
+    -- Backs the global-search "look up by raw txid" path. The existing
+    -- UNIQUE (inscription_id, txid) autoindex can't satisfy WHERE txid = ?
+    -- because txid isn't the leftmost column — without this, every txid
+    -- search scans the entire events table.
+    CREATE INDEX IF NOT EXISTS idx_events_txid            ON events (txid);
 
     -- Composite-PK shape (Phase 4). Per-collection rows for per-collection
     -- streams (satflow, satflow_listings); ord uses a single 'omb' row since
@@ -720,6 +727,14 @@ function upgradeV14ToV15(db: DB): void {
   `);
 }
 
+function upgradeV16ToV17(db: DB): void {
+  // Backs the global-search "lookup by raw txid" path. The existing
+  // UNIQUE (inscription_id, txid) autoindex can't satisfy WHERE-on-txid-only
+  // (txid isn't the leftmost column), so every txid search would otherwise
+  // scan the entire events table.
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_events_txid ON events (txid);`);
+}
+
 function upgradeV15ToV16(db: DB): void {
   // Phase 6.1: extend events.event_type CHECK to allow 'listed' so the
   // listings poll can emit fan-out-eligible rows. SQLite can't ALTER a CHECK
@@ -964,6 +979,14 @@ type Stmts = {
   transferActivityByDay: ReturnType<DB['prepare']>;
   ownershipChangesByAddress: ReturnType<DB['prepare']>;
   holderColorHighlights: ReturnType<DB['prepare']>;
+  // global search
+  searchInscriptionByNumber: ReturnType<DB['prepare']>;
+  searchInscriptionById: ReturnType<DB['prepare']>;
+  searchInscriptionsByIdPrefix: ReturnType<DB['prepare']>;
+  searchEventsByTxid: ReturnType<DB['prepare']>;
+  searchHolderByAddress: ReturnType<DB['prepare']>;
+  searchHoldersBySuffix: ReturnType<DB['prepare']>;
+  searchUsersByName: ReturnType<DB['prepare']>;
 };
 
 let stmts: Stmts | null = null;
@@ -1930,6 +1953,89 @@ export function getStmts(): Stmts {
         AND i.collection_slug = 'omb'
         AND i.color IN ('red', 'blue')
       ORDER BY e.block_timestamp ASC, e.id ASC
+    `),
+
+    // ---------------- global search ----------------
+    // Search across collections; the route layer renders the collection_slug
+    // so links can deep-link to /inscription/[number] (which is OMB-only) or
+    // skip out for non-OMB hits in this UI release.
+    searchInscriptionByNumber: db.prepare(`
+      SELECT inscription_number, inscription_id, color, current_owner, collection_slug
+      FROM inscriptions
+      WHERE inscription_number = ?
+    `),
+
+    searchInscriptionById: db.prepare(`
+      SELECT inscription_number, inscription_id, color, current_owner, collection_slug
+      FROM inscriptions
+      WHERE inscription_id = ?
+    `),
+
+    // Bare-txid input: find inscriptions whose inscription_id is `<txid>i<index>`.
+    // Also matches the legitimate "user pasted the genesis txid" case.
+    searchInscriptionsByIdPrefix: db.prepare(`
+      SELECT inscription_number, inscription_id, color, current_owner, collection_slug
+      FROM inscriptions
+      WHERE inscription_id LIKE ? || 'i%'
+      ORDER BY inscription_number ASC
+      LIMIT 5
+    `),
+
+    // LEFT JOIN inscriptions so the route layer can branch event-row links by
+    // collection — without it, a non-OMB txid hit would link to /inscription/N
+    // which 404s (the route is OMB-only). LEFT (vs INNER) so an event for a
+    // dropped/missing inscription_number still surfaces with a fallback link.
+    searchEventsByTxid: db.prepare(`
+      SELECT e.id, e.inscription_number, e.inscription_id, e.event_type,
+             e.old_owner, e.new_owner, e.marketplace, e.sale_price_sats,
+             e.block_height, e.block_timestamp, e.txid,
+             i.collection_slug
+      FROM events e
+      LEFT JOIN inscriptions i ON i.inscription_number = e.inscription_number
+      WHERE e.txid = ?
+      ORDER BY e.id DESC
+      LIMIT 25
+    `),
+
+    searchHolderByAddress: db.prepare(`
+      SELECT current_owner AS address, COUNT(*) AS inscription_count
+      FROM inscriptions
+      WHERE current_owner = ?
+      GROUP BY current_owner
+    `),
+
+    // Suffix-style match: "I remember it ended in xyz123". LIKE '%' || ? matches
+    // any address ending with the given fragment. Order by holding count so the
+    // big collectors surface first.
+    searchHoldersBySuffix: db.prepare(`
+      SELECT current_owner AS address, COUNT(*) AS inscription_count
+      FROM inscriptions
+      WHERE current_owner IS NOT NULL
+        AND current_owner LIKE '%' || ?
+      GROUP BY current_owner
+      ORDER BY inscription_count DESC
+      LIMIT 10
+    `),
+
+    // Matrica username search: prefix-priority, falls back to substring when
+    // the query is ≥3 chars. Single named param bound multiple times.
+    searchUsersByName: db.prepare(`
+      SELECT mu.user_id, mu.username, mu.avatar_url,
+             COUNT(wl.wallet_addr) AS wallet_count,
+             (SELECT wallet_addr FROM wallet_links WHERE matrica_user_id = mu.user_id LIMIT 1) AS first_wallet
+      FROM matrica_users mu
+      LEFT JOIN wallet_links wl ON wl.matrica_user_id = mu.user_id
+      WHERE mu.username IS NOT NULL
+        AND (
+          LOWER(mu.username) LIKE LOWER(@q) || '%'
+          OR (LENGTH(@q) >= 3 AND LOWER(mu.username) LIKE '%' || LOWER(@q) || '%')
+        )
+      GROUP BY mu.user_id
+      ORDER BY
+        (LOWER(mu.username) = LOWER(@q)) DESC,
+        (LOWER(mu.username) LIKE LOWER(@q) || '%') DESC,
+        LENGTH(mu.username) ASC
+      LIMIT 10
     `),
   };
   return stmts;

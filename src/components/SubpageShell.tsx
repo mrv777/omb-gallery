@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import HelpButton from './HelpButton';
 import MobileMenu from './MobileMenu';
 import FirehoseSubscribe from './FirehoseSubscribe';
+import SearchBar from './Search/SearchBar';
 import type { ColorFilter } from '@/lib/types';
 import { appendColorParam } from '@/lib/colorFilter';
 
@@ -49,6 +50,7 @@ export default function SubpageShell({ active, color = 'all', headerControls, ch
               );
             })}
           </nav>
+          <SearchBar />
           {headerControls}
           <div className="ml-auto hidden md:block">
             <HelpButton />

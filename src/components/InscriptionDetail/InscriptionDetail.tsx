@@ -169,6 +169,15 @@ export default function InscriptionDetail({
                 memepool ↗
               </a>
             )}
+            <a
+              href="https://swap.art/"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Set up an OTC swap on swap.art"
+              className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
+            >
+              swap.art ↗
+            </a>
             {hit && (
               <a
                 href={hit.full}
