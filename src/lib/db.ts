@@ -1095,7 +1095,7 @@ export function getStmts(): Stmts {
     `),
 
     findEventByInscriptionAndTxid: db.prepare(`
-      SELECT id, event_type, inscription_number
+      SELECT id, event_type, inscription_number, new_owner
       FROM events
       WHERE inscription_id = @inscription_id AND txid = @txid
     `),

@@ -1280,8 +1280,18 @@ function applySalesTransaction(
     const dupe = stmts.findEventByInscriptionAndTxid.get({
       inscription_id: sale.inscription_id,
       txid: sale.transfer_txid,
-    }) as { id: number; event_type: string; inscription_number: number } | undefined;
+    }) as
+      | { id: number; event_type: string; inscription_number: number; new_owner: string | null }
+      | undefined;
     if (!dupe) return;
+    // Only delete when the row's new_owner matches Satflow's buyer — that's
+    // the genuine "marketplace settlement plumbing" case the dedup targets.
+    // When they differ, Satflow reported buyer = an intermediate (per-purchase
+    // escrow) address while ord captured the same tx forwarding to the user's
+    // real wallet; the row is the only record of that final hop and deleting
+    // it would orphan the inscription's ownership chain. (See holder pages
+    // showing fewer events than current bag size.)
+    if (dupe.new_owner !== sale.buyer) return;
     // Read sale_price_sats off the row before delete so we know how much to
     // unbump. Cheap — we already have the id.
     const row = stmts.getEventById.get({ id: dupe.id }) as
