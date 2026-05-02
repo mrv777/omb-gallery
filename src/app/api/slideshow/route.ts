@@ -3,6 +3,7 @@ import { clientIpKey } from '@/lib/clientIp';
 import { checkAndConsumePerIp, checkAndConsumeGlobal } from '@/lib/rateLimit';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 import { createSlideshow } from '@/lib/slideshowStore';
+import { resolveSlideshowImages } from '@/lib/slideshowImages';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -41,6 +42,15 @@ export async function POST(req: NextRequest) {
     seen.add(raw);
     ids.push(raw);
   }
+
+  // Trim ids to those that resolve to a real OMB image. Without this, a
+  // payload of all-unknown / all-bravocados ids creates a permanent share
+  // row whose page renders empty + whose metadata reports a misleading
+  // image_count. resolveSlideshowImages is an in-memory Map lookup, so
+  // running it before the rate-limit / Turnstile steps is cheap.
+  const { images: resolved } = resolveSlideshowImages(ids);
+  if (resolved.length === 0) return bad(400, 'ids-empty-resolved');
+  const resolvedIds = resolved.map(i => i.id);
 
   let title: string | null = null;
   if (body.title !== undefined && body.title !== null && body.title !== '') {
@@ -84,7 +94,7 @@ export async function POST(req: NextRequest) {
 
   // 5. DB write.
   try {
-    const slug = createSlideshow({ ids, title, creatorIp: ip });
+    const slug = createSlideshow({ ids: resolvedIds, title, creatorIp: ip });
     return NextResponse.json({ slug });
   } catch (e) {
     console.error('[slideshow] create failed:', e);
