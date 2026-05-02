@@ -252,37 +252,43 @@ export default function HolderProfile({
 function OmbTile({ number }: { number: number }) {
   const hit = lookupInscription(number);
   const tileBg = hit?.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
+  // Span carries the visual box (size, color, border, content-visibility) so
+  // Radix's `Trigger asChild` Slot has a server-rendered primitive to clone
+  // props onto. Wrapping the Link this way prevents an SSR-drop bug where
+  // React's RSC streamer occasionally defers a tile's Client-Component child
+  // (Link) to a separate chunk; when that happens, Slot's element-validity
+  // check fails on the placeholder and the entire trigger renders to nothing.
+  // The Link inside fills the span so click/hover targets are unchanged.
   return (
     <Tooltip content={`#${number}`}>
-      <Link
-        href={`/inscription/${number}`}
-        prefetch={false}
+      <span
         className={`block w-20 h-20 sm:w-24 sm:h-24 ${tileBg} overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors`}
-        // content-visibility:auto skips layout + paint for offscreen tiles;
-        // contain-intrinsic-size reserves the right slot so the flex-wrap
-        // layout still resolves up-front and scroll position stays stable.
-        // 96px matches the sm:w-24 tile (we use the larger value so the
-        // mobile-rendered 80px tiles still land within the reserved box).
         style={{
           contentVisibility: 'auto',
           containIntrinsicSize: '96px 96px',
         }}
       >
-        {hit ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            src={hit.thumbnail}
-            alt={`#${number}`}
-            loading="lazy"
-            decoding="async"
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center font-mono text-[10px] text-bone-dim">
-            #{number}
-          </div>
-        )}
-      </Link>
+        <Link
+          href={`/inscription/${number}`}
+          prefetch={false}
+          className="block w-full h-full"
+        >
+          {hit ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={hit.thumbnail}
+              alt={`#${number}`}
+              loading="lazy"
+              decoding="async"
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center font-mono text-[10px] text-bone-dim">
+              #{number}
+            </div>
+          )}
+        </Link>
+      </span>
     </Tooltip>
   );
 }

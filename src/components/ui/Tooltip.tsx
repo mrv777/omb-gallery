@@ -37,17 +37,7 @@ export function Tooltip({
 
   return (
     <TooltipPrimitive.Root delayDuration={delayDuration}>
-      {/* The span is a server-rendered primitive so Radix's `Slot` (used by
-       * `Trigger asChild`) always has a valid React element to clone props
-       * onto during SSR. Without it, when React's RSC streamer defers a
-       * Client-Component child (e.g. a `<Link>`) to a separate chunk, Slot's
-       * `isValidElement(children)` check fails on the placeholder and the
-       * trigger renders to nothing — silently dropping the tile from SSR
-       * HTML. `display:contents` keeps the wrapper invisible to layout while
-       * still propagating hover/focus events from descendants. */}
-      <TooltipPrimitive.Trigger asChild>
-        <span style={{ display: 'contents' }}>{children}</span>
-      </TooltipPrimitive.Trigger>
+      <TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger>
       <TooltipPrimitive.Portal>
         <TooltipPrimitive.Content
           side={side}
