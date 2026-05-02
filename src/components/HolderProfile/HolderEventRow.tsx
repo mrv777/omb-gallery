@@ -42,26 +42,20 @@ export default function HolderEventRow({ event, wallets }: { event: EventRow; wa
         ? 'internal'
         : '';
 
-  const transferredColor = isOutgoing
+  const directionColor = isOutgoing
     ? 'text-accent-red'
     : isIncoming
       ? 'text-accent-green'
       : 'text-bone-dim';
-  const transferredBg = isOutgoing
+  const directionBg = isOutgoing
     ? 'bg-accent-red/10 border-accent-red/40'
     : isIncoming
       ? 'bg-accent-green/10 border-accent-green/40'
       : 'border-bone-dim/40';
-  const eventColor = isSold
-    ? 'text-accent-green'
-    : isTransferred
-      ? transferredColor
-      : 'text-accent-orange';
-  const eventBg = isSold
-    ? 'bg-accent-green/10 border-accent-green/40'
-    : isTransferred
-      ? transferredBg
-      : 'bg-accent-orange/10 border-accent-orange/40';
+  const eventColor =
+    isSold || isTransferred ? directionColor : 'text-accent-orange';
+  const eventBg =
+    isSold || isTransferred ? directionBg : 'bg-accent-orange/10 border-accent-orange/40';
 
   const priceStr = isSold ? formatBtc(event.sale_price_sats) : '';
   const market = isSold ? marketplaceLabel(event.marketplace) : '';
@@ -109,11 +103,17 @@ export default function HolderEventRow({ event, wallets }: { event: EventRow; wa
   const numberClass =
     'font-mono text-xs text-bone tabular-nums hover:text-accent-orange w-20 shrink-0';
 
+  const rowTint = isSold
+    ? isOutgoing
+      ? 'bg-accent-red/[0.03]'
+      : isIncoming
+        ? 'bg-accent-green/[0.03]'
+        : ''
+    : '';
+
   return (
     <div
-      className={`flex items-center gap-x-3 sm:gap-x-4 px-2 sm:px-4 py-2 border-b border-ink-2 ${
-        isSold ? 'bg-accent-green/[0.03]' : ''
-      }`}
+      className={`flex items-center gap-x-3 sm:gap-x-4 px-2 sm:px-4 py-2 border-b border-ink-2 ${rowTint}`}
     >
       <Tooltip content={tooltipLabel}>
         {isExternal ? (
