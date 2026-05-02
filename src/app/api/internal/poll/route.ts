@@ -1284,14 +1284,24 @@ function applySalesTransaction(
       | { id: number; event_type: string; inscription_number: number; new_owner: string | null }
       | undefined;
     if (!dupe) return;
-    // Only delete when the row's new_owner matches Satflow's buyer — that's
-    // the genuine "marketplace settlement plumbing" case the dedup targets.
-    // When they differ, Satflow reported buyer = an intermediate (per-purchase
-    // escrow) address while ord captured the same tx forwarding to the user's
-    // real wallet; the row is the only record of that final hop and deleting
-    // it would orphan the inscription's ownership chain. (See holder pages
-    // showing fewer events than current bag size.)
-    if (dupe.new_owner !== sale.buyer) return;
+    // Only delete when the consolidation row's new_owner matches the existing
+    // sold row's new_owner — that's the genuine "marketplace settlement
+    // plumbing" case the dedup targets (sold already records the final
+    // destination; the consolidation hop is redundant). When they differ,
+    // the sold row recorded the on-chain fillTx output (typically a per-
+    // purchase escrow) while the consolidation tx forwarded the inscription
+    // on to the user's real wallet — the dupe row is the only record of that
+    // escrow→main transition and deleting it orphans the ownership chain.
+    // (Comparing to sale.buyer is unreliable: Satflow's `fillOrdAddress`
+    // sometimes reports the looked-through final destination even when the
+    // sold row stores the actual on-chain escrow address.)
+    const sold = stmts.findEventByInscriptionAndTxid.get({
+      inscription_id: sale.inscription_id,
+      txid: sale.txid,
+    }) as
+      | { id: number; event_type: string; inscription_number: number; new_owner: string | null }
+      | undefined;
+    if (sold && sold.new_owner !== dupe.new_owner) return;
     // Read sale_price_sats off the row before delete so we know how much to
     // unbump. Cheap — we already have the id.
     const row = stmts.getEventById.get({ id: dupe.id }) as
