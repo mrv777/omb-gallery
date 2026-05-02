@@ -1095,6 +1095,7 @@ async function runSatflowTick(
   let upgraded = 0;
   let inserted = 0;
   let unresolved = 0;
+  let cleaned = 0;
   let pagesUsed = 0;
   let drained = false;
   let errMsg: string | null = null;
@@ -1131,10 +1132,13 @@ async function runSatflowTick(
     upgraded += ap.upgraded;
     inserted += ap.inserted;
     unresolved += ap.unresolved;
+    cleaned += ap.cleaned;
 
     // Incremental stop condition: an entire page yielded zero new writes
     // (every sale is already in events). Once that's true newer pages can
-    // only repeat what we've seen, so further fetching is wasteful.
+    // only repeat what we've seen, so further fetching is wasteful. `cleaned`
+    // doesn't count as "new work" — it's a side-effect of re-processing rows
+    // we've already written, so a page that's pure cleanup still drains.
     if (!backfilling && ap.inserted === 0 && ap.upgraded === 0 && ap.unresolved === 0) {
       drained = true;
       break;
@@ -1200,6 +1204,7 @@ async function runSatflowTick(
     inserted,
     upgraded,
     unresolved,
+    cleaned,
     last_page: lastPageReached,
     drained,
     dur_ms: Date.now() - startedAt,
@@ -1213,6 +1218,7 @@ async function runSatflowTick(
     inserted,
     upgraded,
     unresolved,
+    cleaned,
     unresolvedSeenTotal: backfilling ? nextUnresolvedSeen : 0,
     lastPage: lastPageReached,
     total: totalReported,
@@ -1250,13 +1256,49 @@ function applySalesTransaction(
   upgraded: number;
   inserted: number;
   unresolved: number;
+  /** Spurious second-tx settlement rows removed (escrow → buyer forwarding). */
+  cleaned: number;
 } {
-  if (sales.length === 0) return { upgraded: 0, inserted: 0, unresolved: 0 };
+  if (sales.length === 0) return { upgraded: 0, inserted: 0, unresolved: 0, cleaned: 0 };
   const stmts = getStmts();
   const db = getDb();
   let upgraded = 0;
   let inserted = 0;
   let unresolved = 0;
+  let cleaned = 0;
+
+  // 2-tx escrow-style settlement: when satflow's sale carries a `transferTx`
+  // distinct from `fillTx` (the marketplace forwarded the inscription from
+  // an escrow output to the buyer's display address as a second on-chain tx),
+  // ord's diff-poll writes a separate row for that hop with the escrow as
+  // old_owner and the buyer as new_owner. That row is settlement plumbing,
+  // not a separate sale — delete it so the activity feed shows one event per
+  // logical sale and aggregates don't double-count volume. Idempotent: if no
+  // such row exists, it's a no-op.
+  const cleanupTransferTx = (sale: NormalizedSale): void => {
+    if (!sale.transfer_txid) return;
+    const dupe = stmts.findEventByInscriptionAndTxid.get({
+      inscription_id: sale.inscription_id,
+      txid: sale.transfer_txid,
+    }) as { id: number; event_type: string; inscription_number: number } | undefined;
+    if (!dupe) return;
+    // Read sale_price_sats off the row before delete so we know how much to
+    // unbump. Cheap — we already have the id.
+    const row = stmts.getEventById.get({ id: dupe.id }) as
+      | { sale_price_sats: number | null }
+      | undefined;
+    stmts.deleteEventById.run({ id: dupe.id });
+    if (dupe.event_type === 'sold') {
+      stmts.unbumpSoldOnDelete.run({
+        inscription_number: dupe.inscription_number,
+        sale_price_sats: row?.sale_price_sats ?? 0,
+      });
+      stmts.recomputeHighestSale.run({ inscription_number: dupe.inscription_number });
+    } else if (dupe.event_type === 'transferred') {
+      stmts.unbumpTransferOnDelete.run({ inscription_number: dupe.inscription_number });
+    }
+    cleaned++;
+  };
 
   const tx = db.transaction(() => {
     for (const sale of sales) {
@@ -1276,7 +1318,10 @@ function applySalesTransaction(
       }) as { id: number; event_type: string; inscription_number: number } | undefined;
 
       if (existing) {
-        if (existing.event_type === 'sold') continue;
+        if (existing.event_type === 'sold') {
+          cleanupTransferTx(sale);
+          continue;
+        }
         // Upgrade transferred → sold; rebalance aggregates.
         const r = stmts.upgradeEventToSold.run({
           inscription_id: sale.inscription_id,
@@ -1304,6 +1349,7 @@ function applySalesTransaction(
           // must NOT replay as fresh alerts.
           if (live) stmts.enqueueNotify.run(existing.id);
         }
+        cleanupTransferTx(sale);
         continue;
       }
 
@@ -1322,7 +1368,10 @@ function applySalesTransaction(
       }) as { id: number; event_type: string; inscription_number: number } | undefined;
 
       if (movementMatch) {
-        if (movementMatch.event_type === 'sold') continue;
+        if (movementMatch.event_type === 'sold') {
+          cleanupTransferTx(sale);
+          continue;
+        }
         const r = stmts.upgradeEventToSoldById.run({
           id: movementMatch.id,
           marketplace: sale.marketplace,
@@ -1337,6 +1386,7 @@ function applySalesTransaction(
           });
           if (live) stmts.enqueueNotify.run(movementMatch.id);
         }
+        cleanupTransferTx(sale);
         continue;
       }
 
@@ -1382,11 +1432,12 @@ function applySalesTransaction(
         // = real-time sale, enqueue. Backfill = historical, skip.
         if (live) stmts.enqueueNotify.run(r.lastInsertRowid as number);
       }
+      cleanupTransferTx(sale);
     }
   });
   tx();
 
-  return { upgraded, inserted, unresolved };
+  return { upgraded, inserted, unresolved, cleaned };
 }
 
 // ---------------- mode: listings ----------------

@@ -890,6 +890,11 @@ type Stmts = {
   findEventByMovement: ReturnType<DB['prepare']>;
   upgradeEventToSoldById: ReturnType<DB['prepare']>;
   mergeOrdEnrichmentIntoSold: ReturnType<DB['prepare']>;
+  getEventById: ReturnType<DB['prepare']>;
+  deleteEventById: ReturnType<DB['prepare']>;
+  unbumpSoldOnDelete: ReturnType<DB['prepare']>;
+  unbumpTransferOnDelete: ReturnType<DB['prepare']>;
+  recomputeHighestSale: ReturnType<DB['prepare']>;
   listInscriptionIdToNumber: ReturnType<DB['prepare']>;
   // poll_state
   getPollState: ReturnType<DB['prepare']>;
@@ -1139,6 +1144,45 @@ export function getStmts(): Stmts {
           block_timestamp = @block_timestamp,
           new_satpoint    = COALESCE(@new_satpoint, new_satpoint)
       WHERE id = @id AND event_type = 'sold'
+    `),
+
+    // Read a single event row by id — used by the transferTx-cleanup path to
+    // recover the row's `sale_price_sats` before deletion so aggregates can be
+    // unbumped accurately.
+    getEventById: db.prepare(`
+      SELECT id, inscription_number, event_type, sale_price_sats
+      FROM events WHERE id = @id
+    `),
+
+    // Used by satflow apply to clean up the spurious second row written for a
+    // 2-tx escrow-style settlement (`transferTx` hop). The notify_pending FK
+    // is ON DELETE CASCADE, so any queued alert for this row is also dropped.
+    deleteEventById: db.prepare(`DELETE FROM events WHERE id = @id`),
+
+    // Undo the aggregates a sold row contributed when it was first written.
+    // Pairs with deleteEventById; recomputeHighestSale must be called after
+    // since highest_sale is MAX-derived, not delta-tracked.
+    unbumpSoldOnDelete: db.prepare(`
+      UPDATE inscriptions
+         SET sale_count        = MAX(sale_count - 1, 0),
+             total_volume_sats = MAX(total_volume_sats - COALESCE(@sale_price_sats, 0), 0)
+       WHERE inscription_number = @inscription_number
+    `),
+    // Same for a transferred row.
+    unbumpTransferOnDelete: db.prepare(`
+      UPDATE inscriptions
+         SET transfer_count = MAX(transfer_count - 1, 0)
+       WHERE inscription_number = @inscription_number
+    `),
+    // Recompute highest_sale_sats from the surviving sold rows. Run after any
+    // delete that might have been the previous max.
+    recomputeHighestSale: db.prepare(`
+      UPDATE inscriptions
+         SET highest_sale_sats = COALESCE((
+               SELECT MAX(sale_price_sats) FROM events
+                WHERE inscription_number = @inscription_number AND event_type = 'sold'
+             ), 0)
+       WHERE inscription_number = @inscription_number
     `),
 
     // Used by the satflow tick to resolve `inscription_id` (returned by

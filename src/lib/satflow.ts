@@ -39,6 +39,15 @@ export type NormalizedSale = {
   inscription_id: string;
   /** On-chain tx that completed the sale (Satflow's `fillTx`). Always present. */
   txid: string;
+  /**
+   * Satflow's `transferTx` — the second tx in a 2-tx escrow-style settlement
+   * that forwards the inscription from a marketplace escrow output to the
+   * buyer's display address. Null on bid-orderType fills (single-tx swaps).
+   * Used by the apply path to suppress the spurious second `transferred`/
+   * `sold` row that ord's diff-poll would otherwise write for the forwarding
+   * hop — that hop is settlement plumbing, not a separate sale.
+   */
+  transfer_txid: string | null;
   sale_price_sats: number;
   /** Unix seconds, parsed from `fillCompletedAt` (preferred) or `timestamp`. */
   block_timestamp: number;
@@ -232,6 +241,17 @@ function normalizeSale(item: Record<string, unknown>): NormalizedSale | null {
   // matches across sources.
   if (!/^[0-9a-f]{64}$/i.test(txid)) return null;
 
+  // Optional second-tx settlement hash (escrow → buyer forwarding). When
+  // present and distinct from fillTx, the apply path uses it to suppress
+  // the duplicate row ord's diff-poll writes for the forwarding hop.
+  const rawTransferTx = pickString(item, ['transferTx']);
+  const transfer_txid =
+    rawTransferTx &&
+    /^[0-9a-f]{64}$/i.test(rawTransferTx) &&
+    rawTransferTx.toLowerCase() !== txid.toLowerCase()
+      ? rawTransferTx.toLowerCase()
+      : null;
+
   // `price` lives both top-level and on the order body; prefer top-level since
   // it reflects the executed price (order.body.price could be the original ask
   // for partial-fill cases). Per Satflow docs, integer satoshis.
@@ -264,6 +284,7 @@ function normalizeSale(item: Record<string, unknown>): NormalizedSale | null {
     satflow_id,
     inscription_id,
     txid: txid.toLowerCase(),
+    transfer_txid,
     sale_price_sats,
     block_timestamp,
     block_height: null,

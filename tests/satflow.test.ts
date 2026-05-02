@@ -153,6 +153,31 @@ describe('fetchSalesPage', () => {
     expect(res.items[0].txid).toBe('a'.repeat(64));
   });
 
+  it('exposes transferTx (lowercased) when present and distinct from fillTx', async () => {
+    const withTransfer = {
+      ...baseAsk,
+      fillTx: 'a'.repeat(64),
+      transferTx: 'B'.repeat(64),
+    };
+    stubFetch(async () => jsonResponse({ data: { sales: [withTransfer], total: 1 } }));
+    const res = await fetchSalesPage({ collectionSlug: 'omb' });
+    expect(res.items[0].transfer_txid).toBe('b'.repeat(64));
+  });
+
+  it('drops transferTx when equal to fillTx (no second-tx settlement)', async () => {
+    const same = { ...baseAsk, fillTx: 'a'.repeat(64), transferTx: 'A'.repeat(64) };
+    stubFetch(async () => jsonResponse({ data: { sales: [same], total: 1 } }));
+    const res = await fetchSalesPage({ collectionSlug: 'omb' });
+    expect(res.items[0].transfer_txid).toBeNull();
+  });
+
+  it('returns transfer_txid=null when transferTx is absent or empty', async () => {
+    const noTransfer = { ...baseAsk, fillTx: 'a'.repeat(64) };
+    stubFetch(async () => jsonResponse({ data: { sales: [noTransfer], total: 1 } }));
+    const res = await fetchSalesPage({ collectionSlug: 'omb' });
+    expect(res.items[0].transfer_txid).toBeNull();
+  });
+
   it('returns empty when API returns malformed envelope', async () => {
     stubFetch(async () => jsonResponse({ unexpected: 'shape' }));
     const res = await fetchSalesPage({ collectionSlug: 'omb' });
