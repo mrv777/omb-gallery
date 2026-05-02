@@ -1318,12 +1318,15 @@ export function getStmts(): Stmts {
     `),
 
     // Holders are derived from inscriptions.current_owner — count distinct non-null owners.
+    // Mirrors countEvents in excluding protocol wallets so the two stats
+    // shown side-by-side on the activity feed describe the same population.
     countHolders: db.prepare(`
       SELECT COUNT(DISTINCT current_owner) AS n
       FROM inscriptions
       WHERE current_owner IS NOT NULL
         AND collection_slug = @collection
         AND (@color IS NULL OR color = @color)
+        AND current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST})
     `),
 
     getInscription: db.prepare(`
