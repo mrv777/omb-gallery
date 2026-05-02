@@ -150,6 +150,10 @@ async function walkInscription({ inscription_id, inscription_number, satpoint, h
     // this transfer once it confirms. We still continue walking backward so
     // earlier confirmed transfers in the chain get captured.
     if (timestamp != null) {
+      // Store new_satpoint as ord's `output` format (txid:vout) to match the
+      // live diff-poller. heal-heights calls `/output/<value>` which 404s on
+      // satpoint format. The original sat-tracked offset still has audit
+      // value, so preserve it under raw_json.offset.
       events.push({
         inscription_id,
         inscription_number,
@@ -158,7 +162,8 @@ async function walkInscription({ inscription_id, inscription_number, satpoint, h
         block_timestamp: timestamp,
         new_owner: newOwner,
         old_owner: oldOwner,
-        new_satpoint: `${cur.txid}:${cur.vout}:${cur.offset.toString()}`,
+        new_satpoint: `${cur.txid}:${cur.vout}`,
+        offset: cur.offset.toString(),
       });
     }
     hops.value++;
@@ -201,7 +206,7 @@ async function main() {
     ) VALUES (
       @inscription_id, @inscription_number, 'transferred', @block_height, @block_timestamp,
       @new_satpoint, @old_owner, @new_owner, NULL, NULL, @txid,
-      json_object('source','ord-history-backfill')
+      json_object('source','ord-history-backfill','offset',@offset)
     )
   `);
   const updateEvent = db.prepare(`
