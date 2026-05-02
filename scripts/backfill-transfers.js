@@ -26,6 +26,17 @@
 //                           via ord /inscription/<N>.
 
 const path = require('node:path');
+const {
+  RPC_URL,
+  ORD_BASE,
+  rpc,
+  getHeader,
+  fetchOrdInscription,
+  parseSatpoint,
+  genesisTxidFromId,
+  btcToSats,
+  addressFromScriptPubKey,
+} = require('./lib/chain');
 // better-sqlite3 is only needed in full-backfill mode (main()). Smoke mode
 // (Phase 2a) walks one inscription against ord+bitcoind and prints the chain
 // without ever opening the DB, so we lazy-load this require to let the smoke
@@ -36,31 +47,11 @@ function loadDatabase() {
   return Database;
 }
 
-// Node's fetch (undici) refuses URLs containing inline credentials, so split
-// the user:pass off into a Basic Authorization header.
-const { url: RPC_URL, authHeader: RPC_AUTH } = (() => {
-  const raw = process.env.BITCOIN_RPC_URL;
-  if (!raw) return { url: null, authHeader: null };
-  try {
-    const u = new URL(raw);
-    const user = decodeURIComponent(u.username);
-    const pass = decodeURIComponent(u.password);
-    u.username = '';
-    u.password = '';
-    const authHeader =
-      user || pass ? 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64') : null;
-    return { url: u.toString(), authHeader };
-  } catch {
-    return { url: raw, authHeader: null };
-  }
-})();
-const ORD_BASE = (process.env.ORD_BASE_URL ?? '').replace(/\/+$/, '');
 const DB_PATH = process.env.OMB_DB_PATH ?? path.resolve(__dirname, '..', 'tmp', 'dev.db');
 const CONCURRENCY = parseInt(process.env.BACKFILL_CONCURRENCY ?? '8', 10);
 const LIMIT = process.env.BACKFILL_LIMIT ? parseInt(process.env.BACKFILL_LIMIT, 10) : null;
 const ONLY = process.env.BACKFILL_ONLY ? parseInt(process.env.BACKFILL_ONLY, 10) : null;
 const MAX_HOPS = parseInt(process.env.BACKFILL_MAX_HOPS ?? '250', 10);
-const REQUEST_TIMEOUT_MS = 30_000;
 
 const ARGS = parseArgs(process.argv.slice(2));
 
@@ -87,111 +78,8 @@ if (!ORD_BASE) {
   process.exit(1);
 }
 
-// ---------------- bitcoind RPC ----------------
-
-let rpcId = 0;
-async function rpc(method, params = []) {
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    const headers = { 'content-type': 'application/json' };
-    if (RPC_AUTH) headers['authorization'] = RPC_AUTH;
-    const res = await fetch(RPC_URL, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ jsonrpc: '1.0', id: ++rpcId, method, params }),
-      signal: ctl.signal,
-    });
-    if (!res.ok) {
-      const body = await safeText(res);
-      throw new Error(`rpc ${method} HTTP ${res.status}: ${body.slice(0, 200)}`);
-    }
-    const j = await res.json();
-    if (j.error) throw new Error(`rpc ${method} error: ${JSON.stringify(j.error)}`);
-    return j.result;
-  } finally {
-    clearTimeout(t);
-  }
-}
-
-async function safeText(r) {
-  try {
-    return await r.text();
-  } catch {
-    return '';
-  }
-}
-
-const headerCache = new Map(); // blockhash -> {height, time}
-async function getHeader(blockhash) {
-  let v = headerCache.get(blockhash);
-  if (v) return v;
-  const h = await rpc('getblockheader', [blockhash, true]);
-  v = { height: h.height, time: h.time };
-  headerCache.set(blockhash, v);
-  return v;
-}
-
-// ---------------- ord (satpoints) ----------------
-
-async function fetchOrdInscription(numOrId) {
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), 15_000);
-  try {
-    const res = await fetch(`${ORD_BASE}/inscription/${numOrId}`, {
-      headers: { Accept: 'application/json' },
-      signal: ctl.signal,
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(t);
-  }
-}
-
-// satpoint format: <txid>:<vout>:<offset>
-function parseSatpoint(s) {
-  if (!s || typeof s !== 'string') return null;
-  const parts = s.split(':');
-  if (parts.length < 3) return null;
-  const txid = parts[0];
-  const vout = parseInt(parts[1], 10);
-  const offset = BigInt(parts[2]);
-  if (!/^[0-9a-f]{64}$/i.test(txid)) return null;
-  if (!Number.isFinite(vout) || vout < 0) return null;
-  return { txid: txid.toLowerCase(), vout, offset };
-}
-
-// inscription_id format: <txid>i<index>
-function genesisTxidFromId(inscriptionId) {
-  if (typeof inscriptionId !== 'string') return null;
-  const idx = inscriptionId.indexOf('i');
-  if (idx !== 64) return null;
-  const tx = inscriptionId.slice(0, 64);
-  return /^[0-9a-f]{64}$/i.test(tx) ? tx.toLowerCase() : null;
-}
-
-// ord serves values in BTC (json) — we use sats here. 1 BTC = 1e8 sat.
-// Rounding via Math.round(value * 1e8) loses precision for very large values;
-// stay in BigInt and parse the decimal string directly.
-function btcToSats(v) {
-  if (typeof v === 'number') return BigInt(Math.round(v * 1e8));
-  if (typeof v === 'string') {
-    const [whole, frac = ''] = v.split('.');
-    const padded = (frac + '00000000').slice(0, 8);
-    return BigInt(whole || '0') * 100_000_000n + BigInt(padded || '0');
-  }
-  return 0n;
-}
-
-function addressFromScriptPubKey(spk) {
-  if (!spk || typeof spk !== 'object') return null;
-  if (typeof spk.address === 'string' && spk.address.length > 0) return spk.address;
-  if (Array.isArray(spk.addresses) && typeof spk.addresses[0] === 'string') return spk.addresses[0];
-  return null;
-}
+// bitcoind RPC, ord HTTP, satpoint/script parsing — all live in ./lib/chain.js
+// so the repair script can share them.
 
 // ---------------- chain walk ----------------
 

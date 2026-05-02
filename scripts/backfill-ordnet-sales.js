@@ -68,6 +68,12 @@ function parseArgs(argv) {
   return out;
 }
 
+// Note: ord.net's __data.json feed has been observed mis-attributing a sale's
+// `inscriptionId` (~3% of standalone inserts). We do NOT defend against this
+// at insert time — a per-row chain walk is too expensive on the live path
+// (~100-300ms per insert). Instead, run scripts/repair-ordnet-misattributed-sales.js
+// periodically (or after each backfill) to identify and clean up phantoms.
+
 // ---------------- HTTP + rate limit ----------------
 
 const MIN_INTERVAL_MS = 1000 / ARGS.rps;
