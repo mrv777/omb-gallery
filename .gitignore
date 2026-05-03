@@ -42,6 +42,7 @@ DEPLOYMENT.md
 PHASE2_HANDOFF.md
 AGENTS.md
 SATFLOW-REWRITE.md
+INDEXER-PLAN.md
 
 # server bootstrap + runbooks for the OMB box (bitcoind, ord, Coolify).
 # contains generated RPC creds, INTERNAL_POLL_SECRET, host IPs, etc.
