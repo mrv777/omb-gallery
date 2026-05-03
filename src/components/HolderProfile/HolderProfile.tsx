@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import type { EventRow, InscriptionRow, OwnershipDeltaRow } from '@/lib/db';
 import type { HolderColorHighlight } from '@/lib/holderEvents';
-import { lookupInscription } from '@/lib/inscriptionLookup';
 import { addressLink, ordNetWalletLink, truncateAddr } from '@/lib/format';
 import { lookupWalletLabel } from '@/lib/walletLabels';
 import { WalletsList } from './WalletsList';
@@ -9,15 +8,7 @@ import SafeImg from '@/components/SafeImg';
 import ColorPortfolioBar from '@/components/Charts/ColorPortfolioBar';
 import BagSizeOverTime from '@/components/Charts/BagSizeOverTime';
 import HolderActivityList from './HolderActivityList';
-import { Tooltip } from '../ui/Tooltip';
-
-const COLOR_TILE_BG: Record<string, string> = {
-  red: 'bg-accent-red/20',
-  blue: 'bg-accent-blue/20',
-  green: 'bg-accent-green/20',
-  orange: 'bg-accent-orange/20',
-  black: 'bg-accent-black/10',
-};
+import { OmbTile, BravocadosTile } from './HolderTiles';
 
 // Bravocados thumbnails come straight from ordinals.com — there's no local
 // optimized variant. Limit how many we render before collapsing into a
@@ -246,88 +237,6 @@ export default function HolderProfile({
         eventTotal={eventTotal}
       />
     </section>
-  );
-}
-
-function OmbTile({ number }: { number: number }) {
-  const hit = lookupInscription(number);
-  const tileBg = hit?.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
-  // Span carries the visual box (size, color, border, content-visibility) so
-  // Radix's `Trigger asChild` Slot has a server-rendered primitive to clone
-  // props onto. Wrapping the Link this way prevents an SSR-drop bug where
-  // React's RSC streamer occasionally defers a tile's Client-Component child
-  // (Link) to a separate chunk; when that happens, Slot's element-validity
-  // check fails on the placeholder and the entire trigger renders to nothing.
-  // The Link inside fills the span so click/hover targets are unchanged.
-  return (
-    <Tooltip content={`#${number}`}>
-      <span
-        className={`block w-20 h-20 sm:w-24 sm:h-24 ${tileBg} overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors`}
-        style={{
-          contentVisibility: 'auto',
-          containIntrinsicSize: '96px 96px',
-        }}
-      >
-        <Link
-          href={`/inscription/${number}`}
-          prefetch={false}
-          className="block w-full h-full"
-        >
-          {hit ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img
-              src={hit.thumbnail}
-              alt={`#${number}`}
-              loading="lazy"
-              decoding="async"
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center font-mono text-[10px] text-bone-dim">
-              #{number}
-            </div>
-          )}
-        </Link>
-      </span>
-    </Tooltip>
-  );
-}
-
-function BravocadosTile({
-  number,
-  inscriptionId,
-}: {
-  number: number;
-  inscriptionId: string | null;
-}) {
-  // No /inscription/[n] page exists for non-OMB collections yet, so link out
-  // to ordinals.com. Switch to internal once Phase 5 parametrizes it.
-  const href = inscriptionId
-    ? `https://ordinals.com/inscription/${inscriptionId}`
-    : `https://ordinals.com/inscription/${number}`;
-  const src = inscriptionId ? `https://ordinals.com/content/${inscriptionId}` : null;
-  return (
-    <Tooltip content={`Bravocados #${number}`}>
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="block w-16 h-16 bg-ink-2 overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors"
-      >
-        <SafeImg
-          src={src}
-          alt={`Bravocados #${number}`}
-          loading="lazy"
-          decoding="async"
-          className="w-full h-full object-cover"
-          fallback={
-            <div className="w-full h-full flex items-center justify-center font-mono text-[9px] text-bone-dim">
-              #{number}
-            </div>
-          }
-        />
-      </a>
-    </Tooltip>
   );
 }
 
