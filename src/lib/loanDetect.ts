@@ -762,35 +762,10 @@ export async function runLoanTick(
 
   const writeStats = { defaults: 0, originations: 0, unlocks: 0, repayments: 0 };
   const writeAll = db.transaction(() => {
-    for (const d of defaults) {
-      const v = d.verdict;
-      const raw = JSON.stringify({
-        source: 'onchain-loan-heuristic',
-        confidence: 'high',
-        loan_type: 'default',
-        escrow_addr: v.escrowAddr,
-        lender_addr: v.lender,
-        timelock_value: v.timelock.number,
-        timelock_kind: v.timelock.kind,
-        timelock_opcode: v.timelock.opcode,
-        prevout_txid: v.prevoutTxid,
-        prevout_vout: v.prevoutVout,
-        detector_version: DETECTOR_VERSION,
-      });
-      for (const ev of d.events) {
-        const u = stmts.upgradeToDefault.run({
-          inscription_id: ev.inscription_id,
-          txid: ev.txid,
-          raw_json: raw,
-        });
-        if (u.changes > 0) {
-          stmts.onDefault.run({ inscription_number: ev.inscription_number, lender: v.lender });
-          stmts.dequeueNotify.run({ id: ev.id });
-          writeStats.defaults++;
-        }
-      }
-    }
-
+    // Originations FIRST so active_loan_count is bumped before any
+    // default/unlock decrements it. Otherwise the MAX(x-1, 0) clamp would
+    // eat the decrement (0→0) for inscriptions whose origination event is
+    // processed in the same tick, leaving active_loan_count stuck at 1.
     for (const o of originations) {
       const orig = o.origination;
       const raw = JSON.stringify({
@@ -821,6 +796,35 @@ export async function runLoanTick(
           | undefined;
         if (evRow) stmts.dequeueNotify.run({ id: evRow.id });
         writeStats.originations++;
+      }
+    }
+
+    for (const d of defaults) {
+      const v = d.verdict;
+      const raw = JSON.stringify({
+        source: 'onchain-loan-heuristic',
+        confidence: 'high',
+        loan_type: 'default',
+        escrow_addr: v.escrowAddr,
+        lender_addr: v.lender,
+        timelock_value: v.timelock.number,
+        timelock_kind: v.timelock.kind,
+        timelock_opcode: v.timelock.opcode,
+        prevout_txid: v.prevoutTxid,
+        prevout_vout: v.prevoutVout,
+        detector_version: DETECTOR_VERSION,
+      });
+      for (const ev of d.events) {
+        const u = stmts.upgradeToDefault.run({
+          inscription_id: ev.inscription_id,
+          txid: ev.txid,
+          raw_json: raw,
+        });
+        if (u.changes > 0) {
+          stmts.onDefault.run({ inscription_number: ev.inscription_number, lender: v.lender });
+          stmts.dequeueNotify.run({ id: ev.id });
+          writeStats.defaults++;
+        }
       }
     }
 

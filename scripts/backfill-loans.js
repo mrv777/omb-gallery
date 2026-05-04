@@ -954,9 +954,39 @@ async function main() {
     // aggregates and event upgrades stay consistent if a SIGTERM hits mid-run.
     const w = getWriteStmts();
     const writeAll = db.transaction(() => {
-      // Defaults first (so inscription's effective_owner ends up = lender if
-      // both default and origination apply — in practice they're different
-      // inscriptions).
+      // Originations FIRST so active_loan_count is bumped before any
+      // default/unlock decrements it. Otherwise the MAX(x-1, 0) clamp would
+      // eat the decrement (0→0) for inscriptions whose origination event
+      // gets processed in the same tick — leaving active_loan_count stuck
+      // at 1 after origination instead of 0 after the close-out event.
+      // effective_owner ends correct either way: defaults overwrite to
+      // lender; unlocks overwrite to current_owner.
+      for (const o of originations) {
+        const orig = o.origination;
+        const raw = JSON.stringify({
+          source: 'onchain-loan-heuristic',
+          confidence: 'high',
+          loan_type: 'origination',
+          escrow_addr: orig.escrowAddr,
+          lender_addr: orig.lender,
+          borrower_addr: orig.borrower,
+          loan_amount_sats: orig.loanAmountSats,
+          detector_version: DETECTOR_VERSION,
+        });
+        const u = w.upgradeToOrigination.run({
+          inscription_id: orig.inscriptionId,
+          txid: orig.txid,
+          raw_json: raw,
+        });
+        if (u.changes > 0) {
+          w.onOrigination.run({
+            inscription_number: orig.inscriptionNumber,
+            borrower: orig.borrower,
+          });
+          writeStats.originations++;
+        }
+      }
+
       for (const d of defaults) {
         const v = d.verdict;
         const raw = JSON.stringify({
@@ -985,32 +1015,6 @@ async function main() {
             });
             writeStats.defaults++;
           }
-        }
-      }
-
-      for (const o of originations) {
-        const orig = o.origination;
-        const raw = JSON.stringify({
-          source: 'onchain-loan-heuristic',
-          confidence: 'high',
-          loan_type: 'origination',
-          escrow_addr: orig.escrowAddr,
-          lender_addr: orig.lender,
-          borrower_addr: orig.borrower,
-          loan_amount_sats: orig.loanAmountSats,
-          detector_version: DETECTOR_VERSION,
-        });
-        const u = w.upgradeToOrigination.run({
-          inscription_id: orig.inscriptionId,
-          txid: orig.txid,
-          raw_json: raw,
-        });
-        if (u.changes > 0) {
-          w.onOrigination.run({
-            inscription_number: orig.inscriptionNumber,
-            borrower: orig.borrower,
-          });
-          writeStats.originations++;
         }
       }
 
