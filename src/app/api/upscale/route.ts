@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import sharp from 'sharp';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { lookupInscription } from '@/lib/inscriptionLookup';
@@ -9,10 +10,13 @@ import { checkAndConsumeGlobal, checkAndConsumePerIp } from '@/lib/rateLimit';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// Single output size — 4x of the 336px source. Real-CUGAN ships only the
-// up4x-conservative variant in models-se; the route is fixed to that combo
-// so callers don't need to think about kernels or sizes.
+// Single output size — 4x of the 336px source. Both methods produce
+// 1344px PNGs.
 const TARGET_W = 1344;
+
+const METHODS = ['mitchell', 'waifu2x'] as const;
+type Method = (typeof METHODS)[number];
+
 const CACHE_DIR = process.env.UPSCALE_CACHE_DIR ?? '/data/upscaled';
 const UPSCALER_URL = process.env.UPSCALER_URL ?? 'http://localhost:8001/upscale';
 const UPSCALER_TIMEOUT_MS = 30_000;
@@ -28,18 +32,29 @@ const UPSCALER_TIMEOUT_MS = 30_000;
 const PER_IP_PER_MIN = 10;
 const GLOBAL_LIMIT = 100;
 const GLOBAL_WINDOW_MS = 10 * 60 * 1000;
-// Effectively unbounded — the per-IP helper requires a daily figure but we
-// don't want a daily ceiling here. Set high so the day-window check never
-// trips before the per-minute one.
+// Effectively unbounded — the per-IP helper requires a daily figure but
+// we don't want a daily ceiling here.
 const PER_IP_PER_DAY_UNBOUNDED = 100_000;
+
+function isMethod(m: string | null): m is Method {
+  return !!m && (METHODS as readonly string[]).includes(m);
+}
 
 export async function GET(req: NextRequest) {
   const sp = new URL(req.url).searchParams;
   const id = parseInt(sp.get('id') ?? '', 10);
+  const methodRaw = sp.get('method');
 
   if (!Number.isFinite(id)) {
     return NextResponse.json({ error: 'invalid id' }, { status: 400 });
   }
+  if (!isMethod(methodRaw)) {
+    return NextResponse.json(
+      { error: 'invalid method', allowed: METHODS },
+      { status: 400 },
+    );
+  }
+  const method: Method = methodRaw;
 
   const hit = lookupInscription(id);
   if (!hit || hit.kind !== 'omb' || hit.external) {
@@ -47,8 +62,8 @@ export async function GET(req: NextRequest) {
   }
 
   const srcPath = path.join(process.cwd(), 'public', hit.full.replace(/^\//, ''));
-  const cachePath = path.join(CACHE_DIR, `${id}-realcugan.png`);
-  const filename = `omb-${id}-${TARGET_W}.png`;
+  const cachePath = path.join(CACHE_DIR, `${id}-${method}.png`);
+  const filename = `omb-${id}-${method}-${TARGET_W}.png`;
 
   try {
     const cached = await fs.readFile(cachePath);
@@ -70,13 +85,15 @@ export async function GET(req: NextRequest) {
   const start = Date.now();
   let buf: Buffer;
   try {
-    buf = await runRealcugan(srcPath);
+    buf = method === 'mitchell' ? await runMitchell(srcPath) : await runWaifu2x(srcPath);
   } catch (e) {
-    log.error('upscale', 'generate failed', { id, err: String(e) });
-    return NextResponse.json({ error: 'upscale failed', detail: String(e) }, { status: 502 });
+    log.error('upscale', 'generate failed', { id, method, err: String(e) });
+    const status = method === 'waifu2x' ? 502 : 500;
+    return NextResponse.json({ error: 'upscale failed', detail: String(e) }, { status });
   }
   log.info('upscale', 'generated', {
     id,
+    method,
     bytes: buf.length,
     ms: Date.now() - start,
   });
@@ -91,7 +108,14 @@ export async function GET(req: NextRequest) {
   return pngResponse(buf, filename);
 }
 
-async function runRealcugan(srcPath: string): Promise<Buffer> {
+async function runMitchell(srcPath: string): Promise<Buffer> {
+  return sharp(srcPath)
+    .resize(TARGET_W, TARGET_W, { kernel: 'mitchell', fit: 'inside' })
+    .png()
+    .toBuffer();
+}
+
+async function runWaifu2x(srcPath: string): Promise<Buffer> {
   const srcBytes = await fs.readFile(srcPath);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), UPSCALER_TIMEOUT_MS);
@@ -115,7 +139,7 @@ async function runRealcugan(srcPath: string): Promise<Buffer> {
 function rateLimitResponse(retryAfterSec: number, scope: 'per-ip' | 'global'): NextResponse {
   return NextResponse.json(
     { error: 'rate limited', scope, retry_after_sec: retryAfterSec },
-    { status: 429, headers: { 'retry-after': String(retryAfterSec) } }
+    { status: 429, headers: { 'retry-after': String(retryAfterSec) } },
   );
 }
 
