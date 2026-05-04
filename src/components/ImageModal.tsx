@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { GalleryImage } from '@/lib/types';
 import { useFavorites } from '@/lib/FavoritesContext';
 import NotificationButton, { BellIcon } from './NotificationButton/NotificationButton';
+import DownloadMenu from './DownloadMenu/DownloadMenu';
 import { Tooltip } from './ui/Tooltip';
 
 interface ImageModalProps {
@@ -147,6 +148,7 @@ const ImageModal = memo(function ImageModal({
             label={<BellIcon />}
             className="h-11 w-11 flex items-center justify-center text-bone-dim hover:text-bone transition-colors"
           />
+          <DownloadMenu src={image.src} inscriptionId={id} />
           <button
             type="button"
             onClick={() => toggleFavorite(image.src)}

@@ -46,7 +46,12 @@ INDEXER-PLAN.md
 
 # server bootstrap + runbooks for the OMB box (bitcoind, ord, Coolify).
 # contains generated RPC creds, INTERNAL_POLL_SECRET, host IPs, etc.
-/infra/
+/infra/*
+# Exception: the upscaler sidecar is deployment-time runtime code that
+# needs to track the app's API in lockstep, so it's checked in. It's
+# scrubbed of operator-specific details — host runbook lives in the
+# local DEPLOYMENT.md.
+!/infra/upscaler/
 
 # untracked utility scripts (one-shot tooling, not part of the build)
 /scripts/update-descriptions.js
