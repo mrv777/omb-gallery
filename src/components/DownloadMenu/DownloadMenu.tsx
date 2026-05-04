@@ -36,10 +36,14 @@ export default function DownloadMenu({ src, inscriptionId, className }: Download
   useEffect(() => {
     if (!open) return;
     const onPointer = (e: PointerEvent) => {
+      // Don't close while a request is in flight — the user would lose
+      // all loading feedback for the remaining ~9s.
+      if (busyKey) return;
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (busyKey) return;
         e.stopPropagation();
         setOpen(false);
       }
@@ -50,7 +54,7 @@ export default function DownloadMenu({ src, inscriptionId, className }: Download
       document.removeEventListener('pointerdown', onPointer);
       document.removeEventListener('keydown', onKey, { capture: true });
     };
-  }, [open]);
+  }, [open, busyKey]);
 
   useEffect(() => {
     setOpen(false);
@@ -100,16 +104,20 @@ export default function DownloadMenu({ src, inscriptionId, className }: Download
 
   return (
     <div ref={rootRef} className={`relative ${className ?? ''}`}>
-      <Tooltip content="Download print version">
+      <Tooltip content={busyKey ? 'Generating PNG…' : 'Download print version'}>
         <button
           type="button"
-          onClick={() => setOpen(o => !o)}
+          onClick={() => {
+            if (busyKey) return;
+            setOpen(o => !o);
+          }}
           className="h-11 w-11 flex items-center justify-center text-bone-dim hover:text-bone transition-colors"
           aria-label="Download print version"
           aria-haspopup="menu"
           aria-expanded={open}
+          aria-busy={busyKey !== null}
         >
-          <DownloadIcon />
+          {busyKey ? <Spinner /> : <DownloadIcon />}
         </button>
       </Tooltip>
 
@@ -132,13 +140,19 @@ export default function DownloadMenu({ src, inscriptionId, className }: Download
                     disabled={disabled}
                     className="w-full text-left px-3 py-3 flex items-center justify-between gap-2 hover:bg-ink-2 hover:text-bone disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-bone-dim transition-colors"
                   >
-                    <span className="flex flex-col">
+                    <span className="flex flex-col min-w-0">
                       <span className="text-bone normal-case tracking-wider">{m.label}</span>
                       <span className="text-[10px] text-bone-dim normal-case mt-0.5">
-                        {m.hint}
+                        {isBusy ? 'Generating PNG…' : m.hint}
                       </span>
                     </span>
-                    <span className="text-bone-dim text-[10px]">{isBusy ? '…' : 'PNG'}</span>
+                    <span className="shrink-0 flex items-center justify-center w-6 h-6">
+                      {isBusy ? (
+                        <Spinner />
+                      ) : (
+                        <span className="text-bone-dim text-[10px]">PNG</span>
+                      )}
+                    </span>
                   </button>
                 </li>
               );
@@ -150,8 +164,11 @@ export default function DownloadMenu({ src, inscriptionId, className }: Download
             </div>
           )}
           <div className="px-3 py-2 text-[10px] text-bone-dim normal-case tracking-wider border-t border-ink-2 leading-relaxed">
-            On-chain source is 336px JPEG. AI works great on some pieces,
-            looks off on others — try both.
+            {busyKey === 'waifu2x'
+              ? 'AI upscale takes about 10 seconds. Hang tight…'
+              : busyKey === 'mitchell'
+                ? 'Working…'
+                : 'On-chain source is 336px JPEG. AI works great on some pieces, looks off on others — try both.'}
           </div>
         </div>
       )}
@@ -180,6 +197,31 @@ function DownloadIcon() {
       <path d="M8 2.5v8" />
       <path d="M4.5 7.5L8 11l3.5-3.5" />
       <path d="M3 13.5h10" />
+    </svg>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      aria-hidden="true"
+      className="animate-spin text-bone"
+    >
+      <path d="M8 2.5v3" />
+      <path d="M8 10.5v3" opacity="0.4" />
+      <path d="M2.5 8h3" opacity="0.7" />
+      <path d="M10.5 8h3" opacity="0.55" />
+      <path d="M4.1 4.1l2.1 2.1" opacity="0.85" />
+      <path d="M9.8 9.8l2.1 2.1" opacity="0.45" />
+      <path d="M11.9 4.1l-2.1 2.1" opacity="0.6" />
+      <path d="M6.2 9.8l-2.1 2.1" opacity="0.5" />
     </svg>
   );
 }
