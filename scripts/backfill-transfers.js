@@ -235,6 +235,12 @@ async function main() {
     let inserted = 0;
     let updated = 0;
     for (const r of rows) {
+      // Skip self-transfers (UTXO consolidation / postage moves where the
+      // owner didn't change). They're real on-chain events but not useful
+      // to surface — the live ord poll skips them at insert time, and the
+      // v21 schema migration deletes any historical ones from the DB. Don't
+      // let the backfill re-create them.
+      if (r.old_owner != null && r.old_owner === r.new_owner) continue;
       const existing = lookupEvent.get({
         inscription_id: r.inscription_id,
         txid: r.txid,

@@ -5,7 +5,9 @@ export type LeaderboardKey =
   | 'longest-unmoved'
   | 'top-volume'
   | 'highest-sale'
-  | 'top-holders';
+  | 'most-loaned'
+  | 'top-holders'
+  | 'top-lenders';
 
 export type LeaderboardMeta = {
   key: LeaderboardKey;
@@ -40,11 +42,23 @@ export const LEADERBOARDS: Record<LeaderboardKey, LeaderboardMeta> = {
     blurb: 'Inscriptions with the highest single sale price ever recorded.',
     metricLabel: 'sale',
   },
+  'most-loaned': {
+    key: 'most-loaned',
+    title: 'Most Borrowed Against',
+    blurb: 'Inscriptions used as collateral in the most loans (originations).',
+    metricLabel: 'loans',
+  },
   'top-holders': {
     key: 'top-holders',
     title: 'Top Holders',
     blurb: 'Wallets holding the most OMB inscriptions.',
     metricLabel: 'inscriptions',
+  },
+  'top-lenders': {
+    key: 'top-lenders',
+    title: 'Top Lenders',
+    blurb: 'Wallets that have funded the most loans against OMBs.',
+    metricLabel: 'loans',
   },
 };
 

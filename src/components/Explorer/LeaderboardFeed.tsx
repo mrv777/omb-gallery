@@ -19,7 +19,8 @@ type Props = {
 
 export default function LeaderboardFeed({ type, color, initial }: Props) {
   const meta = LEADERBOARDS[type];
-  const isHolders = type === 'top-holders';
+  const isHolders = type === 'top-holders' || type === 'top-lenders';
+  const unitLabel = type === 'top-holders' ? 'holders' : type === 'top-lenders' ? 'lenders' : 'inscriptions';
 
   const { items, loading, error, reachedEnd, capped, loadMore } = useLeaderboardFeed(
     type,
@@ -92,7 +93,7 @@ export default function LeaderboardFeed({ type, color, initial }: Props) {
         <div className="px-4 py-3 font-mono text-[11px] uppercase tracking-[0.08em] text-bone-dim border-t border-ink-2">
           {capped
             ? `showing top ${items.length.toLocaleString()} — refine by color to see more`
-            : `end of leaderboard · ${items.length.toLocaleString()} ${isHolders ? 'holders' : 'inscriptions'}`}
+            : `end of leaderboard · ${items.length.toLocaleString()} ${unitLabel}`}
         </div>
       )}
       {/* Sentinel sits below the list; IntersectionObserver fires loadMore

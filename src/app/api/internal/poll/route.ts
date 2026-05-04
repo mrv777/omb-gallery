@@ -646,6 +646,27 @@ function applyOrdStates(
 
       if (oldOutput === newOutput) continue;
 
+      // Self-transfer: the UTXO changed but the owner didn't (postage move,
+      // UTXO consolidation, fee bump). Real on-chain spend, but not a
+      // "transfer" in the collection-circulation sense — skip recording
+      // the event so it doesn't pollute leaderboards / timelines. We still
+      // advance current_output so we don't keep tripping on the same diff
+      // next tick.
+      if (known.current_owner != null && known.current_owner === s.address) {
+        stmts.setInscriptionState.run({
+          inscription_number: known.inscription_number,
+          inscription_id: s.inscription_id,
+          current_output: newOutput,
+          current_owner: s.address,
+        });
+        indexed.set(s.inscription_id, {
+          inscription_number: known.inscription_number,
+          current_output: newOutput,
+          current_owner: s.address,
+        });
+        continue;
+      }
+
       // Output changed → transfer happened.
       const txid = txidFromOutput(newOutput);
       if (!txid) {

@@ -69,8 +69,18 @@ export default async function ExplorerPage({
     collection,
     color: colorParam,
   }) as InscriptionRow[];
+  const mostLoaned = stmts.topByLoans.all({
+    limit: 10,
+    collection,
+    color: colorParam,
+  }) as InscriptionRow[];
   const holderRows = stmts.topHoldersGrouped.all({
     limit: 25,
+    collection,
+    color: colorParam,
+  }) as GroupedHolderRow[];
+  const lenderRows = stmts.topLendersGrouped.all({
+    limit: 10,
     collection,
     color: colorParam,
   }) as GroupedHolderRow[];
@@ -83,6 +93,15 @@ export default async function ExplorerPage({
     color: colorParam,
   }) as HoldingDurationBucketRow[];
   const holders: ApiHolder[] = holderRows.map(r => ({
+    group_key: r.group_key,
+    is_user: r.is_user === 1,
+    username: r.username,
+    avatar_url: r.avatar_url,
+    wallets: (r.wallets_csv ?? '').split(',').filter(Boolean),
+    inscription_count: r.inscription_count,
+    updated_at: r.updated_at,
+  }));
+  const lenders: ApiHolder[] = lenderRows.map(r => ({
     group_key: r.group_key,
     is_user: r.is_user === 1,
     username: r.username,
@@ -104,6 +123,8 @@ export default async function ExplorerPage({
           <Leaderboard type="longest-unmoved" items={unmoved} showSeeAll color={color} />
           <Leaderboard type="top-volume" items={volume} showSeeAll color={color} />
           <Leaderboard type="highest-sale" items={highSale} showSeeAll color={color} />
+          <Leaderboard type="most-loaned" items={mostLoaned} showSeeAll color={color} />
+          <Leaderboard type="top-lenders" items={lenders} showSeeAll color={color} />
           <div className="md:col-span-2">
             <Leaderboard type="top-holders" items={holders} showSeeAll color={color} />
           </div>

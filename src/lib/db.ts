@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 20;
+const SCHEMA_VERSION = 21;
 
 // OMB-shape entry: filename = "<inscription_number>.jpg|webp", per-color groups.
 type ImageEntry = { filename: string; description: string; tags: string[] };
@@ -100,6 +100,7 @@ function migrate(db: DB): void {
         upgradeV17ToV18(db);
         upgradeV18ToV19(db);
         upgradeV19ToV20(db);
+        upgradeV20ToV21(db);
       } else {
         initSchemaLatest(db);
       }
@@ -123,6 +124,7 @@ function migrate(db: DB): void {
       if (current < 18) upgradeV17ToV18(db);
       if (current < 19) upgradeV18ToV19(db);
       if (current < 20) upgradeV19ToV20(db);
+      if (current < 21) upgradeV20ToV21(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -862,6 +864,35 @@ function upgradeV19ToV20(db: DB): void {
   `);
 }
 
+function upgradeV20ToV21(db: DB): void {
+  // Self-transfer cleanup: an inscription getting respent within the same
+  // wallet (postage move, UTXO consolidation, fee bump) is a real on-chain
+  // event but isn't a "transfer" in the collection-circulation sense. They
+  // dominated the most-transferred leaderboard (e.g. #83307312 had 85 self
+  // shuffles vs 17 real transfers). Going forward, the ord poll skips
+  // recording them at insert time. This migration deletes the historical
+  // ones and recomputes per-inscription aggregates from the surviving rows.
+  db.exec(`
+    DELETE FROM events WHERE event_type = 'transferred' AND old_owner = new_owner;
+
+    UPDATE inscriptions SET
+      transfer_count = (
+        SELECT COUNT(*) FROM events e
+        WHERE e.inscription_number = inscriptions.inscription_number
+          AND e.event_type = 'transferred'
+      ),
+      last_movement_at = (
+        SELECT MAX(block_timestamp) FROM events e
+        WHERE e.inscription_number = inscriptions.inscription_number
+          AND e.event_type IN ('transferred','sold')
+      ),
+      last_event_at = (
+        SELECT MAX(block_timestamp) FROM events e
+        WHERE e.inscription_number = inscriptions.inscription_number
+      );
+  `);
+}
+
 function upgradeV15ToV16(db: DB): void {
   // Phase 6.1: extend events.event_type CHECK to allow 'listed' so the
   // listings poll can emit fan-out-eligible rows. SQLite can't ALTER a CHECK
@@ -1069,7 +1100,9 @@ type Stmts = {
   topByLongestUnmoved: ReturnType<DB['prepare']>;
   topByVolume: ReturnType<DB['prepare']>;
   topByHighestSale: ReturnType<DB['prepare']>;
+  topByLoans: ReturnType<DB['prepare']>;
   topHolders: ReturnType<DB['prepare']>;
+  topLendersGrouped: ReturnType<DB['prepare']>;
   // leaderboards (cursor-paginated, with stable secondary sort by
   // inscription_number for keyset pagination on the /explorer/[type] detail
   // pages).
@@ -1077,7 +1110,9 @@ type Stmts = {
   topByLongestUnmovedPaged: ReturnType<DB['prepare']>;
   topByVolumePaged: ReturnType<DB['prepare']>;
   topByHighestSalePaged: ReturnType<DB['prepare']>;
+  topByLoansPaged: ReturnType<DB['prepare']>;
   topHoldersGroupedPaged: ReturnType<DB['prepare']>;
+  topLendersGroupedPaged: ReturnType<DB['prepare']>;
   // listings
   upsertActiveListing: ReturnType<DB['prepare']>;
   deleteStaleListings: ReturnType<DB['prepare']>;
@@ -1716,6 +1751,19 @@ export function getStmts(): Stmts {
       LIMIT @limit
     `),
 
+    // Most-borrowed-against: inscriptions used as collateral most often. Uses
+    // the denormalized loan_count column (incremented per loan-originated
+    // event by the loan detector). Ties broken by last_event_at DESC so the
+    // more recently-active piece wins.
+    topByLoans: db.prepare(`
+      SELECT * FROM inscriptions
+      WHERE loan_count > 0
+        AND collection_slug = @collection
+        AND (@color IS NULL OR color = @color)
+      ORDER BY loan_count DESC, last_event_at DESC
+      LIMIT @limit
+    `),
+
     // Paged variants for /explorer/[type] infinite scroll. Ordering uses
     // inscription_number as a unique secondary sort so keyset pagination is
     // deterministic — without it, ties on the primary metric can cause rows
@@ -1779,6 +1827,20 @@ export function getStmts(): Stmts {
           OR (highest_sale_sats = @cursor_primary AND inscription_number > @cursor_secondary)
         )
       ORDER BY highest_sale_sats DESC, inscription_number ASC
+      LIMIT @limit
+    `),
+
+    topByLoansPaged: db.prepare(`
+      SELECT * FROM inscriptions
+      WHERE loan_count > 0
+        AND collection_slug = @collection
+        AND (@color IS NULL OR color = @color)
+        AND (
+          @cursor_primary IS NULL
+          OR loan_count < @cursor_primary
+          OR (loan_count = @cursor_primary AND inscription_number > @cursor_secondary)
+        )
+      ORDER BY loan_count DESC, inscription_number ASC
       LIMIT @limit
     `),
 
@@ -2024,6 +2086,68 @@ export function getStmts(): Stmts {
       WHERE i.current_owner IS NOT NULL
         AND i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
+      GROUP BY group_key
+      HAVING
+        @cursor_primary IS NULL
+        OR inscription_count < @cursor_primary
+        OR (inscription_count = @cursor_primary AND group_key > @cursor_secondary)
+      ORDER BY inscription_count DESC, group_key ASC
+      LIMIT @limit
+    `),
+
+    // Top lenders: wallets that have funded the most loan-originated events.
+    // Mirrors topHoldersGrouped's Matrica-collapse so a lender with several
+    // funding wallets surfaces as one identity. The lender address lives in
+    // raw_json.lender_addr (set by both the live runtime and the historical
+    // backfill). `inscription_count` here is the loan count — reusing the
+    // ApiHolder column name keeps the rendering pipeline unchanged.
+    topLendersGrouped: db.prepare(`
+      WITH loans AS (
+        SELECT json_extract(raw_json, '$.lender_addr') AS lender_addr
+        FROM events e
+        JOIN inscriptions i ON i.inscription_number = e.inscription_number
+        WHERE e.event_type = 'loan-originated'
+          AND i.collection_slug = @collection
+          AND (@color IS NULL OR i.color = @color)
+          AND json_extract(e.raw_json, '$.lender_addr') IS NOT NULL
+      )
+      SELECT
+        COALESCE(wl.matrica_user_id, l.lender_addr)              AS group_key,
+        CASE WHEN wl.matrica_user_id IS NOT NULL THEN 1 ELSE 0 END AS is_user,
+        mu.username                                              AS username,
+        mu.avatar_url                                            AS avatar_url,
+        GROUP_CONCAT(DISTINCT l.lender_addr)                     AS wallets_csv,
+        COUNT(*)                                                 AS inscription_count,
+        unixepoch()                                              AS updated_at
+      FROM loans l
+      LEFT JOIN wallet_links  wl ON wl.wallet_addr = l.lender_addr
+      LEFT JOIN matrica_users mu ON mu.user_id     = wl.matrica_user_id
+      GROUP BY group_key
+      ORDER BY inscription_count DESC, group_key ASC
+      LIMIT @limit
+    `),
+
+    topLendersGroupedPaged: db.prepare(`
+      WITH loans AS (
+        SELECT json_extract(raw_json, '$.lender_addr') AS lender_addr
+        FROM events e
+        JOIN inscriptions i ON i.inscription_number = e.inscription_number
+        WHERE e.event_type = 'loan-originated'
+          AND i.collection_slug = @collection
+          AND (@color IS NULL OR i.color = @color)
+          AND json_extract(e.raw_json, '$.lender_addr') IS NOT NULL
+      )
+      SELECT
+        COALESCE(wl.matrica_user_id, l.lender_addr)              AS group_key,
+        CASE WHEN wl.matrica_user_id IS NOT NULL THEN 1 ELSE 0 END AS is_user,
+        mu.username                                              AS username,
+        mu.avatar_url                                            AS avatar_url,
+        GROUP_CONCAT(DISTINCT l.lender_addr)                     AS wallets_csv,
+        COUNT(*)                                                 AS inscription_count,
+        unixepoch()                                              AS updated_at
+      FROM loans l
+      LEFT JOIN wallet_links  wl ON wl.wallet_addr = l.lender_addr
+      LEFT JOIN matrica_users mu ON mu.user_id     = wl.matrica_user_id
       GROUP BY group_key
       HAVING
         @cursor_primary IS NULL

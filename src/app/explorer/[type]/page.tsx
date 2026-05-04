@@ -15,7 +15,9 @@ const VALID: LeaderboardKey[] = [
   'longest-unmoved',
   'top-volume',
   'highest-sale',
+  'most-loaned',
   'top-holders',
+  'top-lenders',
 ];
 
 // Page-1 size matches the client hook's PAGE_SIZE so the initial SSR render
@@ -71,8 +73,10 @@ export default async function LeaderboardDetailPage({
   let items: LeaderboardItem[];
   let nextCursor: string | null;
 
-  if (type === 'top-holders') {
-    const rows = stmts.topHoldersGroupedPaged.all({
+  if (type === 'top-holders' || type === 'top-lenders') {
+    const stmt =
+      type === 'top-holders' ? stmts.topHoldersGroupedPaged : stmts.topLendersGroupedPaged;
+    const rows = stmt.all({
       limit: PAGE_SIZE,
       collection,
       color: colorParam,
@@ -104,6 +108,8 @@ export default async function LeaderboardDetailPage({
           return stmts.topByVolumePaged;
         case 'highest-sale':
           return stmts.topByHighestSalePaged;
+        case 'most-loaned':
+          return stmts.topByLoansPaged;
         default:
           throw new Error(`unhandled type ${type}`);
       }
@@ -119,7 +125,10 @@ export default async function LeaderboardDetailPage({
     items = inscriptions;
     nextCursor =
       inscriptions.length === PAGE_SIZE
-        ? buildInscriptionCursor(inscriptions[inscriptions.length - 1], type)
+        ? buildInscriptionCursor(
+            inscriptions[inscriptions.length - 1],
+            type as Exclude<LeaderboardKey, 'top-holders' | 'top-lenders'>
+          )
         : null;
   }
 
@@ -136,7 +145,7 @@ export default async function LeaderboardDetailPage({
 
 function buildInscriptionCursor(
   row: ApiInscription,
-  type: Exclude<LeaderboardKey, 'top-holders'>
+  type: Exclude<LeaderboardKey, 'top-holders' | 'top-lenders'>
 ): string | null {
   const num = row.inscription_number;
   switch (type) {
@@ -148,5 +157,7 @@ function buildInscriptionCursor(
       return `${row.total_volume_sats}:${num}`;
     case 'highest-sale':
       return `${row.highest_sale_sats}:${num}`;
+    case 'most-loaned':
+      return `${row.loan_count ?? 0}:${num}`;
   }
 }

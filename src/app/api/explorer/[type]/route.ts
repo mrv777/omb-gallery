@@ -14,7 +14,9 @@ const TYPES = [
   'longest-unmoved',
   'top-volume',
   'highest-sale',
+  'most-loaned',
   'top-holders',
+  'top-lenders',
 ] as const;
 type LeaderboardType = (typeof TYPES)[number];
 
@@ -44,8 +46,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ type: strin
 
   const stmts = getStmts();
 
-  if (type === 'top-holders') {
-    const rows = stmts.topHoldersGroupedPaged.all({
+  if (type === 'top-holders' || type === 'top-lenders') {
+    const stmt =
+      type === 'top-holders' ? stmts.topHoldersGroupedPaged : stmts.topLendersGroupedPaged;
+    const rows = stmt.all({
       limit,
       collection,
       color,
@@ -81,6 +85,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ type: strin
         return stmts.topByVolumePaged;
       case 'highest-sale':
         return stmts.topByHighestSalePaged;
+      case 'most-loaned':
+        return stmts.topByLoansPaged;
     }
   })();
 
@@ -93,7 +99,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ type: strin
   }) as InscriptionRow[];
 
   const next_cursor =
-    rows.length === limit ? buildInscriptionCursor(rows[rows.length - 1], type) : null;
+    rows.length === limit
+      ? buildInscriptionCursor(
+          rows[rows.length - 1],
+          type as Exclude<LeaderboardType, 'top-holders' | 'top-lenders'>
+        )
+      : null;
 
   return NextResponse.json(
     { type, items: rows, next_cursor },
@@ -111,7 +122,7 @@ function parseCursor(raw: string | null, type: LeaderboardType): ParsedCursor | 
   const secondaryStr = raw.slice(idx + 1);
   const primary = parseInt(primaryStr, 10);
   if (!Number.isFinite(primary)) return null;
-  if (type === 'top-holders') {
+  if (type === 'top-holders' || type === 'top-lenders') {
     return { primary, secondary: secondaryStr };
   }
   const secondary = parseInt(secondaryStr, 10);
@@ -121,7 +132,7 @@ function parseCursor(raw: string | null, type: LeaderboardType): ParsedCursor | 
 
 function buildInscriptionCursor(
   row: InscriptionRow,
-  type: Exclude<LeaderboardType, 'top-holders'>
+  type: Exclude<LeaderboardType, 'top-holders' | 'top-lenders'>
 ): string | null {
   const num = row.inscription_number;
   switch (type) {
@@ -133,6 +144,8 @@ function buildInscriptionCursor(
       return `${row.total_volume_sats}:${num}`;
     case 'highest-sale':
       return `${row.highest_sale_sats}:${num}`;
+    case 'most-loaned':
+      return `${row.loan_count ?? 0}:${num}`;
   }
 }
 
