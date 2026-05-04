@@ -2,7 +2,7 @@ export type ApiEvent = {
   id: number;
   inscription_id: string;
   inscription_number: number;
-  event_type: 'inscribed' | 'transferred' | 'sold' | 'loan-originated' | 'loan-defaulted' | 'loan-repaid' | 'loan-unlocked';
+  event_type: 'inscribed' | 'transferred' | 'sold' | 'mint' | 'loan-originated' | 'loan-defaulted' | 'loan-repaid' | 'loan-unlocked';
   block_height: number | null;
   block_timestamp: number;
   new_satpoint: string | null;

@@ -45,12 +45,13 @@ const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev, matrica 
   const tileBg = hit && hit.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
 
   const isSold = event.event_type === 'sold';
+  const isMint = event.event_type === 'mint';
   const display = EVENT_DISPLAY[event.event_type];
   const eventLabel = display.label;
   const eventColor = display.color;
   const eventBg = display.bg;
 
-  const priceStr = isSold ? formatBtc(event.sale_price_sats) : '';
+  const priceStr = isSold || isMint ? formatBtc(event.sale_price_sats) : '';
   const market = isSold ? marketplaceLabel(event.marketplace) : '';
   const txLink = memepoolTxLink(event.txid);
 

@@ -10,6 +10,7 @@ export type EventType =
   | 'transferred'
   | 'sold'
   | 'listed'
+  | 'mint'
   | 'loan-originated'
   | 'loan-defaulted'
   | 'loan-repaid'
@@ -48,6 +49,12 @@ export const EVENT_DISPLAY: Record<EventType, EventDisplay> = {
     label: 'LISTED',
     color: 'text-bone-dim',
     bg: 'border-bone-dim/40',
+  },
+  mint: {
+    label: 'MINT',
+    color: 'text-accent-orange',
+    bg: 'bg-accent-orange/10 border-accent-orange/40',
+    subtitle: 'primary distribution',
   },
   'loan-originated': {
     label: 'LOAN ORIGINATED',

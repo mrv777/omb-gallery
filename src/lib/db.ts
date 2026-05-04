@@ -9,7 +9,17 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 22;
+const SCHEMA_VERSION = 23;
+
+// Wallets that distributed inscriptions as primary-mint outflows. Events
+// where `old_owner` matches one of these (and inscription is in the
+// matching color set) get `event_type = 'mint'` rather than 'sold' or
+// 'transferred', so primary-mint prices don't pollute the sale-volume /
+// highest-sale leaderboards. The wallets are dormant in 2026; this is
+// retroactive cleanup, not a hot path.
+const MINT_WALLETS: Record<string, string> = {
+  bc1pyl6g53k220rggaukyx929qnnxqw8vzt8xrfw88muw22pnwfvqjkqreeqpw: 'green',
+};
 
 // OMB-shape entry: filename = "<inscription_number>.jpg|webp", per-color groups.
 type ImageEntry = { filename: string; description: string; tags: string[] };
@@ -102,6 +112,7 @@ function migrate(db: DB): void {
         upgradeV19ToV20(db);
         upgradeV20ToV21(db);
         upgradeV21ToV22(db);
+        upgradeV22ToV23(db);
       } else {
         initSchemaLatest(db);
       }
@@ -127,6 +138,7 @@ function migrate(db: DB): void {
       if (current < 20) upgradeV19ToV20(db);
       if (current < 21) upgradeV20ToV21(db);
       if (current < 22) upgradeV21ToV22(db);
+      if (current < 23) upgradeV22ToV23(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -214,7 +226,7 @@ function initSchemaLatest(db: DB): void {
       inscription_id      TEXT    NOT NULL,
       inscription_number  INTEGER NOT NULL,
       event_type          TEXT    NOT NULL CHECK (event_type IN (
-        'inscribed','transferred','sold','listed',
+        'inscribed','transferred','sold','listed','mint',
         'loan-originated','loan-defaulted','loan-repaid','loan-unlocked'
       )),
       block_height        INTEGER,
@@ -961,6 +973,99 @@ function upgradeV21ToV22(db: DB): void {
     DROP TABLE poll_state;
     ALTER TABLE poll_state_v22 RENAME TO poll_state;
     INSERT OR IGNORE INTO poll_state (stream, collection_slug) VALUES ('loan_escrows', 'omb');
+  `);
+}
+
+function upgradeV22ToV23(db: DB): void {
+  // Add 'mint' to events.event_type CHECK so primary-mint distributions
+  // (e.g. green-eye outflows from bc1pyl6g…qreeqpw in 2023) can be
+  // distinguished from secondary-market sales. Then reclassify matching
+  // historical events and recompute aggregates so mint prices stop
+  // counting toward sale-volume / highest-sale leaderboards.
+  //
+  // SQLite can't ALTER a CHECK in place — copy-and-swap, same pattern as
+  // v3 / v6 / v9 / v12 / v14 / v16.
+  db.exec(`
+    CREATE TABLE events_v5 (
+      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      inscription_id      TEXT    NOT NULL,
+      inscription_number  INTEGER NOT NULL,
+      event_type          TEXT    NOT NULL CHECK (event_type IN (
+        'inscribed','transferred','sold','listed','mint',
+        'loan-originated','loan-defaulted','loan-repaid','loan-unlocked'
+      )),
+      block_height        INTEGER,
+      block_timestamp     INTEGER NOT NULL,
+      new_satpoint        TEXT,
+      old_owner           TEXT,
+      new_owner           TEXT,
+      marketplace         TEXT,
+      sale_price_sats     INTEGER,
+      txid                TEXT    NOT NULL,
+      raw_json            TEXT,
+      created_at          INTEGER NOT NULL DEFAULT (unixepoch()),
+      FOREIGN KEY (inscription_number) REFERENCES inscriptions (inscription_number) ON DELETE CASCADE,
+      UNIQUE (inscription_id, txid)
+    );
+    INSERT INTO events_v5 SELECT * FROM events;
+    DROP TABLE events;
+    ALTER TABLE events_v5 RENAME TO events;
+    CREATE INDEX IF NOT EXISTS idx_events_block_ts        ON events (block_timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_inscription_num ON events (inscription_number, block_timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_id_desc         ON events (id DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_type_id         ON events (event_type, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_type_ts_id      ON events (event_type, block_timestamp DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_new_owner_ts_id ON events (new_owner, block_timestamp DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_old_owner_ts_id ON events (old_owner, block_timestamp DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_txid            ON events (txid);
+  `);
+
+  // Reclassify primary-mint events. The mapping is wallet → color, so
+  // we only flip rows whose inscription's color matches the registered
+  // distribution wallet. Other colors from the same wallet (none today,
+  // but defensive) keep their existing event_type.
+  const reclassify = db.prepare(`
+    UPDATE events
+       SET event_type = 'mint',
+           marketplace = NULL
+     WHERE old_owner = @addr
+       AND inscription_number IN (
+         SELECT inscription_number FROM inscriptions WHERE color = @color
+       )
+       AND event_type IN ('transferred','sold')
+  `);
+  for (const [addr, color] of Object.entries(MINT_WALLETS)) {
+    reclassify.run({ addr, color });
+  }
+
+  // Recompute aggregates on affected inscriptions so mint events don't
+  // count as transfers or sales. Affected = any inscription that now has
+  // a 'mint' event.
+  db.exec(`
+    UPDATE inscriptions AS i
+       SET transfer_count = (
+             SELECT COUNT(*) FROM events e
+              WHERE e.inscription_number = i.inscription_number
+                AND e.event_type = 'transferred'
+           ),
+           sale_count = (
+             SELECT COUNT(*) FROM events e
+              WHERE e.inscription_number = i.inscription_number
+                AND e.event_type = 'sold'
+           ),
+           total_volume_sats = (
+             SELECT COALESCE(SUM(e.sale_price_sats),0) FROM events e
+              WHERE e.inscription_number = i.inscription_number
+                AND e.event_type = 'sold'
+           ),
+           highest_sale_sats = (
+             SELECT COALESCE(MAX(e.sale_price_sats),0) FROM events e
+              WHERE e.inscription_number = i.inscription_number
+                AND e.event_type = 'sold'
+           )
+     WHERE i.inscription_number IN (
+       SELECT DISTINCT inscription_number FROM events WHERE event_type = 'mint'
+     );
   `);
 }
 
@@ -2581,7 +2686,7 @@ export type EventRow = {
   id: number;
   inscription_id: string;
   inscription_number: number;
-  event_type: 'inscribed' | 'transferred' | 'sold' | 'loan-originated' | 'loan-defaulted' | 'loan-repaid' | 'loan-unlocked';
+  event_type: 'inscribed' | 'transferred' | 'sold' | 'mint' | 'loan-originated' | 'loan-defaulted' | 'loan-repaid' | 'loan-unlocked';
   block_height: number | null;
   block_timestamp: number;
   new_satpoint: string | null;

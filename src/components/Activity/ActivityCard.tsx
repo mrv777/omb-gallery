@@ -59,9 +59,10 @@ const ActivityCard = memo(function ActivityCard({ event }: Props) {
 
   const loanSats = loanAmountSats(event);
   const priceStr =
-    event.event_type === 'sold' ? formatBtc(event.sale_price_sats)
-    : loanSats != null ? formatBtc(loanSats)
-    : '';
+    event.event_type === 'sold' || event.event_type === 'mint'
+      ? formatBtc(event.sale_price_sats)
+      : loanSats != null ? formatBtc(loanSats)
+      : '';
   const market = event.event_type === 'sold' ? marketplaceLabel(event.marketplace) : '';
 
   const showOwners = OWNER_VISIBLE_TYPES.has(event.event_type) && !!(event.old_owner || event.new_owner);

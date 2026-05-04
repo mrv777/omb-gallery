@@ -26,6 +26,7 @@ export default function HolderEventRow({ event, wallets }: { event: EventRow; wa
   const isExternal = hit?.external ?? false;
 
   const isSold = event.event_type === 'sold';
+  const isMint = event.event_type === 'mint';
   const isTransferred = event.event_type === 'transferred';
   const isLoan = isLoanEvent(event.event_type);
   const display = EVENT_DISPLAY[event.event_type];
@@ -62,7 +63,7 @@ export default function HolderEventRow({ event, wallets }: { event: EventRow; wa
   const eventColor = isLoan ? display.color : isSold || isTransferred ? directionColor : display.color;
   const eventBg = isLoan ? display.bg : isSold || isTransferred ? directionBg : display.bg;
 
-  const priceStr = isSold ? formatBtc(event.sale_price_sats) : '';
+  const priceStr = isSold || isMint ? formatBtc(event.sale_price_sats) : '';
   const market = isSold ? marketplaceLabel(event.marketplace) : '';
   const txLink = memepoolTxLink(event.txid);
   // Non-OMB inscriptions don't have a /inscription/[n] page yet (the route is

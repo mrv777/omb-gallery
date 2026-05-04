@@ -14,6 +14,7 @@ type Props = { event: EventRow };
 
 export default function EventTimelineRow({ event }: Props) {
   const isSold = event.event_type === 'sold';
+  const isMint = event.event_type === 'mint';
   const isLoanOrig = event.event_type === 'loan-originated';
   const isLoanDefault = event.event_type === 'loan-defaulted';
   const display = EVENT_DISPLAY[event.event_type];
@@ -21,7 +22,7 @@ export default function EventTimelineRow({ event }: Props) {
   const eventColor = display.color;
   const eventBg = display.bg;
 
-  const priceStr = isSold ? formatBtc(event.sale_price_sats) : '';
+  const priceStr = isSold || isMint ? formatBtc(event.sale_price_sats) : '';
   const market = isSold ? marketplaceLabel(event.marketplace) : '';
   const txLink = memepoolTxLink(event.txid);
 
