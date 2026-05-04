@@ -1,6 +1,12 @@
-// Tiny HTTP wrapper around realcugan-ncnn-vulkan. CPU-only.
+// Tiny HTTP wrapper around waifu2x-ncnn-vulkan, run in CPU mode.
 // POST /upscale with raw image bytes -> 200 image/png
 // GET  /health -> 200 ok
+//
+// Note: an earlier version used realcugan-ncnn-vulkan, but its `-g -1`
+// CPU mode silently no-ops on headless Linux (exits 0 without producing
+// output). waifu2x-ncnn-vulkan by the same author uses the same ncnn
+// substrate and similarly anime-tuned models, but its CPU mode actually
+// works.
 
 'use strict';
 
@@ -12,16 +18,22 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 
 const PORT = parseInt(process.env.PORT || '8001', 10);
-const BIN = process.env.REALCUGAN_BIN || '/app/realcugan-ncnn-vulkan';
-const MODELS = process.env.REALCUGAN_MODELS || '/app/models-se';
-// Real-CUGAN models-se for 4x ships only the "conservative" variant
-// (up4x-conservative.bin) — no separate denoise levels. The CLI maps that
-// to -n -1. The conservative model still suppresses JPEG artifacts as part
-// of its training; it just preserves more original detail than the
-// denoise-heavy variants would.
-const SCALE = process.env.REALCUGAN_SCALE || '4';
-const NOISE = process.env.REALCUGAN_NOISE || '-1';
-const TILE = process.env.REALCUGAN_TILE || '256';
+const BIN = process.env.WAIFU2X_BIN || '/app/waifu2x-ncnn-vulkan';
+// models-cunet: anime/illustration tuned, supports denoise 0-3 at all
+// scales by cascading 2x passes. Best fit for hand-drawn ink art with
+// JPEG noise to clean up.
+const MODELS = process.env.WAIFU2X_MODELS || '/app/models-cunet';
+const SCALE = process.env.WAIFU2X_SCALE || '4';
+// Noise 0-3 (or -1 to skip denoising). 2 = moderate JPEG cleanup
+// without over-smoothing the hand-drawn line wobble.
+const NOISE = process.env.WAIFU2X_NOISE || '2';
+// Tile size matters a LOT for CPU latency. With `-t 256` the input fits
+// in a single tile and the whole image runs through one big inference
+// pass — empirically ~6x slower than smaller tiles that let ncnn
+// pipeline through multiple smaller passes. 200 is a measured sweet spot
+// for our 336px source on Xeon E-2274G; finer tiles below 100 didn't
+// improve further.
+const TILE = process.env.WAIFU2X_TILE || '200';
 const MAX_BODY = parseInt(process.env.MAX_BODY_BYTES || '5242880', 10); // 5 MB
 const REQ_TIMEOUT_MS = parseInt(process.env.REQ_TIMEOUT_MS || '60000', 10);
 
@@ -71,14 +83,18 @@ const server = http.createServer(async (req, res) => {
   try {
     const png = await serial(() => runUpscale(body, reqId));
     if (aborted) return;
-    log('info', reqId, 'ok', { ms: Date.now() - start, in_bytes: body.length, out_bytes: png.length });
+    log('info', reqId, 'ok', {
+      ms: Date.now() - start,
+      in_bytes: body.length,
+      out_bytes: png.length,
+    });
     res.writeHead(200, { 'content-type': 'image/png', 'content-length': png.length }).end(png);
   } catch (e) {
     log('error', reqId, 'fail', { ms: Date.now() - start, err: String(e) });
     if (aborted) return;
-    res.writeHead(500, { 'content-type': 'application/json' }).end(
-      JSON.stringify({ error: String(e) }),
-    );
+    res
+      .writeHead(500, { 'content-type': 'application/json' })
+      .end(JSON.stringify({ error: String(e) }));
   }
 });
 
@@ -110,7 +126,7 @@ async function runUpscale(input, reqId) {
       proc.on('error', reject);
       proc.on('exit', resolve);
     });
-    if (code !== 0) throw new Error(`realcugan exited ${code}`);
+    if (code !== 0) throw new Error(`waifu2x exited ${code}`);
     return await fsp.readFile(outPath);
   } finally {
     await Promise.all([
