@@ -51,7 +51,20 @@ const TIMELOCK_TIMESTAMP_MAX = 1_893_456_000; // 2030-01-01 UTC
 const TIMELOCK_BLOCKS_MIN = 144;
 const TIMELOCK_BLOCKS_MAX = 5_000_000;
 
-const DETECTOR_VERSION = 2;
+const DETECTOR_VERSION = 3;
+
+// Liquidium-specific internal pubkey. See ONCHAIN_TAGGING.md §2.2 — empirically
+// 1,544 of 1,547 loan resolutions in our DB use this constant. The 3 outliers
+// (different internal pubkeys, single-leaf tap-trees) are not Liquidium loans.
+// Detector version bumped to 3 to mark rows that have passed this check.
+const LIQUIDIUM_INTERNAL_PUBKEY =
+  '93674766caa3db9c0f63c4b74f302510c509d6d0ffac9d67214d8f03cb2ed27a';
+
+function isLiquidiumControlBlock(controlBlockHex: string): boolean {
+  // First byte = parity + leaf version (c0 / c1); next 32 bytes = internal pk.
+  if (controlBlockHex.length < 66) return false;
+  return controlBlockHex.slice(2, 66).toLowerCase() === LIQUIDIUM_INTERNAL_PUBKEY;
+}
 
 // ---------------- script parsers ----------------
 //
@@ -204,6 +217,8 @@ function classifySpendSide(tx: RawTx): Verdict {
     if (!sp) continue;
     const leaf = parseLoanDefaultLeaf(sp.scriptHex);
     if (!leaf) continue;
+    // Reject non-Liquidium escrows (different protocol's CSV+DROP locks).
+    if (!isLiquidiumControlBlock(sp.controlBlockHex)) continue;
 
     const escrowAddr = addressFromScriptPubKey(vin.prevout?.scriptPubKey);
     if (!escrowAddr) return { kind: 'skip', reason: 'no-escrow-addr' };
@@ -264,6 +279,10 @@ function classifySpendSide(tx: RawTx): Verdict {
     if (parseLoanDefaultLeaf(sp.scriptHex)) continue;
     const unlock = parseUnlockLeaf(sp.scriptHex);
     if (!unlock) continue;
+    // Reject non-Liquidium escrows. ONCHAIN_TAGGING.md §4.5 — `3bd09bfc…`
+    // class events have a single-leaf tap-tree (no default path) and a
+    // different internal pubkey; they are not Liquidium loans.
+    if (!isLiquidiumControlBlock(sp.controlBlockHex)) continue;
     const escrowAddr = addressFromScriptPubKey(vin.prevout?.scriptPubKey);
     if (!escrowAddr) continue;
     return {
