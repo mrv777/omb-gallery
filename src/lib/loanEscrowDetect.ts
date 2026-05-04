@@ -130,11 +130,10 @@ export async function runLoanEscrowTick({
   const status = errors > 0 ? `ok-with-${errors}-errors` : 'ok';
   stmts.setPollResult.run({
     stream: 'loan_escrows',
-    collection_slug: 'omb',
-    last_run_at: now,
-    last_status: status,
-    last_event_count: detected,
-    last_cursor: JSON.stringify({ last_candidates: candidates.length }),
+    collection: 'omb',
+    status,
+    event_count: detected,
+    cursor: JSON.stringify({ last_candidates: candidates.length }),
   });
 
   log.info('poll/loan-escrows', 'tick complete', {
