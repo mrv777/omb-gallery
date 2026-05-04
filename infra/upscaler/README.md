@@ -34,7 +34,7 @@ file /tmp/upscaled.png  # should report 1344x1344 PNG
 docker stop omb-upscaler
 ```
 
-The Next.js app's `/api/upscale?id=<num>` proxies here. Default URL is `http://localhost:8001/upscale`; override with the `UPSCALER_URL` env var (required in production).
+The Next.js app's `/api/upscale?id=<num>&method=waifu2x` proxies here when the user picks "AI enhanced" in the download menu. (The other menu option, "Standard", uses sharp Mitchell in-process and never touches this sidecar.) Default URL is `http://localhost:8001/upscale`; override with the `UPSCALER_URL` env var (required in production for the AI option).
 
 ## Environment
 
