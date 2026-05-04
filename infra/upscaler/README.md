@@ -4,7 +4,7 @@ CPU-only neural upscaler. Wraps [`waifu2x-ncnn-vulkan`](https://github.com/nihui
 
 ## What it does
 
-`POST /upscale` with a raw JPEG/WebP/PNG body → returns a 4× upscaled PNG. Internally calls `waifu2x-ncnn-vulkan` in CPU mode (`-g -1`) with `-s 4 -n 2` against the `models-cunet` weights — anime/illustration tuned, with moderate denoising for JPEG cleanup.
+`POST /upscale` with a raw JPEG/WebP/PNG body → returns a 4× upscaled PNG. Internally calls `waifu2x-ncnn-vulkan` in CPU mode (`-g -1`) with `-s 4 -n 1` against the `models-cunet` weights — anime/illustration tuned, with light denoising so the rough hand-drawn linework survives.
 
 `GET /health` → `200 ok`
 
@@ -38,24 +38,25 @@ The Next.js app's `/api/upscale?id=<num>&method=waifu2x` proxies here when the u
 
 ## Environment
 
-| Var | Default | Notes |
-|---|---|---|
-| `PORT` | `8001` | HTTP listen port |
-| `WAIFU2X_SCALE` | `4` | Output scale (1/2/4/8/16/32). cunet cascades 2× passes internally for non-2 values. |
-| `WAIFU2X_NOISE` | `2` | Denoising strength (-1/0/1/2/3). 2 is moderate JPEG cleanup without flattening hand-drawn line wobble. |
-| `WAIFU2X_TILE` | `200` | Tile size. **Critical for CPU latency** — at 256 the input fits in a single tile and runs through one big inference pass, ~6× slower than smaller tiles. 200 is a measured sweet spot for 336px source. |
-| `WAIFU2X_MODELS` | `/app/models-cunet` | Model directory inside the image. Other options: `/app/models-upconv_7_anime_style_art_rgb`, `/app/models-upconv_7_photo`. cunet is highest quality for line art; upconv variants are alternatives if needed. |
-| `MAX_BODY_BYTES` | `5242880` | 5 MB request cap |
-| `REQ_TIMEOUT_MS` | `60000` | Per-request socket timeout |
+| Var               | Default             | Notes                                                                                                                                                                                                         |
+| ----------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`            | `8001`              | HTTP listen port                                                                                                                                                                                              |
+| `WAIFU2X_SCALE`   | `4`                 | Output scale (1/2/4/8/16/32). cunet cascades 2× passes internally for non-2 values.                                                                                                                           |
+| `WAIFU2X_NOISE`   | `1`                 | Denoising strength (-1/0/1/2/3). 1 is light cleanup; try 0 or -1 if it still over-smooths the marker/scanner texture. Bump `UPSCALE_CACHE_VERSION` in the app when changing this.                             |
+| `WAIFU2X_TILE`    | `200`               | Tile size. **Critical for CPU latency** — at 256 the input fits in a single tile and runs through one big inference pass, ~6× slower than smaller tiles. 200 is a measured sweet spot for 336px source.       |
+| `WAIFU2X_MODELS`  | `/app/models-cunet` | Model directory inside the image. Other options: `/app/models-upconv_7_anime_style_art_rgb`, `/app/models-upconv_7_photo`. cunet is highest quality for line art; upconv variants are alternatives if needed. |
+| `MAX_BODY_BYTES`  | `5242880`           | 5 MB request cap                                                                                                                                                                                              |
+| `REQ_TIMEOUT_MS`  | `60000`             | Per-request socket timeout                                                                                                                                                                                    |
+| `MAX_QUEUE_DEPTH` | `2`                 | Includes the active job. Extra requests get `503` + `Retry-After` instead of waiting past the app's 30s timeout.                                                                                              |
 
 ## Latency expectations (measured)
 
-For the OMB use case (336 px JPEG → 1344 px PNG, models-cunet, `-s 4 -n 2 -t 200`):
+For the OMB use case (336 px JPEG/WebP → 1344 px PNG, models-cunet, `-s 4 -n 1 -t 200`):
 
 - Xeon E-2274G class CPU, 8 threads, no GPU → **~9 s** per request
 - Apple Silicon under amd64 emulation → ~8 s per request (lucky — MoltenVK fast-path)
 
-Concurrency is intentionally serialized inside the wrapper — multiple in-flight requests thrash L3 cache and are slower end-to-end than running sequentially. The Next.js app's `/api/upscale` route also rate-limits cache misses (10/min per IP, 100/10min global) before sending work here, so steady-state load is bounded.
+Concurrency is intentionally serialized inside the wrapper — multiple in-flight requests thrash L3 cache and are slower end-to-end than running sequentially. The wrapper accepts only a tiny queue, then returns `503` with `Retry-After`; the Next.js app's `/api/upscale` route also rate-limits cache misses (10/min per IP, 20/10min global) before sending work here, so steady-state load is bounded.
 
 ## Production deployment
 
@@ -110,7 +111,7 @@ docker run -d --name omb-upscaler --restart unless-stopped \
   -p 0.0.0.0:8001:8001 --memory 1g omb-upscaler
 ```
 
-The app caches generated PNGs by inscription id at `/data/upscaled/`, so the cache survives upscaler restarts — only fresh inscriptions pay the regen cost.
+The app caches generated PNGs by inscription id, method, and `UPSCALE_CACHE_VERSION` at `/data/upscaled/`, so the cache survives upscaler restarts — only fresh cache keys pay the regen cost. Bump `UPSCALE_CACHE_VERSION` after changing model/denoise/scale settings.
 
 ### Logs
 
@@ -123,6 +124,4 @@ Output is structured JSON (one event per line) with `t`, `level`, `component`, `
 
 ### If CPU latency hurts
 
-The Dockerfile is GPU-ready. Drop `-g -1` from `server.js`'s `args` array and add `--gpus all` to the `docker run`. NVIDIA needs `nvidia-container-toolkit` on the host; AMD works on a Vulkan-capable kernel.
-
-Alternatively, pre-warm the cache by hitting `/api/upscale?id=<n>` for every inscription number in the collection over a few hours — total CPU is bounded by collection size × per-image latency, and after that every user click is an instant cache hit.
+Pre-warm the cache by hitting `/api/upscale?id=<n>` for every inscription number in the collection over a few hours — total CPU is bounded by collection size × per-image latency, and after that every user click is an instant cache hit.

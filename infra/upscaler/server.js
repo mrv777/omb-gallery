@@ -24,9 +24,10 @@ const BIN = process.env.WAIFU2X_BIN || '/app/waifu2x-ncnn-vulkan';
 // JPEG noise to clean up.
 const MODELS = process.env.WAIFU2X_MODELS || '/app/models-cunet';
 const SCALE = process.env.WAIFU2X_SCALE || '4';
-// Noise 0-3 (or -1 to skip denoising). 2 = moderate JPEG cleanup
-// without over-smoothing the hand-drawn line wobble.
-const NOISE = process.env.WAIFU2X_NOISE || '2';
+// Noise 0-3 (or -1 to skip denoising). OMBs are mostly rough black-line
+// drawings, so default to light cleanup; stronger denoise can flatten the
+// marker/scanner texture that makes the originals feel handmade.
+const NOISE = process.env.WAIFU2X_NOISE || '1';
 // Tile size matters a LOT for CPU latency. With `-t 256` the input fits
 // in a single tile and the whole image runs through one big inference
 // pass — empirically ~6x slower than smaller tiles that let ncnn
@@ -36,9 +37,13 @@ const NOISE = process.env.WAIFU2X_NOISE || '2';
 const TILE = process.env.WAIFU2X_TILE || '200';
 const MAX_BODY = parseInt(process.env.MAX_BODY_BYTES || '5242880', 10); // 5 MB
 const REQ_TIMEOUT_MS = parseInt(process.env.REQ_TIMEOUT_MS || '60000', 10);
+// Includes the active job. At ~9s/job and a 30s app timeout, two keeps
+// worst-case wait under the user-facing request deadline with room for I/O.
+const MAX_QUEUE_DEPTH = parseInt(process.env.MAX_QUEUE_DEPTH || '2', 10);
 
 // Serialize work — CPU-bound; concurrency just thrashes L3 cache.
 let chain = Promise.resolve();
+let queuedJobs = 0;
 function serial(fn) {
   const p = chain.then(fn, fn);
   chain = p.catch(() => {});
@@ -80,6 +85,14 @@ const server = http.createServer(async (req, res) => {
 
   const reqId = crypto.randomBytes(4).toString('hex');
   const start = Date.now();
+  if (queuedJobs >= MAX_QUEUE_DEPTH) {
+    log('warn', reqId, 'busy', { queued: queuedJobs, max_queue_depth: MAX_QUEUE_DEPTH });
+    return res
+      .writeHead(503, { 'content-type': 'application/json', 'retry-after': '10' })
+      .end(JSON.stringify({ error: 'upscaler busy' }));
+  }
+
+  queuedJobs++;
   try {
     const png = await serial(() => runUpscale(body, reqId));
     if (aborted) return;
@@ -95,6 +108,8 @@ const server = http.createServer(async (req, res) => {
     res
       .writeHead(500, { 'content-type': 'application/json' })
       .end(JSON.stringify({ error: String(e) }));
+  } finally {
+    queuedJobs--;
   }
 });
 
@@ -102,7 +117,14 @@ server.requestTimeout = REQ_TIMEOUT_MS;
 server.headersTimeout = REQ_TIMEOUT_MS + 5000;
 
 server.listen(PORT, () => {
-  log('info', '-', 'ready', { port: PORT, bin: BIN, scale: SCALE, noise: NOISE, tile: TILE });
+  log('info', '-', 'ready', {
+    port: PORT,
+    bin: BIN,
+    scale: SCALE,
+    noise: NOISE,
+    tile: TILE,
+    max_queue_depth: MAX_QUEUE_DEPTH,
+  });
 });
 
 async function runUpscale(input, reqId) {
@@ -112,13 +134,20 @@ async function runUpscale(input, reqId) {
   await fsp.writeFile(inPath, input);
   try {
     const args = [
-      '-g', '-1',
-      '-t', TILE,
-      '-s', SCALE,
-      '-n', NOISE,
-      '-m', MODELS,
-      '-i', inPath,
-      '-o', outPath,
+      '-g',
+      '-1',
+      '-t',
+      TILE,
+      '-s',
+      SCALE,
+      '-n',
+      NOISE,
+      '-m',
+      MODELS,
+      '-i',
+      inPath,
+      '-o',
+      outPath,
     ];
     log('info', reqId, 'spawn', { args: args.join(' ') });
     const code = await new Promise((resolve, reject) => {
@@ -129,10 +158,7 @@ async function runUpscale(input, reqId) {
     if (code !== 0) throw new Error(`waifu2x exited ${code}`);
     return await fsp.readFile(outPath);
   } finally {
-    await Promise.all([
-      fsp.unlink(inPath).catch(() => {}),
-      fsp.unlink(outPath).catch(() => {}),
-    ]);
+    await Promise.all([fsp.unlink(inPath).catch(() => {}), fsp.unlink(outPath).catch(() => {})]);
   }
 }
 

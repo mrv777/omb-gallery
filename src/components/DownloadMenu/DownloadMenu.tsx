@@ -99,7 +99,7 @@ export default function DownloadMenu({ src, inscriptionId, className }: Download
         setBusyKey(null);
       }
     },
-    [busyKey, inscriptionId],
+    [busyKey, inscriptionId]
   );
 
   return (
@@ -168,7 +168,7 @@ export default function DownloadMenu({ src, inscriptionId, className }: Download
               ? 'AI upscale takes about 10 seconds. Hang tight…'
               : busyKey === 'mitchell'
                 ? 'Working…'
-                : 'On-chain source is 336px JPEG. AI works great on some pieces, looks off on others — try both.'}
+                : 'On-chain source is 336px JPEG/WebP. AI works great on some pieces, looks off on others — try both.'}
           </div>
         </div>
       )}

@@ -17,7 +17,18 @@ const TARGET_W = 1344;
 const METHODS = ['mitchell', 'waifu2x'] as const;
 type Method = (typeof METHODS)[number];
 
+class UpscalerHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly retryAfter: string | null,
+    message: string
+  ) {
+    super(message);
+  }
+}
+
 const CACHE_DIR = process.env.UPSCALE_CACHE_DIR ?? '/data/upscaled';
+const CACHE_VERSION = sanitizeCachePart(process.env.UPSCALE_CACHE_VERSION ?? 'v2');
 const UPSCALER_URL = process.env.UPSCALER_URL ?? 'http://localhost:8001/upscale';
 const UPSCALER_TIMEOUT_MS = 30_000;
 
@@ -26,11 +37,11 @@ const UPSCALER_TIMEOUT_MS = 30_000;
 // only generation of new (id, method) pairs counts.
 //
 // Per-IP: 10/min. Generous for a human clicking around the gallery.
-// Global: 100 / 10min backstop so concurrent abuse from many IPs can't
+// Global: 20 / 10min backstop so concurrent abuse from many IPs can't
 // queue more work than the CPU sidecar can clear. The sidecar serializes
 // internally too, so the global cap mostly bounds queue depth.
 const PER_IP_PER_MIN = 10;
-const GLOBAL_LIMIT = 100;
+const GLOBAL_LIMIT = 20;
 const GLOBAL_WINDOW_MS = 10 * 60 * 1000;
 // Effectively unbounded — the per-IP helper requires a daily figure but
 // we don't want a daily ceiling here.
@@ -38,6 +49,10 @@ const PER_IP_PER_DAY_UNBOUNDED = 100_000;
 
 function isMethod(m: string | null): m is Method {
   return !!m && (METHODS as readonly string[]).includes(m);
+}
+
+function sanitizeCachePart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 64) || 'v';
 }
 
 export async function GET(req: NextRequest) {
@@ -49,10 +64,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'invalid id' }, { status: 400 });
   }
   if (!isMethod(methodRaw)) {
-    return NextResponse.json(
-      { error: 'invalid method', allowed: METHODS },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: 'invalid method', allowed: METHODS }, { status: 400 });
   }
   const method: Method = methodRaw;
 
@@ -62,7 +74,7 @@ export async function GET(req: NextRequest) {
   }
 
   const srcPath = path.join(process.cwd(), 'public', hit.full.replace(/^\//, ''));
-  const cachePath = path.join(CACHE_DIR, `${id}-${method}.png`);
+  const cachePath = path.join(CACHE_DIR, `${id}-${method}-${CACHE_VERSION}.png`);
   const filename = `omb-${id}-${method}-${TARGET_W}.png`;
 
   try {
@@ -88,8 +100,10 @@ export async function GET(req: NextRequest) {
     buf = method === 'mitchell' ? await runMitchell(srcPath) : await runWaifu2x(srcPath);
   } catch (e) {
     log.error('upscale', 'generate failed', { id, method, err: String(e) });
-    const status = method === 'waifu2x' ? 502 : 500;
-    return NextResponse.json({ error: 'upscale failed', detail: String(e) }, { status });
+    const status = e instanceof UpscalerHttpError ? e.status : method === 'waifu2x' ? 502 : 500;
+    const headers =
+      e instanceof UpscalerHttpError && e.retryAfter ? { 'retry-after': e.retryAfter } : undefined;
+    return NextResponse.json({ error: 'upscale failed', detail: String(e) }, { status, headers });
   }
   log.info('upscale', 'generated', {
     id,
@@ -128,7 +142,11 @@ async function runWaifu2x(srcPath: string): Promise<Buffer> {
     });
     if (!r.ok) {
       const text = await r.text();
-      throw new Error(`upscaler HTTP ${r.status}: ${text.slice(0, 200)}`);
+      throw new UpscalerHttpError(
+        r.status,
+        r.headers.get('retry-after'),
+        `upscaler HTTP ${r.status}: ${text.slice(0, 200)}`
+      );
     }
     return Buffer.from(await r.arrayBuffer());
   } finally {
@@ -139,7 +157,7 @@ async function runWaifu2x(srcPath: string): Promise<Buffer> {
 function rateLimitResponse(retryAfterSec: number, scope: 'per-ip' | 'global'): NextResponse {
   return NextResponse.json(
     { error: 'rate limited', scope, retry_after_sec: retryAfterSec },
-    { status: 429, headers: { 'retry-after': String(retryAfterSec) } },
+    { status: 429, headers: { 'retry-after': String(retryAfterSec) } }
   );
 }
 
