@@ -2,7 +2,7 @@ export type ApiEvent = {
   id: number;
   inscription_id: string;
   inscription_number: number;
-  event_type: 'inscribed' | 'transferred' | 'sold';
+  event_type: 'inscribed' | 'transferred' | 'sold' | 'loan-originated' | 'loan-defaulted' | 'loan-repaid' | 'loan-unlocked';
   block_height: number | null;
   block_timestamp: number;
   new_satpoint: string | null;
@@ -11,6 +11,11 @@ export type ApiEvent = {
   marketplace: string | null;
   sale_price_sats: number | null;
   txid: string;
+  /** JSON sidecar for event-type-specific metadata. For loan-originated rows
+   * this carries `{loan_amount_sats, lender_addr, borrower_addr, escrow_addr,
+   * detector_version, ...}`; for loan-defaulted, `{lender_addr, escrow_addr,
+   * csv_value, ...}`. Always a JSON string when set. */
+  raw_json: string | null;
   created_at: number;
 };
 

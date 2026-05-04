@@ -29,6 +29,7 @@ import {
 } from '@/lib/satflow';
 import { fetchWalletProfile, MatricaError } from '@/lib/matrica';
 import { runNotifyFanout } from '@/lib/notify';
+import { runLoanTick } from '@/lib/loanDetect';
 import { log } from '@/lib/log';
 
 export const dynamic = 'force-dynamic';
@@ -179,17 +180,28 @@ async function handle(req: NextRequest): Promise<NextResponse> {
       case 'notify':
         result = await safeNotify();
         break;
+      case 'loans':
+        result = await safeLoans();
+        break;
       case 'auto':
       default: {
         // Matrica is intentionally NOT in 'auto'. Auto runs every 5min;
         // Matrica probes are daily and far more expensive (1 req/s rate
         // limit, 200 wallets/tick = ~3.5min wallclock). Run via its own
         // ?mode=matrica cron at 0 5 * * *.
+        //
+        // Order matters: ord first (writes new transferred events), then
+        // satflow (upgrades transferred → sold for marketplace fills), then
+        // loans (reclassifies remaining transferred rows that are loan
+        // movements — must run AFTER satflow so we don't reclassify a sale
+        // as a loan). listings is independent. notify last so it sees the
+        // final event_type for each row.
         const ord = await runOrdTick();
         const satflow = await iterateSatflowCollections(onlyCollection, {});
         const listings = await iterateListingsCollections(onlyCollection, { force: false });
+        const loans = await safeLoans();
         const notify = await safeNotify();
-        result = [ord, ...satflow, ...listings, notify];
+        result = [ord, ...satflow, ...listings, loans, notify];
         break;
       }
     }
@@ -292,6 +304,16 @@ async function safeNotify(): Promise<TickResult> {
     const msg = e instanceof Error ? e.message : String(e);
     log.error('poll/notify', 'fanout failed', { error: msg });
     return { mode: 'notify', error: msg };
+  }
+}
+
+async function safeLoans(): Promise<TickResult> {
+  try {
+    return (await runLoanTick()) as TickResult;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    log.error('poll/loans', 'tick failed', { error: msg });
+    return { mode: 'loans', error: msg };
   }
 }
 

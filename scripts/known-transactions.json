@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Known on-chain transactions and their expected classifications. Used as a regression test suite for on-chain heuristics (loan detection, sale detection, etc.). Each entry records the ground-truth classification of a transaction so we can verify detectors don't regress.",
+  "version": 1,
+  "transactions": [
+    {
+      "txid": "fb8259cd3d3c18d2ed037f3d91323766a783635dff42fa8871174876475d85fb",
+      "inscription_number": 10444091,
+      "expected_type": "loan-defaulted",
+      "description": "Loan default — lender 3PizFz9dpz4kSB7jqpdXf6QmVMvkH2xeDY claims OMB #10444091 after borrower fails to repay. Taproot script-path spend from escrow bc1p8uykr42qftusy... with OP_CSV OP_DROP (CSV value: e95b4066). Escrow created in 1dddebbf...",
+      "lender": "3PizFz9dpz4kSB7jqpdXf6QmVMvkH2xeDY",
+      "borrower": "3DZu42e7rQYyt8vKNqGbM7wdJadMqQpGXz",
+      "block_timestamp": 1715496274,
+      "tags": ["loan", "default", "csv-timelock", "taproot-script-path"]
+    },
+    {
+      "txid": "16459e791f516c694636fc4320bd9ef550b2a51f69b69ab79ce59cd6d71cdbe4",
+      "inscription_number": 11299730,
+      "expected_type": "loan-defaulted",
+      "description": "Loan default — same lender 3PizFz9dpz4kSB7jqpdXf6QmVMvkH2xeDY claims OMB #11299730. Taproot script-path spend from escrow bc1pgjxzdutrp07q... with OP_CSV OP_DROP (CSV value: e8d66166). Escrow created in 385e6e44...",
+      "lender": "3PizFz9dpz4kSB7jqpdXf6QmVMvkH2xeDY",
+      "borrower": "3Hs3vSyUpVgKw4tz3StftgkRe3hAEDEo74",
+      "block_timestamp": 1717694127,
+      "tags": ["loan", "default", "csv-timelock", "taproot-script-path"]
+    },
+    {
+      "txid": "7a0618d95d8f5a238308b6854393e5d50a7f5bfe99f693ddb3b2db4608f0d091",
+      "inscription_number": 60566736,
+      "expected_type": "loan-repaid",
+      "description": "Loan repayment — borrower 3Jod5HUCnXp9Lee... repays 0.308 BTC to lender 3PizFz9dpz4kSB7jqpdXf6QmVMvkH2xeDY. Pure BTC transfer, no inscription movement. Original loan from d48eb050... with escrow bc1plr9wj5qmlrf...",
+      "lender": "3PizFz9dpz4kSB7jqpdXf6QmVMvkH2xeDY",
+      "borrower": "3Jod5HUCnXp9LeeT3EnLhp9Lfp75m6iPo3",
+      "block_timestamp": 1713571533,
+      "tags": ["loan", "repayment", "btc-only"]
+    },
+    {
+      "txid": "7c3d11e2f323ea628481585fc520b7abb4d7cd2055553d3d1b8cde02037e6cd5",
+      "inscription_number": 60566736,
+      "expected_type": "loan-unlocked",
+      "description": "Loan unlock — borrower reclaims OMB #60566736 from escrow bc1plr9wj5qmlrf... after repaying the loan (7a0618d9...). Taproot script-path spend with <pubkey> OP_CHECKSIG (no CSV — the unlock path).",
+      "lender": "3PizFz9dpz4kSB7jqpdXf6QmVMvkH2xeDY",
+      "borrower": "3Jod5HUCnXp9LeeT3EnLhp9Lfp75m6iPo3",
+      "block_timestamp": 1713756308,
+      "tags": ["loan", "unlock", "taproot-script-path", "no-csv"]
+    },
+    {
+      "txid": "1dddebbf214758f719dc3d2392261c787b7b004e39efa650160e7d83a5d2ed57",
+      "inscription_number": 10444091,
+      "expected_type": "loan-originated",
+      "description": "Loan origination — OMB #10444091 locked into escrow bc1p8uykr42qftusy... Lender 3PizFz9dpz4kSB7jqpdXf6QmVMvkH2xeDY provides ~0.509 BTC to borrower 3DZu42e7rQYyt8vK... Later defaulted in fb8259cd...",
+      "lender": "3PizFz9dpz4kSB7jqpdXf6QmVMvkH2xeDY",
+      "borrower": "3DZu42e7rQYyt8vKNqGbM7wdJadMqQpGXz",
+      "block_timestamp": 1714111814,
+      "tags": ["loan", "origination", "escrow-creation"]
+    },
+    {
+      "txid": "385e6e449b14e548104a069dab19cf192e78f4cb30d592ef3eba2149029168fe",
+      "inscription_number": 11299730,
+      "expected_type": "loan-originated",
+      "description": "Loan origination — OMB #11299730 locked into escrow bc1pgjxzdutrp07q... Lender 3PizFz9dpz4kSB7jqpdXf6QmVMvkH2xeDY provides ~0.426 BTC to borrower 3Hs3vSyUpVgKw4tz... Later defaulted in 16459e79...",
+      "lender": "3PizFz9dpz4kSB7jqpdXf6QmVMvkH2xeDY",
+      "borrower": "3Hs3vSyUpVgKw4tz3StftgkRe3hAEDEo74",
+      "block_timestamp": 1716307331,
+      "tags": ["loan", "origination", "escrow-creation"]
+    },
+    {
+      "txid": "d48eb050ba58fe265ad6135978cfc8fda3bf11e9aa48e890b3185a86cc490964",
+      "inscription_number": 60566736,
+      "expected_type": "loan-originated",
+      "description": "Loan origination — OMB #60566736 locked into escrow bc1plr9wj5qmlrf... Lender 3PizFz9dpz4kSB7jqpdXf6QmVMvkH2xeDY provides ~0.301 BTC to borrower 3Jod5HUCnXp9LeeT... Later repaid in 7a0618d9... and unlocked in 7c3d11e2...",
+      "lender": "3PizFz9dpz4kSB7jqpdXf6QmVMvkH2xeDY",
+      "borrower": "3Jod5HUCnXp9LeeT3EnLhp9Lfp75m6iPo3",
+      "block_timestamp": 1712449959,
+      "tags": ["loan", "origination", "escrow-creation"]
+    }
+  ],
+  "notes": {
+    "loan_lifecycle": "Loan detection works by finding taproot script-path spends with OP_CSV OP_DROP (hex b175) — the definitive fingerprint of a timelocked escrow. From there we trace backward to origination and forward to repayment/unlock.",
+    "lender_3PizFz9": "Address 3PizFz9dpz4kSB7jqpdXf6QmVMvkH2xeDY appears as lender across multiple loans. This is NOT hardcoded in the heuristic — it's discovered purely through on-chain pattern matching.",
+    "csv_values": "CSV values e95b4066 and e8d66166 are Unix timestamps (~May-Jun 2024). Values > 500M are interpreted as timestamps by BIP 68/112. The script pattern is: <csv_timestamp> OP_CSV OP_DROP <pubkey> OP_CHECKSIG.",
+    "escrow_pattern": "Escrow addresses are taproot outputs (bc1p...) created in origination txs. The taproot commits to two spend paths: key-path (borrower, for unlock) and script-path with CSV timelock (lender, for default claim).",
+    "not_a_sale": "These loan transactions are NOT sales. The existing sales heuristic correctly skips them (cooperative layer finds no external outputs). The loan heuristic tags them as distinct event types to avoid confusion with marketplace sales."
+  }
+}

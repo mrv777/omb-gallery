@@ -7,7 +7,7 @@ import type { ColorFilter } from '@/lib/types';
 const PAGE_SIZE = 60;
 const REFRESH_MS = 60_000;
 
-export type FeedFilter = 'all' | 'sales' | 'transfers';
+export type FeedFilter = 'all' | 'sales' | 'transfers' | 'loans';
 
 export type FeedState = {
   events: ApiEvent[];

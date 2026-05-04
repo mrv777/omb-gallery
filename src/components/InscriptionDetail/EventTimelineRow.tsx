@@ -14,17 +14,45 @@ type Props = { event: EventRow };
 export default function EventTimelineRow({ event }: Props) {
   const isSold = event.event_type === 'sold';
   const isTransferred = event.event_type === 'transferred';
-  const eventLabel = isSold ? 'SOLD' : isTransferred ? 'TRANSFERRED' : 'INSCRIBED';
+  const isLoanOrig = event.event_type === 'loan-originated';
+  const isLoanDefault = event.event_type === 'loan-defaulted';
+  const isLoanRepaid = event.event_type === 'loan-repaid';
+  const isLoanUnlock = event.event_type === 'loan-unlocked';
+  const isLoan = isLoanOrig || isLoanDefault || isLoanRepaid || isLoanUnlock;
+
+  const eventLabel = isSold
+    ? 'SOLD'
+    : isTransferred
+      ? 'TRANSFERRED'
+      : isLoanOrig
+        ? 'LOAN ORIG'
+        : isLoanDefault
+          ? 'LOAN DEFAULT'
+          : isLoanRepaid
+            ? 'LOAN REPAID'
+            : isLoanUnlock
+              ? 'LOAN UNLOCK'
+              : 'INSCRIBED';
+
   const eventColor = isSold
     ? 'text-accent-green'
-    : isTransferred
-      ? 'text-bone-dim'
-      : 'text-accent-orange';
+    : isLoanOrig || isLoanRepaid
+      ? 'text-accent-blue'
+      : isLoanDefault
+        ? 'text-accent-red'
+        : isLoanUnlock
+          ? 'text-accent-orange'
+          : isTransferred
+            ? 'text-bone-dim'
+            : 'text-accent-orange';
+
   const eventBg = isSold
     ? 'bg-accent-green/10 border-accent-green/40'
-    : isTransferred
-      ? 'border-bone-dim/40'
-      : 'bg-accent-orange/10 border-accent-orange/40';
+    : isLoan
+      ? 'bg-ink-2 border-bone-dim/40'
+      : isTransferred
+        ? 'border-bone-dim/40'
+        : 'bg-accent-orange/10 border-accent-orange/40';
 
   const priceStr = isSold ? formatBtc(event.sale_price_sats) : '';
   const market = isSold ? marketplaceLabel(event.marketplace) : '';
@@ -79,6 +107,12 @@ export default function EventTimelineRow({ event }: Props) {
           </Tooltip>
         ) : (
           <span>—</span>
+        )}
+        {isLoanDefault && event.old_owner && (
+          <span className="text-accent-red/60 font-mono text-[10px] ml-1 shrink-0">lender</span>
+        )}
+        {isLoanOrig && event.new_owner && (
+          <span className="text-accent-blue/60 font-mono text-[10px] ml-1 shrink-0">escrow</span>
         )}
       </div>
 

@@ -32,10 +32,21 @@ export async function GET(req: NextRequest) {
   const typeParam = url.searchParams.get('type');
   const eventType =
     typeParam === 'sales' ? 'sold' : typeParam === 'transfers' ? 'transferred' : null;
+  const loanOnly = typeParam === 'loans';
 
   const stmts = getStmts();
   const events = (
-    eventType
+    loanOnly
+      ? cursor != null
+        ? stmts.getRecentLoanEventsAfter.all({
+            cursor_ts: cursor.ts,
+            cursor_id: cursor.id,
+            limit,
+            collection,
+            color,
+          })
+        : stmts.getRecentLoanEvents.all({ limit, collection, color })
+      : eventType
       ? cursor != null
         ? stmts.getRecentEventsByTypeAfter.all({
             cursor_ts: cursor.ts,

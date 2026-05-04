@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 17;
+const SCHEMA_VERSION = 20;
 
 // OMB-shape entry: filename = "<inscription_number>.jpg|webp", per-color groups.
 type ImageEntry = { filename: string; description: string; tags: string[] };
@@ -97,6 +97,9 @@ function migrate(db: DB): void {
         upgradeV14ToV15(db);
         upgradeV15ToV16(db);
         upgradeV16ToV17(db);
+        upgradeV17ToV18(db);
+        upgradeV18ToV19(db);
+        upgradeV19ToV20(db);
       } else {
         initSchemaLatest(db);
       }
@@ -117,6 +120,9 @@ function migrate(db: DB): void {
       if (current < 15) upgradeV14ToV15(db);
       if (current < 16) upgradeV15ToV16(db);
       if (current < 17) upgradeV16ToV17(db);
+      if (current < 18) upgradeV17ToV18(db);
+      if (current < 19) upgradeV18ToV19(db);
+      if (current < 20) upgradeV19ToV20(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -150,7 +156,18 @@ function initSchemaLatest(db: DB): void {
       total_volume_sats   INTEGER NOT NULL DEFAULT 0,
       highest_sale_sats   INTEGER NOT NULL DEFAULT 0,
       last_polled_at      INTEGER NOT NULL DEFAULT 0,
-      collection_slug     TEXT REFERENCES collections (slug)
+      collection_slug     TEXT REFERENCES collections (slug),
+      -- Loan-aware aggregates (v18). loan_count is total loan cycles ever
+      -- detected; active_loan_count is currently-open loans (origination
+      -- without subsequent default/unlock). effective_owner is the
+      -- "human-visible" owner: while a loan is open, it's the borrower
+      -- (not the bc1p escrow address); on default, the lender; otherwise
+      -- equals current_owner. Holders / leaderboards / per-holder pages
+      -- read effective_owner so escrow taproot addresses don't surface
+      -- as if they were collectors.
+      loan_count          INTEGER NOT NULL DEFAULT 0,
+      active_loan_count   INTEGER NOT NULL DEFAULT 0,
+      effective_owner     TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_insc_movement   ON inscriptions (last_movement_at);
     CREATE INDEX IF NOT EXISTS idx_insc_xfer_count ON inscriptions (transfer_count DESC);
@@ -158,6 +175,7 @@ function initSchemaLatest(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_insc_volume     ON inscriptions (total_volume_sats DESC);
     CREATE INDEX IF NOT EXISTS idx_insc_high_sale  ON inscriptions (highest_sale_sats DESC);
     CREATE INDEX IF NOT EXISTS idx_insc_owner      ON inscriptions (current_owner);
+    CREATE INDEX IF NOT EXISTS idx_insc_eff_owner  ON inscriptions (effective_owner);
     CREATE INDEX IF NOT EXISTS idx_insc_id         ON inscriptions (inscription_id);
     CREATE INDEX IF NOT EXISTS idx_insc_collection ON inscriptions (collection_slug, inscription_number);
     -- Composite (collection, color, ...) indexes back the color-filtered
@@ -191,7 +209,10 @@ function initSchemaLatest(db: DB): void {
       id                  INTEGER PRIMARY KEY AUTOINCREMENT,
       inscription_id      TEXT    NOT NULL,
       inscription_number  INTEGER NOT NULL,
-      event_type          TEXT    NOT NULL CHECK (event_type IN ('inscribed','transferred','sold','listed')),
+      event_type          TEXT    NOT NULL CHECK (event_type IN (
+        'inscribed','transferred','sold','listed',
+        'loan-originated','loan-defaulted','loan-repaid','loan-unlocked'
+      )),
       block_height        INTEGER,
       block_timestamp     INTEGER NOT NULL,
       new_satpoint        TEXT,
@@ -227,7 +248,7 @@ function initSchemaLatest(db: DB): void {
     -- one batch poll covers every inscription regardless of collection. The
     -- 'matrica' stream is also collection-agnostic — one row keyed to 'omb'.
     CREATE TABLE IF NOT EXISTS poll_state (
-      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica','notify')),
+      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica','notify','loans')),
       collection_slug           TEXT NOT NULL REFERENCES collections (slug),
       last_cursor               TEXT,
       last_run_at               INTEGER,
@@ -243,7 +264,8 @@ function initSchemaLatest(db: DB): void {
       ('satflow', 'omb'),
       ('satflow_listings', 'omb'),
       ('matrica', 'omb'),
-      ('notify', 'omb');
+      ('notify', 'omb'),
+      ('loans', 'omb');
 
     -- Matrica wallet-linking (Phase 5). matrica_users holds one row per
     -- distinct Matrica user we've seen (across any wallet); wallet_links
@@ -735,6 +757,111 @@ function upgradeV16ToV17(db: DB): void {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_events_txid ON events (txid);`);
 }
 
+function upgradeV17ToV18(db: DB): void {
+  // Widen events.event_type CHECK to allow the four loan event types
+  // ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked').
+  // SQLite can't ALTER a CHECK in place — copy-and-swap, same pattern as
+  // v3 / v6 / v9 / v12 / v14 / v16.
+  //
+  // History note: the prod DB had its user_version bumped to 18 by the first
+  // (script-only) iteration of scripts/backfill-loans.js, which only widened
+  // the events CHECK. This migration was promoted into db.ts to be the source
+  // of truth; v18→v19 follows up with the inscription column additions.
+  // Existing prod (already at v18 from the script) skips this and runs v19.
+  db.exec(`
+    CREATE TABLE events_v4 (
+      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      inscription_id      TEXT    NOT NULL,
+      inscription_number  INTEGER NOT NULL,
+      event_type          TEXT    NOT NULL CHECK (event_type IN (
+        'inscribed','transferred','sold','listed',
+        'loan-originated','loan-defaulted','loan-repaid','loan-unlocked'
+      )),
+      block_height        INTEGER,
+      block_timestamp     INTEGER NOT NULL,
+      new_satpoint        TEXT,
+      old_owner           TEXT,
+      new_owner           TEXT,
+      marketplace         TEXT,
+      sale_price_sats     INTEGER,
+      txid                TEXT    NOT NULL,
+      raw_json            TEXT,
+      created_at          INTEGER NOT NULL DEFAULT (unixepoch()),
+      FOREIGN KEY (inscription_number) REFERENCES inscriptions (inscription_number) ON DELETE CASCADE,
+      UNIQUE (inscription_id, txid)
+    );
+    INSERT INTO events_v4 SELECT * FROM events;
+    DROP TABLE events;
+    ALTER TABLE events_v4 RENAME TO events;
+    CREATE INDEX IF NOT EXISTS idx_events_block_ts        ON events (block_timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_inscription_num ON events (inscription_number, block_timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_id_desc         ON events (id DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_type_id         ON events (event_type, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_type_ts_id      ON events (event_type, block_timestamp DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_new_owner_ts_id ON events (new_owner, block_timestamp DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_old_owner_ts_id ON events (old_owner, block_timestamp DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_txid            ON events (txid);
+  `);
+}
+
+function upgradeV18ToV19(db: DB): void {
+  // Loan-aware aggregates on inscriptions:
+  //
+  //   loan_count        — total loan cycles ever detected (lifetime).
+  //   active_loan_count — currently-open loans (origination not yet
+  //                       followed by default/unlock). Always 0 or 1 in
+  //                       practice but typed as INTEGER for forward-compat.
+  //   effective_owner   — "human-visible" owner. While a loan is open this
+  //                       is the borrower (not the bc1p escrow taproot
+  //                       address). Holders / leaderboards / per-holder
+  //                       pages read this so escrow addrs don't surface
+  //                       as if they were collectors. Initialized to
+  //                       current_owner here; the loan backfill is the
+  //                       only thing that diverges them.
+  //
+  // Idempotent ALTERs: probe table_info first so re-running the migration
+  // (which can happen on prod where v18 was set by the script before this
+  // db.ts upgrade existed) is safe.
+  const cols = db.pragma('table_info(inscriptions)') as Array<{ name: string }>;
+  const colNames = new Set(cols.map((c) => c.name));
+  if (!colNames.has('loan_count')) {
+    db.exec(`ALTER TABLE inscriptions ADD COLUMN loan_count INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!colNames.has('active_loan_count')) {
+    db.exec(`ALTER TABLE inscriptions ADD COLUMN active_loan_count INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!colNames.has('effective_owner')) {
+    db.exec(`ALTER TABLE inscriptions ADD COLUMN effective_owner TEXT`);
+    db.exec(`UPDATE inscriptions SET effective_owner = current_owner WHERE effective_owner IS NULL`);
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_insc_eff_owner ON inscriptions (effective_owner)`);
+}
+
+function upgradeV19ToV20(db: DB): void {
+  // Forward-integration of loan detection: extend poll_state.stream CHECK
+  // to allow 'loans' (the cursor for the per-tick incremental detector).
+  // SQLite can't ALTER a CHECK in place — copy-and-swap, same pattern as
+  // v6 / v9 / v12 / v14.
+  db.exec(`
+    CREATE TABLE poll_state_v20 (
+      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica','notify','loans')),
+      collection_slug           TEXT NOT NULL REFERENCES collections (slug),
+      last_cursor               TEXT,
+      last_run_at               INTEGER,
+      last_status               TEXT,
+      last_event_count          INTEGER,
+      is_backfilling            INTEGER NOT NULL DEFAULT 0,
+      last_known_height         INTEGER,
+      backfill_unresolved_seen  INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (stream, collection_slug)
+    );
+    INSERT INTO poll_state_v20 SELECT * FROM poll_state;
+    DROP TABLE poll_state;
+    ALTER TABLE poll_state_v20 RENAME TO poll_state;
+    INSERT OR IGNORE INTO poll_state (stream, collection_slug) VALUES ('loans', 'omb');
+  `);
+}
+
 function upgradeV15ToV16(db: DB): void {
   // Phase 6.1: extend events.event_type CHECK to allow 'listed' so the
   // listings poll can emit fan-out-eligible rows. SQLite can't ALTER a CHECK
@@ -924,6 +1051,8 @@ type Stmts = {
   getRecentEventsAfter: ReturnType<DB['prepare']>;
   getRecentEventsByType: ReturnType<DB['prepare']>;
   getRecentEventsByTypeAfter: ReturnType<DB['prepare']>;
+  getRecentLoanEvents: ReturnType<DB['prepare']>;
+  getRecentLoanEventsAfter: ReturnType<DB['prepare']>;
   countEvents: ReturnType<DB['prepare']>;
   countHolders: ReturnType<DB['prepare']>;
   getInscription: ReturnType<DB['prepare']>;
@@ -1064,9 +1193,17 @@ export function getStmts(): Stmts {
 
     setInscriptionState: db.prepare(`
       UPDATE inscriptions
-      SET current_output = @current_output,
-          current_owner  = @current_owner,
-          inscription_id = COALESCE(inscriptions.inscription_id, @inscription_id)
+      SET current_output  = @current_output,
+          current_owner   = @current_owner,
+          -- effective_owner mirrors current_owner here (the on-chain truth).
+          -- The loan backfill is the only writer that diverges them: when
+          -- it detects an inscription is currently in escrow, it overwrites
+          -- effective_owner to the borrower. That overwrite happens AFTER
+          -- ord ticks, so the brief window between an ord tick observing
+          -- a transfer-into-escrow and the loan backfill catching it shows
+          -- the escrow address as owner — acceptable.
+          effective_owner = @current_owner,
+          inscription_id  = COALESCE(inscriptions.inscription_id, @inscription_id)
       WHERE inscription_number = @inscription_number
     `),
 
@@ -1092,7 +1229,8 @@ export function getStmts(): Stmts {
     // chain-final owner when sale + transfer share a block (timestamps tie).
     setInscriptionOwnerIfNewer: db.prepare(`
       UPDATE inscriptions
-      SET current_owner = @new_owner
+      SET current_owner   = @new_owner,
+          effective_owner = @new_owner
       WHERE inscription_number = @inscription_number
         AND @new_owner IS NOT NULL
         AND (last_movement_at IS NULL OR @block_timestamp > last_movement_at)
@@ -1331,6 +1469,29 @@ export function getStmts(): Stmts {
       LIMIT @limit
     `),
 
+    getRecentLoanEvents: db.prepare(`
+      SELECT e.* FROM events e
+      JOIN inscriptions i ON i.inscription_number = e.inscription_number
+      WHERE e.event_type IN ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked')
+        AND i.collection_slug = @collection
+        AND (@color IS NULL OR i.color = @color)
+        AND (i.current_owner IS NULL OR i.current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
+      ORDER BY e.block_timestamp DESC, e.id DESC
+      LIMIT @limit
+    `),
+
+    getRecentLoanEventsAfter: db.prepare(`
+      SELECT e.* FROM events e
+      JOIN inscriptions i ON i.inscription_number = e.inscription_number
+      WHERE e.event_type IN ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked')
+        AND i.collection_slug = @collection
+        AND (@color IS NULL OR i.color = @color)
+        AND (i.current_owner IS NULL OR i.current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
+        AND (e.block_timestamp, e.id) < (@cursor_ts, @cursor_id)
+      ORDER BY e.block_timestamp DESC, e.id DESC
+      LIMIT @limit
+    `),
+
     countEvents: db.prepare(`
       SELECT COUNT(*) AS n FROM events e
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
@@ -1340,16 +1501,18 @@ export function getStmts(): Stmts {
         AND (i.current_owner IS NULL OR i.current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
     `),
 
-    // Holders are derived from inscriptions.current_owner — count distinct non-null owners.
-    // Mirrors countEvents in excluding protocol wallets so the two stats
-    // shown side-by-side on the activity feed describe the same population.
+    // Holders are derived from inscriptions.effective_owner — distinct
+    // human-visible owners (re-attributing inscriptions in loan escrow back
+    // to their borrower). Mirrors countEvents in excluding protocol wallets
+    // so the two stats shown side-by-side on the activity feed describe the
+    // same population.
     countHolders: db.prepare(`
-      SELECT COUNT(DISTINCT current_owner) AS n
+      SELECT COUNT(DISTINCT effective_owner) AS n
       FROM inscriptions
-      WHERE current_owner IS NOT NULL
+      WHERE effective_owner IS NOT NULL
         AND collection_slug = @collection
         AND (@color IS NULL OR color = @color)
-        AND current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST})
+        AND effective_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST})
     `),
 
     getInscription: db.prepare(`
@@ -1376,10 +1539,12 @@ export function getStmts(): Stmts {
     `),
 
     // For the "other holdings by this wallet" strip on the inscription detail page.
+    // Uses effective_owner so a borrower's strip still shows inscriptions
+    // they have parked in loan escrow.
     otherInscriptionsByOwner: db.prepare(`
       SELECT inscription_number
       FROM inscriptions
-      WHERE current_owner = @owner
+      WHERE effective_owner = @owner
         AND inscription_number != @exclude
         AND collection_slug = @collection
       ORDER BY inscription_number
@@ -1387,12 +1552,15 @@ export function getStmts(): Stmts {
     `),
 
     // Holder profile: every inscription this address currently owns in a given
-    // collection. Walks idx_insc_owner; the per-collection filter narrows the
-    // result via idx_insc_collection. Returns inscription_number ASC for stable
-    // grid ordering across reloads.
+    // collection. Uses effective_owner so a borrower sees inscriptions
+    // currently in their loan escrows; the on-chain bc1p escrow address
+    // doesn't get a (mostly-empty) profile page of its own. Walks
+    // idx_insc_eff_owner; the per-collection filter narrows the result via
+    // idx_insc_collection. Returns inscription_number ASC for stable grid
+    // ordering across reloads.
     getInscriptionsByOwner: db.prepare(`
       SELECT * FROM inscriptions
-      WHERE current_owner = @owner
+      WHERE effective_owner = @owner
         AND collection_slug = @collection
       ORDER BY inscription_number ASC
     `),
@@ -1403,7 +1571,7 @@ export function getStmts(): Stmts {
     // generation when no Matrica avatar is available.
     firstInscriptionByOwner: db.prepare(`
       SELECT inscription_number FROM inscriptions
-      WHERE current_owner = @owner
+      WHERE effective_owner = @owner
         AND collection_slug = @collection
       ORDER BY inscription_number ASC
       LIMIT 1
@@ -1568,15 +1736,15 @@ export function getStmts(): Stmts {
     `),
 
     topHolders: db.prepare(`
-      SELECT current_owner AS wallet_addr,
-             COUNT(*)      AS inscription_count,
-             unixepoch()   AS updated_at
+      SELECT effective_owner AS wallet_addr,
+             COUNT(*)        AS inscription_count,
+             unixepoch()     AS updated_at
       FROM inscriptions
-      WHERE current_owner IS NOT NULL
+      WHERE effective_owner IS NOT NULL
         AND collection_slug = @collection
         AND (@color IS NULL OR color = @color)
-      GROUP BY current_owner
-      ORDER BY inscription_count DESC, current_owner ASC
+      GROUP BY effective_owner
+      ORDER BY inscription_count DESC, effective_owner ASC
       LIMIT @limit
     `),
 
@@ -1696,13 +1864,15 @@ export function getStmts(): Stmts {
     // recently (to avoid re-probing both linked and known-not-linked rows
     // every tick). The poller passes the collection-list in JS, since we want
     // owners across BOTH OMB and Bravocados — not a single collection.
+    // Uses effective_owner so we don't waste probes on bc1p loan-escrow
+    // addresses (which won't have Matrica profiles by construction).
     pickWalletsToProbe: db.prepare(`
-      SELECT DISTINCT i.current_owner AS wallet_addr
+      SELECT DISTINCT i.effective_owner AS wallet_addr
       FROM inscriptions i
-      WHERE i.current_owner IS NOT NULL
+      WHERE i.effective_owner IS NOT NULL
         AND NOT EXISTS (
           SELECT 1 FROM wallet_links wl
-          WHERE wl.wallet_addr = i.current_owner
+          WHERE wl.wallet_addr = i.effective_owner
             AND wl.checked_at > @stale_before
         )
       ORDER BY wallet_addr ASC
@@ -1887,9 +2057,16 @@ export function getStmts(): Stmts {
       GROUP BY bucket
     `),
 
-    // Charts: transfer + sale events per day for the last @days days. The
+    // Charts: per-day "inscription moved" count for the last @days days. The
     // index idx_events_type_ts_id covers the (event_type, block_timestamp)
     // probe; the inscription join scopes to a collection.
+    //
+    // Includes loan-originated, loan-defaulted, and loan-unlocked alongside
+    // transferred + sold — they all represent on-chain movement of the
+    // inscription. loan-repaid is excluded: it's a pure-BTC tx with no
+    // inscription movement, so counting it would double-count days where
+    // both repayment and unlock happen. 'listed' is also excluded (off-chain
+    // notification, not a movement).
     transferActivityByDay: db.prepare(`
       SELECT date(e.block_timestamp, 'unixepoch') AS date,
              COUNT(*)                              AS count
@@ -1897,7 +2074,7 @@ export function getStmts(): Stmts {
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
       WHERE i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
-        AND e.event_type IN ('transferred', 'sold')
+        AND e.event_type IN ('transferred', 'sold', 'loan-originated', 'loan-defaulted', 'loan-unlocked')
         AND e.block_timestamp >= unixepoch() - (@days * 86400)
         AND (i.current_owner IS NULL OR i.current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
       GROUP BY date
@@ -2098,7 +2275,7 @@ export type EventRow = {
   id: number;
   inscription_id: string;
   inscription_number: number;
-  event_type: 'inscribed' | 'transferred' | 'sold';
+  event_type: 'inscribed' | 'transferred' | 'sold' | 'loan-originated' | 'loan-defaulted' | 'loan-repaid' | 'loan-unlocked';
   block_height: number | null;
   block_timestamp: number;
   new_satpoint: string | null;
@@ -2107,6 +2284,7 @@ export type EventRow = {
   marketplace: string | null;
   sale_price_sats: number | null;
   txid: string;
+  raw_json: string | null;
   created_at: number;
 };
 
@@ -2124,6 +2302,9 @@ export type InscriptionRow = {
   sale_count: number;
   total_volume_sats: number;
   highest_sale_sats: number;
+  loan_count: number;
+  active_loan_count: number;
+  effective_owner: string | null;
 };
 
 export type ActiveListingRow = {
@@ -2144,7 +2325,7 @@ export type HolderRow = {
 };
 
 export type PollStateRow = {
-  stream: 'ord' | 'satflow' | 'satflow_listings' | 'matrica' | 'notify';
+  stream: 'ord' | 'satflow' | 'satflow_listings' | 'matrica' | 'notify' | 'loans';
   collection_slug: string;
   last_cursor: string | null;
   last_run_at: number | null;

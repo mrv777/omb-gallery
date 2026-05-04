@@ -12,6 +12,7 @@ const FILTERS: { key: FeedFilter; label: string }[] = [
   { key: 'all', label: 'all' },
   { key: 'sales', label: 'sales' },
   { key: 'transfers', label: 'transfers' },
+  { key: 'loans', label: 'loans' },
 ];
 
 type Props = {
