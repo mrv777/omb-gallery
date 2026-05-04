@@ -30,6 +30,8 @@ import {
 import { fetchWalletProfile, MatricaError } from '@/lib/matrica';
 import { runNotifyFanout } from '@/lib/notify';
 import { runLoanTick } from '@/lib/loanDetect';
+import { runLoanEscrowTick } from '@/lib/loanEscrowDetect';
+import { bitcoindConfigured } from '@/lib/bitcoind';
 import { log } from '@/lib/log';
 
 export const dynamic = 'force-dynamic';
@@ -183,6 +185,9 @@ async function handle(req: NextRequest): Promise<NextResponse> {
       case 'loans':
         result = await safeLoans();
         break;
+      case 'loan-escrows':
+        result = await safeLoanEscrows();
+        break;
       case 'auto':
       default: {
         // Matrica is intentionally NOT in 'auto'. Auto runs every 5min;
@@ -200,8 +205,9 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         const satflow = await iterateSatflowCollections(onlyCollection, {});
         const listings = await iterateListingsCollections(onlyCollection, { force: false });
         const loans = await safeLoans();
+        const loanEscrows = await safeLoanEscrows();
         const notify = await safeNotify();
-        result = [ord, ...satflow, ...listings, loans, notify];
+        result = [ord, ...satflow, ...listings, loans, loanEscrows, notify];
         break;
       }
     }
@@ -314,6 +320,20 @@ async function safeLoans(): Promise<TickResult> {
     const msg = e instanceof Error ? e.message : String(e);
     log.error('poll/loans', 'tick failed', { error: msg });
     return { mode: 'loans', error: msg };
+  }
+}
+
+async function safeLoanEscrows(): Promise<TickResult> {
+  if (!bitcoindConfigured()) {
+    return { mode: 'loan-escrows', skipped: 'not-configured' };
+  }
+  try {
+    const r = await runLoanEscrowTick();
+    return { mode: 'loan-escrows', done: true, ...r } as TickResult;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    log.error('poll/loan-escrows', 'tick failed', { error: msg });
+    return { mode: 'loan-escrows', error: msg };
   }
 }
 

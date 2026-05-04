@@ -77,6 +77,7 @@ export type RawTx = {
       scriptPubKey?: {
         address?: string;
         addresses?: string[];
+        type?: string;
       };
     };
   }>;
@@ -85,6 +86,7 @@ export type RawTx = {
     scriptPubKey?: {
       address?: string;
       addresses?: string[];
+      type?: string;
     };
   }>;
 };

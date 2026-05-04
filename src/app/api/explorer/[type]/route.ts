@@ -15,8 +15,8 @@ const TYPES = [
   'top-volume',
   'highest-sale',
   'most-loaned',
+  'currently-loaned',
   'top-holders',
-  'top-lenders',
 ] as const;
 type LeaderboardType = (typeof TYPES)[number];
 
@@ -46,10 +46,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ type: strin
 
   const stmts = getStmts();
 
-  if (type === 'top-holders' || type === 'top-lenders') {
-    const stmt =
-      type === 'top-holders' ? stmts.topHoldersGroupedPaged : stmts.topLendersGroupedPaged;
-    const rows = stmt.all({
+  if (type === 'top-holders') {
+    const rows = stmts.topHoldersGroupedPaged.all({
       limit,
       collection,
       color,
@@ -87,6 +85,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ type: strin
         return stmts.topByHighestSalePaged;
       case 'most-loaned':
         return stmts.topByLoansPaged;
+      case 'currently-loaned':
+        return stmts.topActiveLoansPaged;
     }
   })();
 
@@ -102,7 +102,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ type: strin
     rows.length === limit
       ? buildInscriptionCursor(
           rows[rows.length - 1],
-          type as Exclude<LeaderboardType, 'top-holders' | 'top-lenders'>
+          type as Exclude<LeaderboardType, 'top-holders'>
         )
       : null;
 
@@ -122,7 +122,7 @@ function parseCursor(raw: string | null, type: LeaderboardType): ParsedCursor | 
   const secondaryStr = raw.slice(idx + 1);
   const primary = parseInt(primaryStr, 10);
   if (!Number.isFinite(primary)) return null;
-  if (type === 'top-holders' || type === 'top-lenders') {
+  if (type === 'top-holders') {
     return { primary, secondary: secondaryStr };
   }
   const secondary = parseInt(secondaryStr, 10);
@@ -132,7 +132,7 @@ function parseCursor(raw: string | null, type: LeaderboardType): ParsedCursor | 
 
 function buildInscriptionCursor(
   row: InscriptionRow,
-  type: Exclude<LeaderboardType, 'top-holders' | 'top-lenders'>
+  type: Exclude<LeaderboardType, 'top-holders'>
 ): string | null {
   const num = row.inscription_number;
   switch (type) {
@@ -146,6 +146,8 @@ function buildInscriptionCursor(
       return `${row.highest_sale_sats}:${num}`;
     case 'most-loaned':
       return `${row.loan_count ?? 0}:${num}`;
+    case 'currently-loaned':
+      return row.loan_funded_at != null ? `${row.loan_funded_at}:${num}` : null;
   }
 }
 

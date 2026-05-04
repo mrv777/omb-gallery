@@ -19,8 +19,8 @@ type Props = {
 
 export default function LeaderboardFeed({ type, color, initial }: Props) {
   const meta = LEADERBOARDS[type];
-  const isHolders = type === 'top-holders' || type === 'top-lenders';
-  const unitLabel = type === 'top-holders' ? 'holders' : type === 'top-lenders' ? 'lenders' : 'inscriptions';
+  const isHolders = type === 'top-holders';
+  const unitLabel = type === 'top-holders' ? 'holders' : 'inscriptions';
 
   const { items, loading, error, reachedEnd, capped, loadMore } = useLeaderboardFeed(
     type,

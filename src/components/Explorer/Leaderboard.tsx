@@ -19,7 +19,7 @@ type Props = {
 
 export default function Leaderboard({ type, items, showSeeAll, color = 'all' }: Props) {
   const meta = LEADERBOARDS[type];
-  const isHolders = type === 'top-holders' || type === 'top-lenders';
+  const isHolders = type === 'top-holders';
 
   return (
     <div className="border border-ink-2 bg-ink-1">
@@ -203,8 +203,9 @@ function renderInscriptionMetric(row: ApiInscription, type: LeaderboardKey): str
       return formatBtc(row.highest_sale_sats) || '—';
     case 'most-loaned':
       return `${(row.loan_count ?? 0).toLocaleString()}`;
+    case 'currently-loaned':
+      return row.loan_funded_at ? formatRelTime(row.loan_funded_at) : '—';
     case 'top-holders':
-    case 'top-lenders':
       return '';
   }
 }

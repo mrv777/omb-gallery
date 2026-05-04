@@ -16,8 +16,8 @@ const VALID: LeaderboardKey[] = [
   'top-volume',
   'highest-sale',
   'most-loaned',
+  'currently-loaned',
   'top-holders',
-  'top-lenders',
 ];
 
 // Page-1 size matches the client hook's PAGE_SIZE so the initial SSR render
@@ -73,10 +73,8 @@ export default async function LeaderboardDetailPage({
   let items: LeaderboardItem[];
   let nextCursor: string | null;
 
-  if (type === 'top-holders' || type === 'top-lenders') {
-    const stmt =
-      type === 'top-holders' ? stmts.topHoldersGroupedPaged : stmts.topLendersGroupedPaged;
-    const rows = stmt.all({
+  if (type === 'top-holders') {
+    const rows = stmts.topHoldersGroupedPaged.all({
       limit: PAGE_SIZE,
       collection,
       color: colorParam,
@@ -110,6 +108,8 @@ export default async function LeaderboardDetailPage({
           return stmts.topByHighestSalePaged;
         case 'most-loaned':
           return stmts.topByLoansPaged;
+        case 'currently-loaned':
+          return stmts.topActiveLoansPaged;
         default:
           throw new Error(`unhandled type ${type}`);
       }
@@ -127,7 +127,7 @@ export default async function LeaderboardDetailPage({
       inscriptions.length === PAGE_SIZE
         ? buildInscriptionCursor(
             inscriptions[inscriptions.length - 1],
-            type as Exclude<LeaderboardKey, 'top-holders' | 'top-lenders'>
+            type as Exclude<LeaderboardKey, 'top-holders'>
           )
         : null;
   }
@@ -145,7 +145,7 @@ export default async function LeaderboardDetailPage({
 
 function buildInscriptionCursor(
   row: ApiInscription,
-  type: Exclude<LeaderboardKey, 'top-holders' | 'top-lenders'>
+  type: Exclude<LeaderboardKey, 'top-holders'>
 ): string | null {
   const num = row.inscription_number;
   switch (type) {
@@ -159,5 +159,7 @@ function buildInscriptionCursor(
       return `${row.highest_sale_sats}:${num}`;
     case 'most-loaned':
       return `${row.loan_count ?? 0}:${num}`;
+    case 'currently-loaned':
+      return row.loan_funded_at != null ? `${row.loan_funded_at}:${num}` : null;
   }
 }

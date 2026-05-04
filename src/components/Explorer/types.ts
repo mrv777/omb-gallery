@@ -6,8 +6,8 @@ export type LeaderboardKey =
   | 'top-volume'
   | 'highest-sale'
   | 'most-loaned'
-  | 'top-holders'
-  | 'top-lenders';
+  | 'currently-loaned'
+  | 'top-holders';
 
 export type LeaderboardMeta = {
   key: LeaderboardKey;
@@ -48,17 +48,17 @@ export const LEADERBOARDS: Record<LeaderboardKey, LeaderboardMeta> = {
     blurb: 'Inscriptions used as collateral in the most loans (originations).',
     metricLabel: 'loans',
   },
+  'currently-loaned': {
+    key: 'currently-loaned',
+    title: 'Currently Loaned Out',
+    blurb: 'OMBs currently locked in active Liquidium loan escrows. Detected via on-chain shape — vin[0]=P2TR + vout[0]=P2TR + 4-output funding tx, single-use destination, last-touched within 30d.',
+    metricLabel: 'funded',
+  },
   'top-holders': {
     key: 'top-holders',
     title: 'Top Holders',
     blurb: 'Wallets holding the most OMB inscriptions.',
     metricLabel: 'inscriptions',
-  },
-  'top-lenders': {
-    key: 'top-lenders',
-    title: 'Top Lenders',
-    blurb: 'Wallets that have funded the most loans against OMBs.',
-    metricLabel: 'loans',
   },
 };
 
