@@ -2193,7 +2193,7 @@ export function getStmts(): Stmts {
         FROM events e WHERE e.new_owner LIKE 'bc1p%' GROUP BY e.new_owner
       ),
       latest_in AS (
-        SELECT e.inscription_number, e.new_owner, e.txid, e.block_timestamp,
+        SELECT e.inscription_number, e.new_owner, e.txid, e.block_timestamp, e.event_type,
                ROW_NUMBER() OVER (PARTITION BY e.inscription_number ORDER BY e.block_height DESC, e.id DESC) AS rn
         FROM events e
         JOIN inscriptions i ON i.inscription_number = e.inscription_number
@@ -2203,6 +2203,9 @@ export function getStmts(): Stmts {
           AND e.new_owner = i.current_owner
           AND e.block_timestamp > @cutoff
       )
+      -- Only the latest event in the window is considered. If that event is
+      -- 'sold', the destination is a buyer (not a loan escrow) — exclude.
+      -- A loan origination always lands as 'transferred' (no sale price).
       SELECT li.inscription_number,
              li.new_owner   AS escrow_addr,
              li.txid        AS funding_txid,
@@ -2210,6 +2213,7 @@ export function getStmts(): Stmts {
       FROM latest_in li
       JOIN addr_stats s ON s.addr = li.new_owner
       WHERE li.rn = 1
+        AND li.event_type = 'transferred'
         AND s.recv_n = 1
         AND s.sent_n = 0
     `),
@@ -2240,7 +2244,7 @@ export function getStmts(): Stmts {
       DELETE FROM active_loan_escrows
       WHERE inscription_number NOT IN (
         SELECT li.inscription_number FROM (
-          SELECT e.inscription_number, e.new_owner,
+          SELECT e.inscription_number, e.new_owner, e.event_type,
                  ROW_NUMBER() OVER (PARTITION BY e.inscription_number ORDER BY e.block_height DESC, e.id DESC) AS rn
           FROM events e
           JOIN inscriptions i ON i.inscription_number = e.inscription_number
@@ -2256,7 +2260,7 @@ export function getStmts(): Stmts {
                  (SELECT COUNT(*) FROM events WHERE old_owner = e.new_owner) AS sent_n
           FROM events e WHERE e.new_owner LIKE 'bc1p%' GROUP BY e.new_owner
         ) s ON s.addr = li.new_owner
-        WHERE li.rn = 1 AND s.recv_n = 1 AND s.sent_n = 0
+        WHERE li.rn = 1 AND li.event_type = 'transferred' AND s.recv_n = 1 AND s.sent_n = 0
       )
     `),
 

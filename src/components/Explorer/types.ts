@@ -51,7 +51,7 @@ export const LEADERBOARDS: Record<LeaderboardKey, LeaderboardMeta> = {
   'currently-loaned': {
     key: 'currently-loaned',
     title: 'Currently Loaned Out',
-    blurb: 'OMBs currently locked in active Liquidium loan escrows. Detected via on-chain shape — vin[0]=P2TR + vout[0]=P2TR + 4-output funding tx, single-use destination, last-touched within 30d.',
+    blurb: 'OMBs currently locked in active Liquidium loan escrows.',
     metricLabel: 'funded',
   },
   'top-holders': {
