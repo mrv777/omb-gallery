@@ -9,17 +9,59 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 23;
+const SCHEMA_VERSION = 24;
 
-// Wallets that distributed inscriptions as primary-mint outflows. Events
-// where `old_owner` matches one of these (and inscription is in the
-// matching color set) get `event_type = 'mint'` rather than 'sold' or
-// 'transferred', so primary-mint prices don't pollute the sale-volume /
-// highest-sale leaderboards. The wallets are dormant in 2026; this is
-// retroactive cleanup, not a hot path.
-const MINT_WALLETS: Record<string, string> = {
-  bc1pyl6g53k220rggaukyx929qnnxqw8vzt8xrfw88muw22pnwfvqjkqreeqpw: 'green',
+// Wallets that distributed inscriptions as primary-mint outflows. An event
+// is `event_type = 'mint'` only when ALL of:
+//   - `old_owner` matches one of these wallets
+//   - inscription's color matches the wallet's registered color
+//   - `block_timestamp <= valid_until_ts` (the wallet's mint window)
+//
+// The window matters because some mint wallets continue to do regular
+// movement after distribution ended (orange and black both still hold
+// OMBs and do post-mint transfers). Without the time bound, those would
+// mis-tag as mints. See ONCHAIN_TAGGING.md §2.1 for window evidence.
+type MintWallet = {
+  addr: string;
+  color: string;
+  /** Unix timestamp; events from this wallet after this are NOT mints. */
+  valid_until_ts: number;
+  /** Human-readable for diff/blame. */
+  description: string;
 };
+
+const MINT_WALLETS: MintWallet[] = [
+  {
+    addr: 'bc1pyl6g53k220rggaukyx929qnnxqw8vzt8xrfw88muw22pnwfvqjkqreeqpw',
+    color: 'green',
+    valid_until_ts: 1704067200, // 2024-01-01 UTC (last out: 2023-07-05)
+    description: 'Green eyes mint distribution',
+  },
+  {
+    addr: 'bc1p53jarhva6eg4wggv7apndndger4y4gy9s6mf3gp0rttdzensu2nq3598ur',
+    color: 'blue',
+    valid_until_ts: 1717200000, // 2024-06-01 UTC (last out: 2023-11-14)
+    description: 'Blue eyes mint distribution',
+  },
+  {
+    addr: 'bc1pg8jywvphzeyf9fg8tsac6jq7ft2dzz7pez720r6uanumn6lyayeshg46es',
+    color: 'red',
+    valid_until_ts: 1717200000, // 2024-06-01 UTC (last out: 2023-11-06)
+    description: 'Red eyes mint distribution',
+  },
+  {
+    addr: 'bc1p4a29gzwlear4csc9sz6ll97j9yl7877tasy75evq8wm6r3admtqq3m72k0',
+    color: 'orange',
+    valid_until_ts: 1756684800, // 2025-09-01 UTC (last out: 2025-04-09)
+    description: 'Orange eyes mint distribution',
+  },
+  {
+    addr: 'bc1q86ssqhk04chjah6kkuqw3fv5wjy7v2nflyg50t',
+    color: 'black',
+    valid_until_ts: 1756684800, // 2025-09-01 UTC (last out: 2025-02-26)
+    description: 'Black eyes mint distribution',
+  },
+];
 
 // OMB-shape entry: filename = "<inscription_number>.jpg|webp", per-color groups.
 type ImageEntry = { filename: string; description: string; tags: string[] };
@@ -113,6 +155,7 @@ function migrate(db: DB): void {
         upgradeV20ToV21(db);
         upgradeV21ToV22(db);
         upgradeV22ToV23(db);
+        upgradeV23ToV24(db);
       } else {
         initSchemaLatest(db);
       }
@@ -139,6 +182,7 @@ function migrate(db: DB): void {
       if (current < 21) upgradeV20ToV21(db);
       if (current < 22) upgradeV21ToV22(db);
       if (current < 23) upgradeV22ToV23(db);
+      if (current < 24) upgradeV23ToV24(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -1020,22 +1064,26 @@ function upgradeV22ToV23(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_events_txid            ON events (txid);
   `);
 
-  // Reclassify primary-mint events. The mapping is wallet → color, so
-  // we only flip rows whose inscription's color matches the registered
-  // distribution wallet. Other colors from the same wallet (none today,
-  // but defensive) keep their existing event_type.
+  // Reclassify primary-mint events. Three constraints applied per wallet:
+  //   1. old_owner = wallet's addr
+  //   2. inscription's color matches the wallet's registered color (the
+  //      black wallet has 2 outflows of red eyes that are NOT mints)
+  //   3. block_timestamp <= valid_until_ts (orange and black still hold
+  //      OMBs and do post-mint regular transfers; without the time bound
+  //      those would mis-tag)
   const reclassify = db.prepare(`
     UPDATE events
        SET event_type = 'mint',
            marketplace = NULL
      WHERE old_owner = @addr
+       AND block_timestamp <= @valid_until_ts
        AND inscription_number IN (
          SELECT inscription_number FROM inscriptions WHERE color = @color
        )
        AND event_type IN ('transferred','sold')
   `);
-  for (const [addr, color] of Object.entries(MINT_WALLETS)) {
-    reclassify.run({ addr, color });
+  for (const w of MINT_WALLETS) {
+    reclassify.run({ addr: w.addr, color: w.color, valid_until_ts: w.valid_until_ts });
   }
 
   // Recompute aggregates on affected inscriptions so mint events don't
@@ -1066,6 +1114,65 @@ function upgradeV22ToV23(db: DB): void {
      WHERE i.inscription_number IN (
        SELECT DISTINCT inscription_number FROM events WHERE event_type = 'mint'
      );
+  `);
+}
+
+function upgradeV23ToV24(db: DB): void {
+  // v23 only registered the green mint wallet. v24 adds the remaining
+  // four (blue, red, orange, black) AND introduces a per-wallet time
+  // bound (`block_timestamp <= valid_until_ts`) so post-mint regular
+  // transfers from still-active wallets (orange, black) don't mis-tag
+  // as mints. See ONCHAIN_TAGGING.md §2.1 for window evidence.
+  //
+  // Idempotent: the UPDATE only flips rows still in 'transferred'/'sold'.
+  // For prod (already at v23 with greens reclassified) this catches the
+  // 4 new wallets. For fresh DBs (v23 modified to handle all 5 already)
+  // this is a no-op.
+
+  const reclassify = db.prepare(`
+    UPDATE events
+       SET event_type = 'mint',
+           marketplace = NULL
+     WHERE old_owner = @addr
+       AND block_timestamp <= @valid_until_ts
+       AND inscription_number IN (
+         SELECT inscription_number FROM inscriptions WHERE color = @color
+       )
+       AND event_type IN ('transferred','sold')
+  `);
+  for (const w of MINT_WALLETS) {
+    reclassify.run({ addr: w.addr, color: w.color, valid_until_ts: w.valid_until_ts });
+  }
+
+  // Recompute aggregates on every inscription that now has any mint
+  // event so transfer_count / sale_count / total_volume_sats /
+  // highest_sale_sats reflect secondary-market activity only.
+  //
+  // Single-pass GROUP BY + UPDATE...FROM is ~100× faster than the
+  // per-row correlated-subquery pattern v23 used; with ~6,800 affected
+  // inscriptions on prod the v23 shape would tie up the connection
+  // long enough to risk the app's startup probe. SQLite ≥ 3.33
+  // supports UPDATE...FROM (better-sqlite3 ships ≥ 3.42).
+  db.exec(`
+    WITH agg AS (
+      SELECT e.inscription_number                                                       AS num,
+             SUM(CASE WHEN e.event_type = 'transferred' THEN 1 ELSE 0 END)              AS xfer,
+             SUM(CASE WHEN e.event_type = 'sold'        THEN 1 ELSE 0 END)              AS sold_n,
+             COALESCE(SUM(CASE WHEN e.event_type='sold' THEN e.sale_price_sats END),0)  AS vol,
+             COALESCE(MAX(CASE WHEN e.event_type='sold' THEN e.sale_price_sats END),0)  AS hi
+      FROM events e
+      WHERE e.inscription_number IN (
+        SELECT DISTINCT inscription_number FROM events WHERE event_type = 'mint'
+      )
+      GROUP BY e.inscription_number
+    )
+    UPDATE inscriptions
+       SET transfer_count    = agg.xfer,
+           sale_count        = agg.sold_n,
+           total_volume_sats = agg.vol,
+           highest_sale_sats = agg.hi
+      FROM agg
+     WHERE inscriptions.inscription_number = agg.num;
   `);
 }
 

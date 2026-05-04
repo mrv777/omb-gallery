@@ -21,14 +21,29 @@ A new fingerprint cannot promote from heuristic→chain-fingerprint without the 
 
 The atomic things we are certain about, with the on-chain evidence each rests on. Anything not in this section is either refuted (§4) or unknown (§5).
 
-### 2.1 OMB minting wallet (green)
+### 2.1 OMB minting wallets
 
-`bc1pyl6g53k220rggaukyx929qnnxqw8vzt8xrfw88muw22pnwfvqjkqreeqpw` distributed every green-eye OMB inscription via 1,883 outflows in a one-week window 2023-06-29 → 2023-07-06. Wallet has been dormant since.
+One wallet per color held the original mint distribution and outflowed inscriptions to first buyers. Some of these wallets are still active beyond their distribution window (orange, black) and continue to do regular post-mint movements — those movements are NOT mints. Tagging requires three constraints to all hold:
 
-- **Confidence:** chain-truth (direct outflows observable).
-- **Verification:** user-confirmed; example txs `6f546e796bff596e44cde317bf9a787d6f1886809c0464d939eb968b14bd4b03` and `52ae855fe1a0995fe0eaeb0c1885e14ef94c94c2e6e1e813e3833ec7a02c5fd6`.
-- **Tag rule:** any event where `old_owner = MINT_WALLET` and inscription matches the wallet's color set ⇒ `event_type = 'mint'`, `marketplace = NULL`.
-- **Color sets known so far:** green only. Other colors' mint wallets are unknown — see §5.
+1. `events.old_owner = wallet.addr`
+2. `inscriptions.color = wallet.color`
+3. `events.block_timestamp ≤ wallet.valid_until_ts`
+
+| Color | Wallet | Observed outflow window | Cutoff (`valid_until_ts`) | Outflows in window |
+|---|---|---|---|---|
+| Green | `bc1pyl6g53k220rggaukyx929qnnxqw8vzt8xrfw88muw22pnwfvqjkqreeqpw` | 2023-06-29 → 2023-07-05 | 2024-01-01 (1704067200) | 1,883 |
+| Blue | `bc1p53jarhva6eg4wggv7apndndger4y4gy9s6mf3gp0rttdzensu2nq3598ur` | 2023-05-08 → 2023-11-14 | 2024-06-01 (1717200000) | 98 |
+| Red | `bc1pg8jywvphzeyf9fg8tsac6jq7ft2dzz7pez720r6uanumn6lyayeshg46es` | 2023-03-31 → 2023-11-06 | 2024-06-01 (1717200000) | 91 |
+| Orange | `bc1p4a29gzwlear4csc9sz6ll97j9yl7877tasy75evq8wm6r3admtqq3m72k0` | 2024-03-15 → 2025-04-09 | 2025-09-01 (1756684800) | 2,915 |
+| Black | `bc1q86ssqhk04chjah6kkuqw3fv5wjy7v2nflyg50t` | 2025-02-25 → 2025-02-26 | 2025-09-01 (1756684800) | 3,752 |
+
+Cutoffs sit ≥4 months after each wallet's last observed mint outflow. The "definitely-not-a-mint" guardrail (current_date − 6 months ≈ 2025-11-04) is well after every cutoff, so a recent transfer can never trip a mint tag.
+
+**Counter-example (true negative):** the black wallet (`bc1q86ss…`) has 2 historical outflows tagged with **red**-color OMBs (it received them and re-sent them, unrelated to its mint role). Color-match constraint #2 above correctly rejects these — they remain `transferred`.
+
+- **Confidence:** chain-truth (direct outflows + simple time bound).
+- **Verification:** user-supplied wallets, outflow counts cross-checked against the `events` table.
+- **Code:** `MINT_WALLETS` const at the top of `src/lib/db.ts`. Migration v23 (greens only, no time bound) → v24 (all 5 colors, time-bounded, with aggregate recompute).
 
 ### 2.2 Liquidium loan escrow signature
 
@@ -143,9 +158,7 @@ We've only confirmed legacy 4-out, 3PizFz9-lender era loans. Modern loans may us
 
 ### 5.5 Other-color mint wallets
 
-Only the green mint wallet (§2.1) is registered. Red, blue, orange, black mint wallets are unknown — those mints currently appear as `transferred` or `sold` events.
-
-**To resolve:** identify each color's distribution wallet (likely 4 more wallets, one per remaining color). Same investigation method as the green wallet (look for early-life concentrated outflows).
+**Resolved 2026-05-04.** All 5 colors registered — see §2.1.
 
 ### 5.6 Satflow on-chain fingerprint
 
@@ -178,9 +191,9 @@ All three resolution-type fixtures verify against internal pubkey `9367…d27a`.
 |---|---|---|
 | 11299610 | `35448512f39f65aaf9fa86794cb1dbcd7dc219962c9f0f83dcea9df7230cfe27` | 6-in / 7-out, vout[3]=`3Ke21os…` (75k sats) |
 
-### 6.4 Mint wallet (chain-truth, N=1,883)
+### 6.4 Mint wallets (chain-truth, N=8,739 across 5 colors)
 
-Wallet `bc1pyl6g53k220rggaukyx929qnnxqw8vzt8xrfw88muw22pnwfvqjkqreeqpw` → all green eyes via 1,883 outflows 2023-06-29 → 2023-07-06.
+See §2.1 for the full table. All five colors covered.
 
 ### 6.5 Counter-examples (true negatives — important for keeping fingerprints honest)
 
