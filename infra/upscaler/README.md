@@ -34,6 +34,12 @@ file /tmp/upscaled.png  # should report 1344x1344 PNG
 docker stop omb-upscaler
 ```
 
+### Apple Silicon dev caveat
+
+Under amd64 emulation (OrbStack/Docker Desktop on M-series), the container's lavapipe Vulkan ICD reports as 128-bit without fp16/int8 support. With cunet at `-s 4 -n N` for `N >= 0` the noise+scale cascade silently fails and writes an all-black 1344×1344 PNG (the binary still exits 0). On the prod x86 host lavapipe is 256-bit with fp16/int8 and works correctly, so this is a dev-only artifact.
+
+If you need to smoke-test denoise behavior locally, either run with `-n -1` (which works), or run with `-s 2` (native scale, also works) and accept a 672×672 output. To verify a setting that you intend to ship, run it on prod via `docker exec omb-upscaler /app/waifu2x-ncnn-vulkan ...`.
+
 The Next.js app's `/api/upscale?id=<num>&method=waifu2x` proxies here when the user picks "AI enhanced" in the download menu. (The other menu option, "Standard", uses sharp Mitchell in-process and never touches this sidecar.) Default URL is `http://localhost:8001/upscale`; override with the `UPSCALER_URL` env var (required in production for the AI option).
 
 ## Environment
