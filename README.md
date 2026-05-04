@@ -1,23 +1,23 @@
 # OMB Gallery
 
-A zoomable gallery for showcasing OMB images, built with Next.js 15, Next.js Image component, and React Zoom Pan Pinch.
+A zoomable gallery for showcasing OMB ordinal images plus an on-chain activity feed and explorer surfaced from a self-hosted `ord` node. Built on Next.js 16 with TanStack Virtual for the gallery, SQLite (`better-sqlite3`) for the activity / explorer side, and Tailwind for the punk-zine palette.
 
 ![OMB Gallery Screenshot](screenshot.png)
 
 ## Features
 
-- **Zoomable Interface**: Pinch, scroll, or use controls to zoom in and out of the gallery
-- **Modal View**: Click on any image to open it in a full-screen modal with navigation
-- **Color Filtering**: Filter images by their color category (red, blue, green, orange, black)
-- **Unobtrusive Controls**: Filter controls are subtle and don't distract from the viewing experience
-- **Responsive Design**: Works on desktop and mobile devices
-- **Optimized Images**: Uses Next.js Image component for automatic optimization and lazy loading
+- **Zoomable gallery**: pinch / scroll / drag to move around, click any inscription to open the modal with arrow-key navigation
+- **Color filter**: red / blue / green / orange / black, with the chosen filter persisted across the activity / explorer surfaces too
+- **Activity feed** (`/activity`): live transfers, sales, listings, and loan events for OMB inscriptions. Backed by an `ord` UTXO-diff poller plus Satflow sale enrichment.
+- **Explorer** (`/explorer`): leaderboards — most-transferred, longest-unmoved, top sale volume, highest single sale, most borrowed against, **currently loaned out** (active Liquidium loan escrows detected on-chain), and top holders.
+- **Slideshow + share**: play a filtered set sequentially or randomly, optionally fullscreen, and mint a shareable short-link to the snapshot.
+- **Notifications**: opt-in Telegram or Discord webhook alerts for per-inscription / per-color / firehose events.
 
 ## Technologies Used
 
-- Next.js 15
-- Next.js Image Component
-- React Zoom Pan Pinch
+- Next.js 16 App Router, React 19
+- TanStack Virtual (gallery virtualization)
+- `better-sqlite3` (SQLite at `/data/app.db` — activity feed, leaderboards, notifications)
 - Tailwind CSS
 
 ## Installation
