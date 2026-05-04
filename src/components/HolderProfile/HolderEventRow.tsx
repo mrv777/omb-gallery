@@ -8,6 +8,7 @@ import {
   memepoolTxLink,
   truncateAddr,
 } from '@/lib/format';
+import { EVENT_DISPLAY, isLoanEvent } from '@/lib/eventDisplay';
 import SafeImg from '@/components/SafeImg';
 import { Tooltip } from '../ui/Tooltip';
 
@@ -26,7 +27,8 @@ export default function HolderEventRow({ event, wallets }: { event: EventRow; wa
 
   const isSold = event.event_type === 'sold';
   const isTransferred = event.event_type === 'transferred';
-  const eventLabel = isSold ? 'SOLD' : isTransferred ? 'TRANSFERRED' : 'INSCRIBED';
+  const isLoan = isLoanEvent(event.event_type);
+  const display = EVENT_DISPLAY[event.event_type];
 
   const oldIsSelf = event.old_owner != null && wallets.includes(event.old_owner);
   const newIsSelf = event.new_owner != null && wallets.includes(event.new_owner);
@@ -52,10 +54,13 @@ export default function HolderEventRow({ event, wallets }: { event: EventRow; wa
     : isIncoming
       ? 'bg-accent-green/10 border-accent-green/40'
       : 'border-bone-dim/40';
-  const eventColor =
-    isSold || isTransferred ? directionColor : 'text-accent-orange';
-  const eventBg =
-    isSold || isTransferred ? directionBg : 'bg-accent-orange/10 border-accent-orange/40';
+  // Loan events get their fixed type-coloring (blue/red/orange) — direction
+  // doesn't capture the lifecycle clearly enough for sent/received tinting.
+  // Sold + transferred keep direction-aware tinting since "received from X
+  // for Y BTC" is the dominant signal there.
+  const eventLabel = display.label;
+  const eventColor = isLoan ? display.color : isSold || isTransferred ? directionColor : display.color;
+  const eventBg = isLoan ? display.bg : isSold || isTransferred ? directionBg : display.bg;
 
   const priceStr = isSold ? formatBtc(event.sale_price_sats) : '';
   const market = isSold ? marketplaceLabel(event.marketplace) : '';

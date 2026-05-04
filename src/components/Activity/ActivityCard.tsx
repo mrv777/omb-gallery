@@ -13,22 +13,7 @@ import {
 } from '@/lib/format';
 import SafeImg from '@/components/SafeImg';
 import { Tooltip } from '../ui/Tooltip';
-
-// Per-event-type display config. Keeps the JSX below readable instead of
-// six nested ternaries. Subtitle is a short human caption shown under the
-// type label (e.g. "collateral locked in escrow").
-const EVENT_DISPLAY: Record<
-  ApiEvent['event_type'],
-  { label: string; color: string; subtitle?: string }
-> = {
-  sold:               { label: 'SOLD',            color: 'text-accent-green' },
-  transferred:        { label: 'TRANSFERRED',     color: 'text-bone' },
-  inscribed:          { label: 'INSCRIBED',       color: 'text-bone-dim' },
-  'loan-originated':  { label: 'LOAN ORIGINATED', color: 'text-accent-blue',   subtitle: 'collateral locked in escrow' },
-  'loan-defaulted':   { label: 'LOAN DEFAULTED',  color: 'text-accent-red',    subtitle: 'lender claimed collateral' },
-  'loan-repaid':      { label: 'LOAN REPAID',     color: 'text-accent-blue',   subtitle: 'borrower paid lender' },
-  'loan-unlocked':    { label: 'LOAN UNLOCKED',   color: 'text-accent-orange', subtitle: 'borrower reclaimed collateral' },
-};
+import { EVENT_DISPLAY } from '@/lib/eventDisplay';
 
 // Loan amount lives in raw_json.loan_amount_sats for loan-originated rows.
 // Defaults don't carry a loan amount (we only know it from the origination

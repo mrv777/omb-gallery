@@ -7,52 +7,19 @@ import {
   truncateAddr,
 } from '@/lib/format';
 import type { EventRow } from '@/lib/db';
+import { EVENT_DISPLAY } from '@/lib/eventDisplay';
 import { Tooltip } from '../ui/Tooltip';
 
 type Props = { event: EventRow };
 
 export default function EventTimelineRow({ event }: Props) {
   const isSold = event.event_type === 'sold';
-  const isTransferred = event.event_type === 'transferred';
   const isLoanOrig = event.event_type === 'loan-originated';
   const isLoanDefault = event.event_type === 'loan-defaulted';
-  const isLoanRepaid = event.event_type === 'loan-repaid';
-  const isLoanUnlock = event.event_type === 'loan-unlocked';
-  const isLoan = isLoanOrig || isLoanDefault || isLoanRepaid || isLoanUnlock;
-
-  const eventLabel = isSold
-    ? 'SOLD'
-    : isTransferred
-      ? 'TRANSFERRED'
-      : isLoanOrig
-        ? 'LOAN ORIG'
-        : isLoanDefault
-          ? 'LOAN DEFAULT'
-          : isLoanRepaid
-            ? 'LOAN REPAID'
-            : isLoanUnlock
-              ? 'LOAN UNLOCK'
-              : 'INSCRIBED';
-
-  const eventColor = isSold
-    ? 'text-accent-green'
-    : isLoanOrig || isLoanRepaid
-      ? 'text-accent-blue'
-      : isLoanDefault
-        ? 'text-accent-red'
-        : isLoanUnlock
-          ? 'text-accent-orange'
-          : isTransferred
-            ? 'text-bone-dim'
-            : 'text-accent-orange';
-
-  const eventBg = isSold
-    ? 'bg-accent-green/10 border-accent-green/40'
-    : isLoan
-      ? 'bg-ink-2 border-bone-dim/40'
-      : isTransferred
-        ? 'border-bone-dim/40'
-        : 'bg-accent-orange/10 border-accent-orange/40';
+  const display = EVENT_DISPLAY[event.event_type];
+  const eventLabel = display.label;
+  const eventColor = display.color;
+  const eventBg = display.bg;
 
   const priceStr = isSold ? formatBtc(event.sale_price_sats) : '';
   const market = isSold ? marketplaceLabel(event.marketplace) : '';

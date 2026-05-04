@@ -989,12 +989,18 @@ async function main() {
 
       for (const d of defaults) {
         const v = d.verdict;
+        // borrower_addr is known via the escrowMap (populated when origination
+        // tracing succeeded for this escrow). Including it on the default row
+        // lets /holder/[borrower] surface "you got defaulted on" without
+        // having to JOIN-walk back to the origination event.
+        const escrowInfo = escrowMap.get(v.escrowAddr);
         const raw = JSON.stringify({
           source: 'onchain-loan-heuristic',
           confidence: 'high',
           loan_type: 'default',
           escrow_addr: v.escrowAddr,
           lender_addr: v.lender,
+          borrower_addr: escrowInfo?.borrower ?? null,
           timelock_value: v.timelock.number,
           timelock_kind: v.timelock.kind,
           timelock_opcode: v.timelock.opcode,

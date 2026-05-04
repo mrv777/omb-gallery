@@ -13,6 +13,7 @@ import {
   truncateAddr,
 } from '@/lib/format';
 import { lookupWalletLabel } from '@/lib/walletLabels';
+import { EVENT_DISPLAY } from '@/lib/eventDisplay';
 import SafeImg from '@/components/SafeImg';
 import { Tooltip } from '../ui/Tooltip';
 
@@ -44,18 +45,10 @@ const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev, matrica 
   const tileBg = hit && hit.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
 
   const isSold = event.event_type === 'sold';
-  const isTransferred = event.event_type === 'transferred';
-  const eventLabel = isSold ? 'SOLD' : isTransferred ? 'TRANSFERRED' : 'INSCRIBED';
-  const eventColor = isSold
-    ? 'text-accent-green'
-    : isTransferred
-      ? 'text-bone-dim'
-      : 'text-accent-orange';
-  const eventBg = isSold
-    ? 'bg-accent-green/10 border-accent-green/40'
-    : isTransferred
-      ? 'border-bone-dim/40'
-      : 'bg-accent-orange/10 border-accent-orange/40';
+  const display = EVENT_DISPLAY[event.event_type];
+  const eventLabel = display.label;
+  const eventColor = display.color;
+  const eventBg = display.bg;
 
   const priceStr = isSold ? formatBtc(event.sale_price_sats) : '';
   const market = isSold ? marketplaceLabel(event.marketplace) : '';

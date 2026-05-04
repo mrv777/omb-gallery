@@ -1578,20 +1578,43 @@ export function getStmts(): Stmts {
     `),
 
     // Holder profile: events where the address shows up on either side of a
-    // transfer/sale, sorted (block_timestamp, id) DESC. UNION ALL'd two indexed
-    // lookups (one per owner side) since SQLite won't pick a single index for
-    // the disjunction `new_owner=? OR old_owner=?`. Outer ORDER BY does the
-    // merge — at the LIMIT we use here (50) the cost is negligible.
-    // Holder timeline — also excludes 'listed' events. Listings have NULL
-    // new_owner so they wouldn't even match `new_owner = @owner`, but they
-    // WOULD match `old_owner = @owner` for the seller's address; exclude
-    // explicitly to keep the holder profile to on-chain history only.
+    // transfer/sale (`new_owner` / `old_owner`), OR is the borrower/lender on
+    // a loan event (via raw_json). Sorted (block_timestamp, id) DESC.
+    // UNION ALL'd four lookups since SQLite won't pick a single index for
+    // a disjunction across them; outer ORDER BY merges. At the LIMIT we use
+    // (50) the cost is negligible.
+    //
+    // The two raw_json branches cover the case where a user borrowed an
+    // inscription (so the on-chain old_owner is the user, captured by the
+    // primary branch) and then it defaulted (where old_owner=escrow,
+    // new_owner=lender — neither is the borrower, but raw_json records who
+    // the borrower was). Without these branches, a defaulted borrower's
+    // holder page would show the loan-originated event but go silent on
+    // the eventual default. The `NOT IN` guards keep us from double-counting
+    // events where the user is BOTH on a primary side AND mentioned in
+    // raw_json (e.g. borrower=user is also old_owner=user on origination).
+    //
+    // Excludes 'listed': listings are off-chain notification triggers, not
+    // on-chain history.
     getEventsByAddress: db.prepare(`
       SELECT * FROM (
         SELECT * FROM events WHERE new_owner = @owner AND event_type != 'listed'
         UNION ALL
         SELECT * FROM events WHERE old_owner = @owner AND event_type != 'listed'
           AND old_owner != COALESCE(new_owner, '')
+        UNION ALL
+        SELECT * FROM events
+          WHERE event_type IN ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked')
+            AND json_extract(raw_json, '$.borrower_addr') = @owner
+            AND COALESCE(new_owner, '') != @owner
+            AND COALESCE(old_owner, '') != @owner
+        UNION ALL
+        SELECT * FROM events
+          WHERE event_type IN ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked')
+            AND json_extract(raw_json, '$.lender_addr') = @owner
+            AND COALESCE(new_owner, '') != @owner
+            AND COALESCE(old_owner, '') != @owner
+            AND COALESCE(json_extract(raw_json, '$.borrower_addr'), '') != @owner
       )
       ORDER BY block_timestamp DESC, id DESC
       LIMIT @limit
@@ -1607,6 +1630,19 @@ export function getStmts(): Stmts {
         UNION ALL
         SELECT * FROM events WHERE old_owner = @owner AND event_type != 'listed'
           AND old_owner != COALESCE(new_owner, '')
+        UNION ALL
+        SELECT * FROM events
+          WHERE event_type IN ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked')
+            AND json_extract(raw_json, '$.borrower_addr') = @owner
+            AND COALESCE(new_owner, '') != @owner
+            AND COALESCE(old_owner, '') != @owner
+        UNION ALL
+        SELECT * FROM events
+          WHERE event_type IN ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked')
+            AND json_extract(raw_json, '$.lender_addr') = @owner
+            AND COALESCE(new_owner, '') != @owner
+            AND COALESCE(old_owner, '') != @owner
+            AND COALESCE(json_extract(raw_json, '$.borrower_addr'), '') != @owner
       )
       WHERE block_timestamp < @cursor_ts
          OR (block_timestamp = @cursor_ts AND id < @cursor_id)
@@ -1622,6 +1658,17 @@ export function getStmts(): Stmts {
         (SELECT COUNT(*) FROM events WHERE new_owner = @owner AND event_type != 'listed')
         + (SELECT COUNT(*) FROM events WHERE old_owner = @owner AND event_type != 'listed'
            AND old_owner != COALESCE(new_owner, ''))
+        + (SELECT COUNT(*) FROM events
+            WHERE event_type IN ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked')
+              AND json_extract(raw_json, '$.borrower_addr') = @owner
+              AND COALESCE(new_owner, '') != @owner
+              AND COALESCE(old_owner, '') != @owner)
+        + (SELECT COUNT(*) FROM events
+            WHERE event_type IN ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked')
+              AND json_extract(raw_json, '$.lender_addr') = @owner
+              AND COALESCE(new_owner, '') != @owner
+              AND COALESCE(old_owner, '') != @owner
+              AND COALESCE(json_extract(raw_json, '$.borrower_addr'), '') != @owner)
         AS n
     `),
 
