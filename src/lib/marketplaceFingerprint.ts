@@ -42,9 +42,9 @@ export type MarketplaceMatch = {
   acpInputs: number[];
 };
 
-// Magisat's fixed P2SH fee output. See ONCHAIN_TAGGING.md §2.6 for the
-// derivation (14/14 confirmed Magisat OMB sales contain this address; 2/2
-// confirmed-not-Magisat sales do not).
+// Magisat's fixed P2SH fee output. See ONCHAIN_TAGGING.md §2.7 for the
+// derivation (14/14 confirmed Magisat OMB sales contain this address;
+// confirmed-not-Magisat examples do not).
 const MAGISAT_FEE_ADDRS = new Set<string>(['3Ke21osfhEbEryUeqdwAuAY8VKxm5B9uB2']);
 
 /** Return the input indexes whose schnorr signature carries SIGHASH 0x83. */

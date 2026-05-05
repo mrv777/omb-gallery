@@ -9,6 +9,7 @@ import {
   truncateAddr,
 } from '@/lib/format';
 import { EVENT_DISPLAY, isLoanEvent } from '@/lib/eventDisplay';
+import { loanAmountSats } from '@/lib/eventMeta';
 import SafeImg from '@/components/SafeImg';
 import { Tooltip } from '../ui/Tooltip';
 
@@ -60,10 +61,20 @@ export default function HolderEventRow({ event, wallets }: { event: EventRow; wa
   // Sold + transferred keep direction-aware tinting since "received from X
   // for Y BTC" is the dominant signal there.
   const eventLabel = display.label;
-  const eventColor = isLoan ? display.color : isSold || isTransferred ? directionColor : display.color;
+  const eventColor = isLoan
+    ? display.color
+    : isSold || isTransferred
+      ? directionColor
+      : display.color;
   const eventBg = isLoan ? display.bg : isSold || isTransferred ? directionBg : display.bg;
 
-  const priceStr = isSold || isMint ? formatBtc(event.sale_price_sats) : '';
+  const loanSats = loanAmountSats(event);
+  const priceStr =
+    isSold || isMint
+      ? formatBtc(event.sale_price_sats)
+      : loanSats != null
+        ? formatBtc(loanSats)
+        : '';
   const market = isSold ? marketplaceLabel(event.marketplace) : '';
   const txLink = memepoolTxLink(event.txid);
   // Non-OMB inscriptions don't have a /inscription/[n] page yet (the route is
@@ -73,7 +84,9 @@ export default function HolderEventRow({ event, wallets }: { event: EventRow; wa
       ? `https://ordinals.com/inscription/${hit.inscriptionId}`
       : `/inscription/${event.inscription_number}`;
   const tooltipLabel =
-    hit?.kind === 'bravocados' ? `Bravocados #${event.inscription_number}` : `#${event.inscription_number}`;
+    hit?.kind === 'bravocados'
+      ? `Bravocados #${event.inscription_number}`
+      : `#${event.inscription_number}`;
 
   const thumb = hit ? (
     isExternal ? (
@@ -139,12 +152,7 @@ export default function HolderEventRow({ event, wallets }: { event: EventRow; wa
       </Tooltip>
 
       {isExternal ? (
-        <a
-          href={inscriptionLink}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={numberClass}
-        >
+        <a href={inscriptionLink} target="_blank" rel="noopener noreferrer" className={numberClass}>
           #{event.inscription_number}
         </a>
       ) : (

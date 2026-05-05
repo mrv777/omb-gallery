@@ -14,6 +14,7 @@ import {
 } from '@/lib/format';
 import { lookupWalletLabel } from '@/lib/walletLabels';
 import { EVENT_DISPLAY } from '@/lib/eventDisplay';
+import { loanAmountSats } from '@/lib/eventMeta';
 import SafeImg from '@/components/SafeImg';
 import { Tooltip } from '../ui/Tooltip';
 
@@ -46,12 +47,18 @@ const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev, matrica 
 
   const isSold = event.event_type === 'sold';
   const isMint = event.event_type === 'mint';
+  const loanSats = loanAmountSats(event);
   const display = EVENT_DISPLAY[event.event_type];
   const eventLabel = display.label;
   const eventColor = display.color;
   const eventBg = display.bg;
 
-  const priceStr = isSold || isMint ? formatBtc(event.sale_price_sats) : '';
+  const priceStr =
+    isSold || isMint
+      ? formatBtc(event.sale_price_sats)
+      : loanSats != null
+        ? formatBtc(loanSats)
+        : '';
   const market = isSold ? marketplaceLabel(event.marketplace) : '';
   const txLink = memepoolTxLink(event.txid);
 

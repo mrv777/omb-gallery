@@ -1170,7 +1170,7 @@ function upgradeV24ToV25(db: DB): void {
   // Add the 'magisat_fp' poll stream — cursor for the live Magisat
   // fingerprint detector that walks new `transferred` events and upgrades
   // them to `sold` + marketplace='magisat' when the on-chain fingerprint
-  // matches (ONCHAIN_TAGGING.md §2.6).
+  // matches (ONCHAIN_TAGGING.md §2.7).
   //
   // SQLite can't ALTER a CHECK in place — copy-and-swap, same pattern as
   // v6 / v9 / v12 / v14 / v20 / v22.
@@ -1214,10 +1214,12 @@ function upgradeV25ToV26(db: DB): void {
   //      we can audit how many real sales we lost if we ever revisit.
   //
   //   2. Drops `active_loan_escrows` (Phase 7) entirely. ONCHAIN_TAGGING.md
-  //      §2.3 proves there is no on-chain detection rule for currently-active
-  //      Liquidium loans — the previous detector populated 32 false positives.
-  //      The /explorer/currently-loaned route, loan-escrows poll mode, and
-  //      loanEscrowDetect.ts are removed in the same commit.
+  //      §2.3 proves there is no cryptographic on-chain proof for currently-
+  //      active Liquidium loans — the previous detector populated false positives.
+  //      The loan-escrows poll mode and loanEscrowDetect.ts are removed in the
+  //      same commit. /explorer/currently-loaned was later restored from the
+  //      event-lifecycle `inscriptions.active_loan_count` aggregate, not from
+  //      escrow-address probing.
   //
   //   3. Removes 'loan_escrows' from poll_state.stream CHECK + drops the row.
   //
@@ -1502,6 +1504,7 @@ type Stmts = {
   topByVolume: ReturnType<DB['prepare']>;
   topByHighestSale: ReturnType<DB['prepare']>;
   topByLoans: ReturnType<DB['prepare']>;
+  topByActiveLoans: ReturnType<DB['prepare']>;
   topHolders: ReturnType<DB['prepare']>;
   // leaderboards (cursor-paginated, with stable secondary sort by
   // inscription_number for keyset pagination on the /explorer/[type] detail
@@ -1511,6 +1514,7 @@ type Stmts = {
   topByVolumePaged: ReturnType<DB['prepare']>;
   topByHighestSalePaged: ReturnType<DB['prepare']>;
   topByLoansPaged: ReturnType<DB['prepare']>;
+  topByActiveLoansPaged: ReturnType<DB['prepare']>;
   topHoldersGroupedPaged: ReturnType<DB['prepare']>;
   // listings
   upsertActiveListing: ReturnType<DB['prepare']>;
@@ -2163,6 +2167,18 @@ export function getStmts(): Stmts {
       LIMIT @limit
     `),
 
+    // Currently-loaned: open loan cycles as tracked by tagged
+    // loan-originated events minus observed loan resolutions. This is an
+    // event-lifecycle leaderboard, not an escrow-address proof table.
+    topByActiveLoans: db.prepare(`
+      SELECT * FROM inscriptions
+      WHERE active_loan_count > 0
+        AND collection_slug = @collection
+        AND (@color IS NULL OR color = @color)
+      ORDER BY active_loan_count DESC, last_event_at DESC
+      LIMIT @limit
+    `),
+
     // Paged variants for /explorer/[type] infinite scroll. Ordering uses
     // inscription_number as a unique secondary sort so keyset pagination is
     // deterministic — without it, ties on the primary metric can cause rows
@@ -2240,6 +2256,20 @@ export function getStmts(): Stmts {
           OR (loan_count = @cursor_primary AND inscription_number > @cursor_secondary)
         )
       ORDER BY loan_count DESC, inscription_number ASC
+      LIMIT @limit
+    `),
+
+    topByActiveLoansPaged: db.prepare(`
+      SELECT * FROM inscriptions
+      WHERE active_loan_count > 0
+        AND collection_slug = @collection
+        AND (@color IS NULL OR color = @color)
+        AND (
+          @cursor_primary IS NULL
+          OR active_loan_count < @cursor_primary
+          OR (active_loan_count = @cursor_primary AND inscription_number > @cursor_secondary)
+        )
+      ORDER BY active_loan_count DESC, inscription_number ASC
       LIMIT @limit
     `),
 

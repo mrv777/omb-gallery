@@ -8,6 +8,7 @@ import {
 } from '@/lib/format';
 import type { EventRow } from '@/lib/db';
 import { EVENT_DISPLAY } from '@/lib/eventDisplay';
+import { loanAmountSats } from '@/lib/eventMeta';
 import { Tooltip } from '../ui/Tooltip';
 
 type Props = { event: EventRow };
@@ -22,7 +23,13 @@ export default function EventTimelineRow({ event }: Props) {
   const eventColor = display.color;
   const eventBg = display.bg;
 
-  const priceStr = isSold || isMint ? formatBtc(event.sale_price_sats) : '';
+  const loanSats = loanAmountSats(event);
+  const priceStr =
+    isSold || isMint
+      ? formatBtc(event.sale_price_sats)
+      : loanSats != null
+        ? formatBtc(loanSats)
+        : '';
   const market = isSold ? marketplaceLabel(event.marketplace) : '';
   const txLink = memepoolTxLink(event.txid);
 

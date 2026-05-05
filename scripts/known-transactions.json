@@ -73,26 +73,865 @@
       "block_timestamp": 1712449959,
       "tags": ["loan", "origination", "escrow-creation"]
     },
-
-    { "txid": "35448512f39f65aaf9fa86794cb1dbcd7dc219962c9f0f83dcea9df7230cfe27", "inscription_number": 11299610, "expected_type": "sold", "expected_marketplace": "magisat", "sale_price_sats": 5010000, "description": "Magisat sale of #11299610 (user-verified externally). 6-in/7-out PSBT. vout[3]=3Ke21os... fee output. ACP signature on vin[2].", "tags": ["sale", "magisat", "fingerprint-tp"] },
-    { "txid": "a05018db45ef694309fd479471532b4deab73f78ca6f4f81c308c691d10a004c", "inscription_number": 60576611, "expected_type": "sold", "expected_marketplace": "magisat", "sale_price_sats": 1990000, "description": "Magisat sale of #60576611. Magisat fee at vout[3].", "tags": ["sale", "magisat", "fingerprint-tp"] },
-    { "txid": "9b39158d01b120bb4d7b9672bb33853fcfd2fb4d16d87bfc90bc09ee5be8efcb", "inscription_number": 83315935, "expected_type": "sold", "expected_marketplace": "magisat", "sale_price_sats": 1700000, "description": "Magisat sale of #83315935. Magisat fee at vout[3].", "tags": ["sale", "magisat", "fingerprint-tp"] },
-    { "txid": "fe6f0cea64e5531b08201a799994a51e0c70099a244c2e386867da369cc56976", "inscription_number": 83313141, "expected_type": "sold", "expected_marketplace": "magisat", "sale_price_sats": 1650000, "description": "Magisat sale of #83313141 (12-in/7-out). Magisat fee at vout[3].", "tags": ["sale", "magisat", "fingerprint-tp"] },
-    { "txid": "4fb45a9d7ecce4d21772712a905ce0e02231628d894636b152a24e159028b2ab", "inscription_number": 60577519, "expected_type": "sold", "expected_marketplace": "magisat", "sale_price_sats": 1980999, "description": "Magisat sale of #60577519 (5-in/7-out). Magisat fee at vout[3].", "tags": ["sale", "magisat", "fingerprint-tp"] },
-    { "txid": "c2e8525350484452aa9fe0e7ac84555ba0c8e6ed7e6ede2955f14d4e665ca877", "inscription_number": 83314941, "expected_type": "sold", "expected_marketplace": "magisat", "sale_price_sats": 1490000, "description": "Magisat sale of #83314941. Magisat fee at vout[3].", "tags": ["sale", "magisat", "fingerprint-tp"] },
-    { "txid": "64b6da0210ea2c8d10b1e8484ed26dec35cefa19682cdc61c0424e663b5db60c", "inscription_number": 60577519, "expected_type": "sold", "expected_marketplace": "magisat", "sale_price_sats": 1950999, "description": "Second Magisat sale of #60577519 (re-listed). Magisat fee at vout[3].", "tags": ["sale", "magisat", "fingerprint-tp"] },
-    { "txid": "a2ab6124d0169fb7b8b78a9af63644ba2f2270f154fb64cf0a91d917b602a18a", "inscription_number": 60575164, "expected_type": "sold", "expected_marketplace": "magisat", "sale_price_sats": 18699004, "description": "Magisat sale of #60575164 (15-in/7-out, larger consolidation).", "tags": ["sale", "magisat", "fingerprint-tp"] },
-    { "txid": "26fa970071d96815f1bd36564e5682c69609cfc48183356540ff43f0ffd030c4", "inscription_number": 60563279, "expected_type": "sold", "expected_marketplace": "magisat", "sale_price_sats": 22885999, "description": "Magisat sale of #60563279.", "tags": ["sale", "magisat", "fingerprint-tp"] },
-    { "txid": "ed699e3337dcb038c231ee4007cd5ad139963fa1569f41ddb342b385a3fe75f1", "inscription_number": 60583767, "expected_type": "sold", "expected_marketplace": "magisat", "sale_price_sats": 21791499, "description": "Magisat sale of #60583767. Outlier shape: 4-in/3-out (fee at vout[2] not vout[3]). Useful TP for confirming the rule isn't position-bound.", "tags": ["sale", "magisat", "fingerprint-tp", "outlier-shape"] },
-    { "txid": "4ea9f02b3622d0d49122e427fdd8c9f07314947f71b8334a31feed965739ac15", "inscription_number": 60577536, "expected_type": "sold", "expected_marketplace": "magisat", "sale_price_sats": 23880999, "description": "Magisat sale of #60577536.", "tags": ["sale", "magisat", "fingerprint-tp"] },
-    { "txid": "a4af1a3135c55826dec44ae469ea49df80b4d3768e8d755dfe90b75e2121ef7d", "inscription_number": 60576648, "expected_type": "sold", "expected_marketplace": "magisat", "sale_price_sats": 25771499, "description": "Magisat sale of #60576648 (24-in/7-out, large consolidation).", "tags": ["sale", "magisat", "fingerprint-tp"] },
-    { "txid": "01b7312da978f86a7ac66a786410e64e08377a287bbce476b8d13eceb393c39c", "inscription_number": 60580333, "expected_type": "sold", "expected_marketplace": "magisat", "sale_price_sats": 36716499, "description": "Magisat sale of #60580333.", "tags": ["sale", "magisat", "fingerprint-tp"] },
-    { "txid": "e566eb2e00cf88da73df433841eadb9afbbf7700582ce93f84b42f613629424e", "inscription_number": 60579029, "expected_type": "sold", "expected_marketplace": "magisat", "sale_price_sats": 35820999, "description": "Magisat sale of #60579029.", "tags": ["sale", "magisat", "fingerprint-tp"] },
-
-    { "txid": "5c2e3ba9ab42fd5d2f3752d15cd5a0154b903668391fe6301f895e1ed1fa73d9", "inscription_number": 11287305, "expected_type": "sold", "expected_marketplace": null, "description": "Confirmed sale but NOT Magisat. 4-out PSBT pattern with bc1papmpmu0...59se9u as vout[1] (an unidentified marketplace's recurring fee output, see ONCHAIN_TAGGING.md §5.1). Magisat fingerprint correctly does NOT match — used as TN to validate the rule isn't over-greedy.", "tags": ["sale", "fingerprint-tn", "unidentified-marketplace"] },
-    { "txid": "b9a77cffc3914af60564d49bb34a5d421075780e91cebaa20cad639530671d57", "inscription_number": 83309450, "expected_type": "sold", "expected_marketplace": null, "description": "Sale of #83309450 confirmed NOT on Magisat (user verified the listing UI). Same bc1papmpmu0... fee shape as 5c2e3ba9. Magisat fingerprint correctly does NOT match.", "tags": ["sale", "fingerprint-tn", "unidentified-marketplace"] },
-
-    { "txid": "3bd09bfc7d229428cb99cfb44170e939b80a297b2f35f2e2ea2af7df0da22711", "inscription_number": 11299747, "expected_type": "transferred", "description": "Counter-example for Phase 4 Liquidium loan-resolution detector: single-leaf taproot tap-tree, internal pubkey 428a... — NOT 9367...d27a. Phase 4 v2 detector misclassified as loan-unlocked; v3 (with Liquidium-pubkey check, ONCHAIN_TAGGING.md §2.2) correctly rejects.", "tags": ["transfer", "loan-fingerprint-tn", "non-liquidium-internal-pubkey"] }
+    {
+      "txid": "35448512f39f65aaf9fa86794cb1dbcd7dc219962c9f0f83dcea9df7230cfe27",
+      "inscription_number": 11299610,
+      "expected_type": "sold",
+      "expected_marketplace": "magisat",
+      "sale_price_sats": 5010000,
+      "description": "Magisat sale of #11299610 (user-verified externally). 6-in/7-out PSBT. vout[3]=3Ke21os... fee output. ACP signature on vin[2].",
+      "tags": ["sale", "magisat", "fingerprint-tp"]
+    },
+    {
+      "txid": "a05018db45ef694309fd479471532b4deab73f78ca6f4f81c308c691d10a004c",
+      "inscription_number": 60576611,
+      "expected_type": "sold",
+      "expected_marketplace": "magisat",
+      "sale_price_sats": 1990000,
+      "description": "Magisat sale of #60576611. Magisat fee at vout[3].",
+      "tags": ["sale", "magisat", "fingerprint-tp"]
+    },
+    {
+      "txid": "9b39158d01b120bb4d7b9672bb33853fcfd2fb4d16d87bfc90bc09ee5be8efcb",
+      "inscription_number": 83315935,
+      "expected_type": "sold",
+      "expected_marketplace": "magisat",
+      "sale_price_sats": 1700000,
+      "description": "Magisat sale of #83315935. Magisat fee at vout[3].",
+      "tags": ["sale", "magisat", "fingerprint-tp"]
+    },
+    {
+      "txid": "fe6f0cea64e5531b08201a799994a51e0c70099a244c2e386867da369cc56976",
+      "inscription_number": 83313141,
+      "expected_type": "sold",
+      "expected_marketplace": "magisat",
+      "sale_price_sats": 1650000,
+      "description": "Magisat sale of #83313141 (12-in/7-out). Magisat fee at vout[3].",
+      "tags": ["sale", "magisat", "fingerprint-tp"]
+    },
+    {
+      "txid": "4fb45a9d7ecce4d21772712a905ce0e02231628d894636b152a24e159028b2ab",
+      "inscription_number": 60577519,
+      "expected_type": "sold",
+      "expected_marketplace": "magisat",
+      "sale_price_sats": 1980999,
+      "description": "Magisat sale of #60577519 (5-in/7-out). Magisat fee at vout[3].",
+      "tags": ["sale", "magisat", "fingerprint-tp"]
+    },
+    {
+      "txid": "c2e8525350484452aa9fe0e7ac84555ba0c8e6ed7e6ede2955f14d4e665ca877",
+      "inscription_number": 83314941,
+      "expected_type": "sold",
+      "expected_marketplace": "magisat",
+      "sale_price_sats": 1490000,
+      "description": "Magisat sale of #83314941. Magisat fee at vout[3].",
+      "tags": ["sale", "magisat", "fingerprint-tp"]
+    },
+    {
+      "txid": "64b6da0210ea2c8d10b1e8484ed26dec35cefa19682cdc61c0424e663b5db60c",
+      "inscription_number": 60577519,
+      "expected_type": "sold",
+      "expected_marketplace": "magisat",
+      "sale_price_sats": 1950999,
+      "description": "Second Magisat sale of #60577519 (re-listed). Magisat fee at vout[3].",
+      "tags": ["sale", "magisat", "fingerprint-tp"]
+    },
+    {
+      "txid": "a2ab6124d0169fb7b8b78a9af63644ba2f2270f154fb64cf0a91d917b602a18a",
+      "inscription_number": 60575164,
+      "expected_type": "sold",
+      "expected_marketplace": "magisat",
+      "sale_price_sats": 18699004,
+      "description": "Magisat sale of #60575164 (15-in/7-out, larger consolidation).",
+      "tags": ["sale", "magisat", "fingerprint-tp"]
+    },
+    {
+      "txid": "26fa970071d96815f1bd36564e5682c69609cfc48183356540ff43f0ffd030c4",
+      "inscription_number": 60563279,
+      "expected_type": "sold",
+      "expected_marketplace": "magisat",
+      "sale_price_sats": 22885999,
+      "description": "Magisat sale of #60563279.",
+      "tags": ["sale", "magisat", "fingerprint-tp"]
+    },
+    {
+      "txid": "ed699e3337dcb038c231ee4007cd5ad139963fa1569f41ddb342b385a3fe75f1",
+      "inscription_number": 60583767,
+      "expected_type": "sold",
+      "expected_marketplace": "magisat",
+      "sale_price_sats": 21791499,
+      "description": "Magisat sale of #60583767. Outlier shape: 4-in/3-out (fee at vout[2] not vout[3]). Useful TP for confirming the rule isn't position-bound.",
+      "tags": ["sale", "magisat", "fingerprint-tp", "outlier-shape"]
+    },
+    {
+      "txid": "4ea9f02b3622d0d49122e427fdd8c9f07314947f71b8334a31feed965739ac15",
+      "inscription_number": 60577536,
+      "expected_type": "sold",
+      "expected_marketplace": "magisat",
+      "sale_price_sats": 23880999,
+      "description": "Magisat sale of #60577536.",
+      "tags": ["sale", "magisat", "fingerprint-tp"]
+    },
+    {
+      "txid": "a4af1a3135c55826dec44ae469ea49df80b4d3768e8d755dfe90b75e2121ef7d",
+      "inscription_number": 60576648,
+      "expected_type": "sold",
+      "expected_marketplace": "magisat",
+      "sale_price_sats": 25771499,
+      "description": "Magisat sale of #60576648 (24-in/7-out, large consolidation).",
+      "tags": ["sale", "magisat", "fingerprint-tp"]
+    },
+    {
+      "txid": "01b7312da978f86a7ac66a786410e64e08377a287bbce476b8d13eceb393c39c",
+      "inscription_number": 60580333,
+      "expected_type": "sold",
+      "expected_marketplace": "magisat",
+      "sale_price_sats": 36716499,
+      "description": "Magisat sale of #60580333.",
+      "tags": ["sale", "magisat", "fingerprint-tp"]
+    },
+    {
+      "txid": "e566eb2e00cf88da73df433841eadb9afbbf7700582ce93f84b42f613629424e",
+      "inscription_number": 60579029,
+      "expected_type": "sold",
+      "expected_marketplace": "magisat",
+      "sale_price_sats": 35820999,
+      "description": "Magisat sale of #60579029.",
+      "tags": ["sale", "magisat", "fingerprint-tp"]
+    },
+    {
+      "txid": "7b4855e7dfb1515ab231af9fd619cec2fa19e0302ba5033d0996c29395042bed",
+      "inscription_number": 11523618,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified active 16d green-eyes loan. 6-in/4-out shape: vin[0] inscription P2TR -> vout[0] P2TR collateral holder, vout[1]=bc1papmp...59se9u activation fee, vout[2]=P2SH borrower principal, vout[3]=same P2WSH 1-of-2 lender vault as vin[1..]. Candidate fixture only; not live-tagged until true negatives are confirmed.",
+      "block_timestamp": 1777569249,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified"
+      ]
+    },
+    {
+      "txid": "5c2e3ba9ab42fd5d2f3752d15cd5a0154b903668391fe6301f895e1ed1fa73d9",
+      "inscription_number": 11287305,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified active 30d green-eyes loan. Previously recorded as an unidentified sale counterexample; raw tx shape matches the Liquidium instant-loan candidate pattern: vin[0] inscription P2TR -> vout[0] P2TR collateral holder, vout[1]=bc1papmp...59se9u activation fee, vout[2]=P2SH borrower principal, vout[3]=same P2WSH 1-of-2 lender vault as vin[1..]. Candidate fixture only; not live-tagged until true negatives are confirmed.",
+      "block_timestamp": 1777662759,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "reclassified-fixture"
+      ]
+    },
+    {
+      "txid": "6fecd1ba736b2bcea3ec18727a04014419586f012497f6f87e7ad2124abb5dbe",
+      "inscription_number": 60578598,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified active 30d orange-eyes loan. 3-in/4-out shape: vin[0] inscription P2TR -> vout[0] P2TR collateral holder, vout[1]=bc1papmp...59se9u activation fee, vout[2]=P2SH borrower principal, vout[3]=same P2WSH 1-of-2 lender vault as vin[1..]. Candidate fixture only; not live-tagged until true negatives are confirmed.",
+      "block_timestamp": 1777642588,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified"
+      ]
+    },
+    {
+      "txid": "5fdfe1557bb9fef77f7dfc391c95b344f64ba90f74e035f4b7088089da7c7689",
+      "inscription_number": 83311912,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified active black-eyes loan. 3-in/4-out Liquidium candidate shape with borrower principal 1,401,819 sats and activation fee 10,605 sats. Candidate fixture only; not live-tagged until true negatives are confirmed.",
+      "block_timestamp": 1777757853,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified"
+      ]
+    },
+    {
+      "txid": "c6e4f029d2c873f5c405c68f507ac533089b209a0f182d7ae4da8ac98087cc94",
+      "inscription_number": 11412779,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified active green-eyes loan. 5-in/4-out Liquidium candidate shape with borrower principal 3,051,389 sats and activation fee 23,062 sats. Candidate fixture only; not live-tagged until true negatives are confirmed.",
+      "block_timestamp": 1777512211,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified"
+      ]
+    },
+    {
+      "txid": "46406f17ea65086edbd0749d8cb4ddd2ffc0fef024da2c9ff69fa79307c9259f",
+      "inscription_number": 60576752,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified active orange-eyes loan. 4-in/4-out Liquidium candidate shape with borrower principal 1,660,647 sats and activation fee 12,577 sats. Candidate fixture only; not live-tagged until true negatives are confirmed.",
+      "block_timestamp": 1777487132,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified"
+      ]
+    },
+    {
+      "txid": "a55d04f31a25f1413fb88b4c982d247fee227da65ec455568fb4f1926c380857",
+      "inscription_number": 11209997,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified active green-eyes loan. 4-in/4-out Liquidium candidate shape with borrower principal 3,025,237 sats and activation fee 22,875 sats. Candidate fixture only; not live-tagged until true negatives are confirmed.",
+      "block_timestamp": 1777396893,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified"
+      ]
+    },
+    {
+      "txid": "4d801efc89608d9c0d31c059785d51fd92635a001999ef8ffa0441eb7ef5513f",
+      "inscription_number": 83311199,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified active black-eyes loan. 3-in/4-out Liquidium candidate shape with borrower principal 1,322,609 sats and activation fee 9,997 sats. Candidate fixture only; not live-tagged until true negatives are confirmed.",
+      "block_timestamp": 1777301508,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified"
+      ]
+    },
+    {
+      "txid": "957956afa5fef3749fe2f1aa39edc8742a1b81bff4fb1c4cd202581d834594f1",
+      "inscription_number": 11273327,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken green-eyes loan, active status unknown. 3-in/4-out Liquidium candidate shape with borrower principal 3,075,962 sats and activation fee 23,250 sats. Candidate fixture only; not live-tagged until true negatives are confirmed.",
+      "block_timestamp": 1777039969,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "4e448ef5d063a51d4027cbbf612edb4780c90a127a06cbbf0002253371e73cd1",
+      "inscription_number": 11210011,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken green-eyes loan, active status unknown. 5-in/4-out Liquidium candidate shape with borrower principal 3,117,337 sats and activation fee 23,565 sats. Candidate fixture only; not live-tagged until true negatives are confirmed.",
+      "block_timestamp": 1777037882,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "3b28b071cea49aa8def81d3c2827d082baa58a54254d55f926343e16a06a9385",
+      "inscription_number": 10827837,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken green-eyes loan, active status unknown. 3-in/4-out Liquidium candidate shape with borrower principal 3,025,943 sats and activation fee 22,875 sats. Candidate fixture only; not live-tagged until true negatives are confirmed.",
+      "block_timestamp": 1777142995,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "271f9ed476bcc7794e2cbd15b511bddb2983b32b725de3c868939985c7f0fac5",
+      "inscription_number": 11209953,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination variant — user-verified recently taken green-eyes loan, active status unknown. 2-in/4-out related shape: vin[0] inscription P2TR -> vout[0] P2TR collateral holder, vout[1]=bc1papmp...59se9u activation fee, vout[2]=P2WPKH borrower principal, vout[3]=P2WSH lender-vault change. This intentionally does NOT match the current strict P2SH-principal candidate rule.",
+      "block_timestamp": 1777308158,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "fingerprint-miss",
+        "externally-verified",
+        "variant-2in-p2wpkh-principal",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "3bdb0927d54909e5556648aa6fcfe4652253fc0f227f1cecc1da675ec431a14e",
+      "inscription_number": 11299682,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination variant — user-verified recently taken green-eyes loan, active status unknown. 2-in/4-out related shape: vin[0] inscription P2TR -> vout[0] P2TR collateral holder, vout[1]=bc1papmp...59se9u activation fee, vout[2]=P2TR borrower/principal output, vout[3]=P2WSH lender-vault change. This intentionally does NOT match the current strict P2SH-principal candidate rule.",
+      "block_timestamp": 1777321292,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "fingerprint-miss",
+        "externally-verified",
+        "variant-2in-p2tr-principal",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "ee0ace27c2476e6d7fa7e2c6834e10567c6ea42ade8c8f56497ac223598303a2",
+      "inscription_number": 83313116,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken black-eyes loan, active status unknown. The later tx eba4f842... is a post-origination movement, not the origination. This 10-in/4-out strict Liquidium candidate shape has borrower principal 1,397,551 sats and activation fee 10,575 sats. Candidate fixture only; not live-tagged until true negatives are confirmed.",
+      "block_timestamp": 1777015885,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown",
+        "not-latest-tx"
+      ]
+    },
+    {
+      "txid": "395a6615f83ec6b1d3bdcae290147fd286c38e90d986e6fd9fa381f25f6c660e",
+      "inscription_number": 11181309,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken green-eyes loan, active status unknown. 14-in/4-out strict Liquidium candidate shape with borrower principal 2,917,899 sats and activation fee 22,125 sats.",
+      "block_timestamp": 1776698606,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "20333e9c3147a2460a2ccf87cbffb4c599f7c437dc35bfdcb304ca0f83d04675",
+      "inscription_number": 11287298,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken green-eyes loan, active status unknown. 4-in/4-out strict Liquidium candidate shape with borrower principal 2,897,628 sats and activation fee 21,900 sats.",
+      "block_timestamp": 1776816504,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "5f360b723c007d9ce907e6757dbb222d8349c782275e61e35c99f30ffde869f4",
+      "inscription_number": 11412785,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken green-eyes loan, active status unknown. 3-in/4-out strict Liquidium candidate shape with borrower principal 3,076,356 sats and activation fee 23,250 sats.",
+      "block_timestamp": 1777017378,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "c94f58c96f66d2eeb68f84b9647e0ff569c891f1afdfe1c282b6766cc668272e",
+      "inscription_number": 60577516,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken orange-eyes loan, active status unknown. 3-in/4-out strict Liquidium candidate shape with borrower principal 1,374,715 sats and activation fee 10,391 sats.",
+      "block_timestamp": 1776834895,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "86bb49503773b4911dbebc1653285258967b0bb1852d6ebcbdc67b6555348908",
+      "inscription_number": 83310226,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken black-eyes loan, active status unknown. 5-in/4-out strict Liquidium candidate shape with borrower principal 1,262,355 sats and activation fee 9,547 sats.",
+      "block_timestamp": 1777013468,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "befe43ff4debe758ff79b1268e4d819fcbdac4852db1047432c37fb9a71f0bca",
+      "inscription_number": 83314015,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken black-eyes loan, active status unknown. 9-in/4-out strict Liquidium candidate shape with borrower principal 1,202,539 sats and activation fee 9,165 sats. A second older strict candidate exists for the same inscription in the 30-day scan but is not recorded here until specifically confirmed.",
+      "block_timestamp": 1776880567,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "a63030cdebfdd9c2b70e5f3a6c30a5dfc6412ce356e776d454b3e7cdfaf710e2",
+      "inscription_number": 60571179,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination variant — user-verified recently taken orange-eyes loan, active status unknown. 2-in/4-out related shape with bc1papmp... activation fee, P2SH borrower principal 1,353,812 sats, and P2WSH lender-vault change. This intentionally does NOT match the current strict rule because it has only one lender input.",
+      "block_timestamp": 1776829217,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "fingerprint-miss",
+        "externally-verified",
+        "variant-2in-p2sh-principal",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "85897139589e8fd781c9cf28f6779a780e5e04f48a3c79076b5d29edbf5f2201",
+      "inscription_number": 60580809,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination variant — user-verified recently taken orange-eyes loan, active status unknown. 2-in/4-out related shape with bc1papmp... activation fee, P2SH borrower principal 1,460,643 sats, and P2WSH lender-vault change. This intentionally does NOT match the current strict rule because it has only one lender input.",
+      "block_timestamp": 1776987992,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "fingerprint-miss",
+        "externally-verified",
+        "variant-2in-p2sh-principal",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "8fe3ee399ac1ac7eeee3709f983952ea0c59a9671dcbba7353181118f7dde8d9",
+      "inscription_number": 83296297,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination variant — user-verified recently taken black-eyes loan, active status unknown. 2-in/4-out related shape with bc1papmp... activation fee, P2WPKH borrower principal 1,211,571 sats, and P2WSH lender-vault change. A later movement exists in the 30-day scan, so this is not the latest tx.",
+      "block_timestamp": 1776969006,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "fingerprint-miss",
+        "externally-verified",
+        "variant-2in-p2wpkh-principal",
+        "active-unknown",
+        "not-latest-tx"
+      ]
+    },
+    {
+      "txid": "ac36feb9f178a10ce02510031f8e2541af4569ce795e8bb8a24abb95393fac60",
+      "inscription_number": 60576225,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination variant — user-verified recently taken orange-eyes loan, active status unknown. 2-in/4-out related shape with bc1papmp... activation fee, P2SH borrower principal 1,276,797 sats, and P2WSH lender-vault change. A later movement exists in the 30-day scan, so this is not the latest tx.",
+      "block_timestamp": 1776689659,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "fingerprint-miss",
+        "externally-verified",
+        "variant-2in-p2sh-principal",
+        "active-unknown",
+        "not-latest-tx"
+      ]
+    },
+    {
+      "txid": "55f6031370baf5f49e3080a83afc24d87452195d936187505a79f4c5d786b00c",
+      "inscription_number": 83316387,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination variant — user-verified recently taken black-eyes loan, active status unknown. 2-in/4-out related shape with bc1papmp... activation fee, P2SH borrower principal 1,479,184 sats, and P2WSH lender-vault change. A second older P2SH-principal variant exists for the same inscription in the 30-day scan but is not recorded here until specifically confirmed.",
+      "block_timestamp": 1777093920,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "fingerprint-miss",
+        "externally-verified",
+        "variant-2in-p2sh-principal",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "3e226ec40701acc1381d5eccc1912b6d258f7182e2f9fcea419fb2984f479dac",
+      "inscription_number": 60578966,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination variant — user-verified recently taken orange-eyes loan, active status unknown. 2-in/4-out related shape with bc1papmp... activation fee, P2WPKH borrower principal 1,601,449 sats, and P2WSH lender-vault change. An older multi-input P2WPKH-principal candidate exists for the same inscription in the 30-day scan but is not recorded here until specifically confirmed.",
+      "block_timestamp": 1777129394,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "fingerprint-miss",
+        "externally-verified",
+        "variant-2in-p2wpkh-principal",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "617ac4b6093d8c6d6caf5d2f83be9222ad5ecd759273d1b33bfb6ed5bfda94f1",
+      "inscription_number": 60578441,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken orange-eyes loan, active status unknown. 3-in/4-out strict Liquidium candidate shape with borrower principal 1,312,290 sats and activation fee 9,922 sats. Later sale/transfer movements exist in the 30-day scan, so this is not the latest tx.",
+      "block_timestamp": 1776411479,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown",
+        "not-latest-tx"
+      ]
+    },
+    {
+      "txid": "872fb86eb415c2db041fbc701419826dc06abce1f824703e009401887665ad2e",
+      "inscription_number": 83295902,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination variant — user-verified recently taken black-eyes loan, active status unknown. 3-in/4-out related shape with bc1papmp... activation fee, P2WPKH borrower principal 1,167,387 sats, and P2WSH lender-vault change. This intentionally does NOT match the current strict rule because the borrower principal is P2WPKH and the flow has multiple non-collateral inputs. A later movement exists in the 30-day scan, so this is not the latest tx.",
+      "block_timestamp": 1776351117,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "fingerprint-miss",
+        "externally-verified",
+        "variant-multiin-p2wpkh-principal",
+        "active-unknown",
+        "not-latest-tx"
+      ]
+    },
+    {
+      "txid": "d79938ee8d903463a18666f5109ed307bce83b269312fc7b65ca3b70df15d4ee",
+      "inscription_number": 83296387,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken black-eyes loan, active status unknown. 3-in/4-out strict Liquidium candidate shape with borrower principal 1,358,952 sats and activation fee 10,290 sats. Another older strict candidate and later sale/transfer movements exist in the 30-day scan; only this newer strict candidate is recorded.",
+      "block_timestamp": 1776283009,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown",
+        "not-latest-tx"
+      ]
+    },
+    {
+      "txid": "3f8022c740a23dac9dce59a6b6707522af21801c8eaafd36bfd8cc415b9e3c80",
+      "inscription_number": 83307339,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination variant — user-verified recently taken black-eyes loan, active status unknown. 2-in/4-out related shape with bc1papmp... activation fee, P2TR borrower/principal output 1,157,592 sats, and P2WSH lender-vault change.",
+      "block_timestamp": 1776421424,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "fingerprint-miss",
+        "externally-verified",
+        "variant-2in-p2tr-principal",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "64e025901f0969b2f8b5b4501b95ae27bd11d83909dd811a74f1d0b373df357f",
+      "inscription_number": 11273478,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken green-eyes loan, active status unknown. 5-in/4-out strict Liquidium candidate shape with borrower principal 2,892,589 sats and activation fee 21,862 sats.",
+      "block_timestamp": 1776248643,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "7bbd54b33b02985e347ac851a0e03fff01dd9d9ff255c6d34559dfd616973035",
+      "inscription_number": 60569712,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken orange-eyes loan, active status unknown. 3-in/4-out strict Liquidium candidate shape with borrower principal 1,334,717 sats and activation fee 10,089 sats.",
+      "block_timestamp": 1776367801,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "d82b96550a08453b6c383666d8b6bcb415ecb1175c1d011685926e32a3071788",
+      "inscription_number": 60580346,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken orange-eyes loan, active status unknown. 3-in/4-out strict Liquidium candidate shape with borrower principal 1,330,155 sats and activation fee 10,057 sats.",
+      "block_timestamp": 1776227717,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "7ad6ff5939fffcc3654e72d35fafb07c869726d4d3a36a8f2e4054325a2133a6",
+      "inscription_number": 83310204,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken black-eyes loan, active status unknown. 8-in/4-out strict Liquidium candidate shape with borrower principal 1,389,711 sats and activation fee 10,507 sats. Candidate fixture only; not live-tagged until true negatives are confirmed.",
+      "block_timestamp": 1777389816,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "7c473aa8e56a8158460cf82a291e3478df13f7d59796c3cb0b23afa3ed0c1686",
+      "inscription_number": 83313381,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken black-eyes loan, active status unknown. 3-in/4-out strict Liquidium candidate shape with borrower principal 1,365,887 sats and activation fee 10,327 sats. Candidate fixture only; not live-tagged until true negatives are confirmed.",
+      "block_timestamp": 1777344065,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "04913246ee3f86cf69ed64d90f5e681b1ea8fe67b40934ccaff4c896e0e7cad5",
+      "inscription_number": 83298014,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken black-eyes loan, active status unknown. 3-in/4-out strict Liquidium candidate shape with borrower principal 1,488,356 sats and activation fee 11,250 sats. Candidate fixture only; not live-tagged until true negatives are confirmed.",
+      "block_timestamp": 1777300757,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "d29767aba84a2e80122d23f928b5fb8104105e73a9af823907e8c9dd4f014d26",
+      "inscription_number": 83310436,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken black-eyes loan, active status unknown. 3-in/4-out strict Liquidium candidate shape with borrower principal 1,322,609 sats and activation fee 9,997 sats. Candidate fixture only; not live-tagged until true negatives are confirmed.",
+      "block_timestamp": 1777251516,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "e3cebfc538f3eca80438a59b173a40ab2fc9bbd5feb34eb93e11e4226849cb3c",
+      "inscription_number": 60570073,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken orange-eyes loan, active status unknown. 3-in/4-out strict Liquidium candidate shape with borrower principal 1,587,606 sats and activation fee 12,000 sats. Candidate fixture only; not live-tagged until true negatives are confirmed.",
+      "block_timestamp": 1777172181,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "752523a1a3cbadff35affcee7efdbf0af1b6fc8da52c508cb23ad713c7a4c014",
+      "inscription_number": 11299684,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination candidate — user-verified recently taken green-eyes loan, active status unknown. 15-in/4-out strict Liquidium candidate shape with borrower principal 3,195,520 sats and activation fee 24,157 sats. Candidate fixture only; not live-tagged until true negatives are confirmed.",
+      "block_timestamp": 1776156516,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "candidate-fingerprint",
+        "externally-verified",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "a9cc5fabbcebd5511699590f6ce33c6572d05d897d0a9e1de3f9dc498811bcf8",
+      "inscription_number": 60578991,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination variant — user-verified recently taken orange-eyes loan, active status unknown. 2-in/4-out related shape with P2SH borrower principal with bc1papmp... activation fee, borrower principal 1,661,991 sats, and activation fee 12,561 sats. This intentionally does NOT match the current strict rule.",
+      "block_timestamp": 1777419999,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "fingerprint-miss",
+        "externally-verified",
+        "variant-2in-p2sh-principal",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "7380b922ea8aeaf8e4c79f7eca821791f3893fd29f7d05a0f6cfbe89a204e71f",
+      "inscription_number": 11209362,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination variant — user-verified recently taken green-eyes loan, active status unknown. multi-input/4-out related shape with P2TR borrower/principal output with bc1papmp... activation fee, borrower principal 3,026,642 sats, and activation fee 22,875 sats. This intentionally does NOT match the current strict rule.",
+      "block_timestamp": 1777346723,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "fingerprint-miss",
+        "externally-verified",
+        "variant-multiin-p2tr-principal",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "b08020802dd431a21c7f1b58a47fd3010b1cd51e7bd4207759992df28ae5d5fd",
+      "inscription_number": 83313543,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination variant — user-verified recently taken black-eyes loan, active status unknown. 2-in/4-out related shape with P2WPKH borrower principal with bc1papmp... activation fee, borrower principal 1,488,434 sats, and activation fee 11,250 sats. This intentionally does NOT match the current strict rule.",
+      "block_timestamp": 1777074585,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "fingerprint-miss",
+        "externally-verified",
+        "variant-2in-p2wpkh-principal",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "81488471b6dd9adbf9a013ee278af36ee47cd771c6a752fd4ca7d836e1594df4",
+      "inscription_number": 60563151,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination variant — user-verified recently taken orange-eyes loan, active status unknown. 2-in/4-out related shape with P2SH borrower principal with bc1papmp... activation fee, borrower principal 1,519,072 sats, and activation fee 11,481 sats. This intentionally does NOT match the current strict rule.",
+      "block_timestamp": 1777034209,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "fingerprint-miss",
+        "externally-verified",
+        "variant-2in-p2sh-principal",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "7d62f433d3ce3af27f065ab57c7cb580125af2b4beee9339d589cecab56e5ed4",
+      "inscription_number": 60580576,
+      "expected_type": "loan-originated",
+      "description": "Modern Liquidium instant-loan origination variant — user-verified recently taken orange-eyes loan, active status unknown. 2-in/4-out related shape with P2WPKH borrower principal with bc1papmp... activation fee, borrower principal 1,575,774 sats, and activation fee 11,910 sats. This intentionally does NOT match the current strict rule.",
+      "block_timestamp": 1777162883,
+      "tags": [
+        "loan",
+        "origination",
+        "liquidium",
+        "instant-loan",
+        "fingerprint-miss",
+        "externally-verified",
+        "variant-2in-p2wpkh-principal",
+        "active-unknown"
+      ]
+    },
+    {
+      "txid": "b9a77cffc3914af60564d49bb34a5d421075780e91cebaa20cad639530671d57",
+      "inscription_number": 83309450,
+      "expected_type": "sold",
+      "expected_marketplace": null,
+      "description": "Sale of #83309450 confirmed NOT on Magisat (user verified the listing UI). Same bc1papmpmu0... fee shape as 5c2e3ba9. Magisat fingerprint correctly does NOT match.",
+      "tags": ["sale", "fingerprint-tn", "unidentified-marketplace"]
+    },
+    {
+      "txid": "3bd09bfc7d229428cb99cfb44170e939b80a297b2f35f2e2ea2af7df0da22711",
+      "inscription_number": 11299747,
+      "expected_type": "transferred",
+      "description": "Counter-example for Phase 4 Liquidium loan-resolution detector: single-leaf taproot tap-tree, internal pubkey 428a... — NOT 9367...d27a. Phase 4 v2 detector misclassified as loan-unlocked; v3 (with Liquidium-pubkey check, ONCHAIN_TAGGING.md §2.2) correctly rejects.",
+      "tags": ["transfer", "loan-fingerprint-tn", "non-liquidium-internal-pubkey"]
+    }
   ],
   "notes": {
     "loan_lifecycle": "Loan detection works by finding taproot script-path spends with OP_CSV OP_DROP (hex b175) — the definitive fingerprint of a timelocked escrow. From there we trace backward to origination and forward to repayment/unlock.",
@@ -100,7 +939,8 @@
     "csv_values": "CSV values e95b4066 and e8d66166 are Unix timestamps (~May-Jun 2024). Values > 500M are interpreted as timestamps by BIP 68/112. The script pattern is: <csv_timestamp> OP_CSV OP_DROP <pubkey> OP_CHECKSIG.",
     "escrow_pattern": "Escrow addresses are taproot outputs (bc1p...) created in origination txs. The taproot commits to two spend paths: key-path (borrower, for unlock) and script-path with CSV timelock (lender, for default claim).",
     "not_a_sale": "These loan transactions are NOT sales. The existing sales heuristic correctly skips them (cooperative layer finds no external outputs). The loan heuristic tags them as distinct event types to avoid confusion with marketplace sales.",
-    "magisat_fingerprint": "Magisat sales are detected by the on-chain fingerprint in src/lib/marketplaceFingerprint.ts: any vout with address 3Ke21osfhEbEryUeqdwAuAY8VKxm5B9uB2 (P2SH fee) AND ≥1 vin with a 65-byte schnorr signature ending in 0x83 (SIGHASH_SINGLE | ANYONECANPAY). 14 TPs + 2 TNs in this corpus. Full design + price-extraction rule in ONCHAIN_TAGGING.md §2.6.",
-    "liquidium_internal_pubkey": "Phase 4 loan-resolution detection requires the spend's control-block internal pubkey to equal 93674766caa3db9c0f63c4b74f302510c509d6d0ffac9d67214d8f03cb2ed27a. Single-leaf tap-trees with other internal pubkeys (e.g. 428a... in 3bd09bfc) are NOT Liquidium and the v3 detector rejects them. See ONCHAIN_TAGGING.md §2.2 + §4.5."
+    "magisat_fingerprint": "Magisat sales are detected by the on-chain fingerprint in src/lib/marketplaceFingerprint.ts: any vout with address 3Ke21osfhEbEryUeqdwAuAY8VKxm5B9uB2 (P2SH fee) AND ≥1 vin with a 65-byte schnorr signature ending in 0x83 (SIGHASH_SINGLE | ANYONECANPAY). 14 TPs plus confirmed TNs in this corpus. Full design + price-extraction rule in ONCHAIN_TAGGING.md §2.7.",
+    "liquidium_internal_pubkey": "Phase 4 loan-resolution detection requires the spend's control-block internal pubkey to equal 93674766caa3db9c0f63c4b74f302510c509d6d0ffac9d67214d8f03cb2ed27a. Single-leaf tap-trees with other internal pubkeys (e.g. 428a... in 3bd09bfc) are NOT Liquidium and the v3 detector rejects them. See ONCHAIN_TAGGING.md §2.2 + §4.5.",
+    "liquidium_modern_origination_candidate": "Twenty-nine user-verified Liquidium OMB loans from 2026 match a narrow instant-loan origination shape: vin[0] spends the inscription P2TR, vin[1..] spend one recurring P2WSH 1-of-2 lender vault, vout[0] keeps the inscription value in a new P2TR collateral holder, vout[1] pays bc1papmpmu0...59se9u, vout[2] pays borrower principal to P2SH, and vout[3] returns lender-vault change. Fifteen additional user-verified loans match close variants: P2SH/P2WPKH/P2TR principal-output variants with the same fee and lender-vault family. This is a candidate fingerprint only; do not live-tag variants until confirmed true negatives or a conservative production policy are added."
   }
 }

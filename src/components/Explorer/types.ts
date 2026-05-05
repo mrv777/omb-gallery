@@ -6,6 +6,7 @@ export type LeaderboardKey =
   | 'top-volume'
   | 'highest-sale'
   | 'most-loaned'
+  | 'currently-loaned'
   | 'top-holders';
 
 export type LeaderboardMeta = {
@@ -46,6 +47,12 @@ export const LEADERBOARDS: Record<LeaderboardKey, LeaderboardMeta> = {
     title: 'Most Borrowed Against',
     blurb: 'Inscriptions used as collateral in the most loans (originations).',
     metricLabel: 'loans',
+  },
+  'currently-loaned': {
+    key: 'currently-loaned',
+    title: 'Currently Loaned',
+    blurb: 'Inscriptions with tagged loan originations that have not resolved on-chain yet.',
+    metricLabel: 'open loans',
   },
   'top-holders': {
     key: 'top-holders',

@@ -14,19 +14,7 @@ import {
 import SafeImg from '@/components/SafeImg';
 import { Tooltip } from '../ui/Tooltip';
 import { EVENT_DISPLAY } from '@/lib/eventDisplay';
-
-// Loan amount lives in raw_json.loan_amount_sats for loan-originated rows.
-// Defaults don't carry a loan amount (we only know it from the origination
-// trace, which the script doesn't replicate onto the default row).
-function loanAmountSats(event: ApiEvent): number | null {
-  if (event.event_type !== 'loan-originated' || !event.raw_json) return null;
-  try {
-    const rj = JSON.parse(event.raw_json) as { loan_amount_sats?: number };
-    return typeof rj.loan_amount_sats === 'number' ? rj.loan_amount_sats : null;
-  } catch {
-    return null;
-  }
-}
+import { loanAmountSats } from '@/lib/eventMeta';
 
 const COLOR_TILE_BG: Record<string, string> = {
   red: 'bg-accent-red/20',
@@ -61,11 +49,13 @@ const ActivityCard = memo(function ActivityCard({ event }: Props) {
   const priceStr =
     event.event_type === 'sold' || event.event_type === 'mint'
       ? formatBtc(event.sale_price_sats)
-      : loanSats != null ? formatBtc(loanSats)
-      : '';
+      : loanSats != null
+        ? formatBtc(loanSats)
+        : '';
   const market = event.event_type === 'sold' ? marketplaceLabel(event.marketplace) : '';
 
-  const showOwners = OWNER_VISIBLE_TYPES.has(event.event_type) && !!(event.old_owner || event.new_owner);
+  const showOwners =
+    OWNER_VISIBLE_TYPES.has(event.event_type) && !!(event.old_owner || event.new_owner);
 
   return (
     <div className="group block border border-ink-2 hover:border-bone-dim transition-colors bg-ink-1">

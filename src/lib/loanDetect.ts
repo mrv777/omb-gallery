@@ -28,6 +28,10 @@ import {
   type RawTx,
   type TxCache,
 } from './bitcoind';
+import {
+  detectLiquidiumOriginationCandidate,
+  type LiquidiumOriginationMatchKind,
+} from './liquidiumOriginationFingerprint';
 
 // Tick wallclock cap. The /api/internal/poll auto cron runs every 5min;
 // loans is one of several streams in that tick, so it should complete fast
@@ -457,6 +461,18 @@ type EscrowInfo = {
   inscriptionId: string;
 };
 
+type DirectOrigination = {
+  txid: string;
+  escrowAddr: string;
+  lender: string;
+  borrower: string;
+  loanAmountSats: number;
+  activationFeeSats: number;
+  inscriptionNumber: number;
+  inscriptionId: string;
+  matchKind: LiquidiumOriginationMatchKind;
+};
+
 type LoansCursor = { last_event_id: number };
 
 function readCursor(): LoansCursor {
@@ -547,20 +563,24 @@ export async function runLoanTick(
   const cursor = readCursor();
   const db = getDb();
 
-  // Pull new transferred events (id > cursor) up to the cap. Also include
+  // Pull new movement events (id > cursor) up to the cap. Also include
   // already-classified loan-* rows whose id is past the cursor — they
   // shouldn't exist in normal operation (live writers only insert
   // 'transferred'), but if a backfill ran mid-tick we want to advance the
-  // cursor past them rather than skipping.
+  // cursor past them rather than skipping. `sold` is included because Satflow
+  // can mark Liquidium instant-loan originations as sales before this stream
+  // gets a chance to apply the stricter chain fingerprint.
   const targets = db
     .prepare(
       `SELECT id, inscription_id, inscription_number, txid, old_owner, new_owner,
               event_type, block_timestamp
-         FROM events
-        WHERE id > @cursor
-          AND event_type IN ('transferred','loan-originated','loan-defaulted','loan-unlocked')
-          AND old_owner != COALESCE(new_owner, '')
-        ORDER BY id ASC
+         FROM events e
+         JOIN inscriptions i USING (inscription_number)
+        WHERE e.id > @cursor
+          AND i.collection_slug = 'omb'
+          AND e.event_type IN ('transferred','sold','loan-originated','loan-defaulted','loan-unlocked')
+          AND e.old_owner != COALESCE(e.new_owner, '')
+        ORDER BY e.id ASC
         LIMIT @cap`
     )
     .all({ cursor: cursor.last_event_id, cap }) as Array<{
@@ -600,6 +620,7 @@ export async function runLoanTick(
   const cache: TxCache = new Map();
   const defaults: Array<{ verdict: DefaultVerdict; events: typeof targets }> = [];
   const unlockCandidates: Array<{ verdict: UnlockCandidate; events: typeof targets }> = [];
+  const directOriginations: DirectOrigination[] = [];
   let scanned = 0;
   let highestProcessedId = cursor.last_event_id;
 
@@ -613,6 +634,23 @@ export async function runLoanTick(
       const tx = await getRawTxCached(txid, cache);
       const verdict = classifySpendSide(tx);
       const events = txToEvents.get(txid)!;
+      const originationCandidate = detectLiquidiumOriginationCandidate(tx);
+      if (originationCandidate) {
+        for (const ev of events) {
+          if (ev.event_type !== 'transferred' && ev.event_type !== 'sold') continue;
+          directOriginations.push({
+            txid,
+            escrowAddr: originationCandidate.escrowAddress,
+            lender: originationCandidate.lenderVaultAddress,
+            borrower: originationCandidate.borrowerPayoutAddress,
+            loanAmountSats: originationCandidate.principalSats,
+            activationFeeSats: originationCandidate.activationFeeSats,
+            inscriptionNumber: ev.inscription_number,
+            inscriptionId: ev.inscription_id,
+            matchKind: originationCandidate.matchKind,
+          });
+        }
+      }
       if (verdict.kind === 'default') {
         defaults.push({ verdict, events });
       } else if (verdict.kind === 'unlock-candidate') {
@@ -730,7 +768,16 @@ export async function runLoanTick(
     upgradeToOrigination: db.prepare(`
       UPDATE events
          SET event_type = 'loan-originated',
+             marketplace = NULL,
+             sale_price_sats = NULL,
              raw_json   = @raw_json
+       WHERE inscription_id = @inscription_id
+         AND txid           = @txid
+         AND event_type     IN ('transferred','sold')
+    `),
+    getOriginationEvent: db.prepare(`
+      SELECT id, event_type, sale_price_sats, inscription_number
+        FROM events
        WHERE inscription_id = @inscription_id
          AND txid           = @txid
          AND event_type     IN ('transferred','sold')
@@ -758,6 +805,23 @@ export async function runLoanTick(
         active_loan_count = active_loan_count + 1,
         effective_owner   = @borrower
       WHERE inscription_number = @inscription_number
+    `),
+    onSoldOrigination: db.prepare(`
+      UPDATE inscriptions SET
+        sale_count        = MAX(sale_count - 1, 0),
+        total_volume_sats = MAX(total_volume_sats - COALESCE(@sale_price_sats, 0), 0),
+        loan_count        = loan_count + 1,
+        active_loan_count = active_loan_count + 1,
+        effective_owner   = @borrower
+      WHERE inscription_number = @inscription_number
+    `),
+    recomputeHighestSale: db.prepare(`
+      UPDATE inscriptions
+         SET highest_sale_sats = COALESCE((
+               SELECT MAX(sale_price_sats) FROM events
+                WHERE inscription_number = @inscription_number AND event_type = 'sold'
+             ), 0)
+       WHERE inscription_number = @inscription_number
     `),
     onDefault: db.prepare(`
       UPDATE inscriptions SET
@@ -787,6 +851,56 @@ export async function runLoanTick(
     // default/unlock decrements it. Otherwise the MAX(x-1, 0) clamp would
     // eat the decrement (0→0) for inscriptions whose origination event is
     // processed in the same tick, leaving active_loan_count stuck at 1.
+    for (const orig of directOriginations) {
+      const existing = stmts.getOriginationEvent.get({
+        inscription_id: orig.inscriptionId,
+        txid: orig.txid,
+      }) as
+        | {
+            id: number;
+            event_type: 'transferred' | 'sold';
+            sale_price_sats: number | null;
+            inscription_number: number;
+          }
+        | undefined;
+      if (!existing) continue;
+
+      const raw = JSON.stringify({
+        source: 'liquidium-modern-origination-fingerprint',
+        confidence: orig.matchKind === 'strict-p2sh' ? 'high' : 'medium',
+        loan_type: 'origination',
+        match_kind: orig.matchKind,
+        escrow_addr: orig.escrowAddr,
+        lender_addr: orig.lender,
+        borrower_addr: orig.borrower,
+        loan_amount_sats: orig.loanAmountSats,
+        activation_fee_sats: orig.activationFeeSats,
+        detector_version: DETECTOR_VERSION,
+      });
+      const u = stmts.upgradeToOrigination.run({
+        inscription_id: orig.inscriptionId,
+        txid: orig.txid,
+        raw_json: raw,
+      });
+      if (u.changes > 0) {
+        if (existing.event_type === 'sold') {
+          stmts.onSoldOrigination.run({
+            inscription_number: orig.inscriptionNumber,
+            sale_price_sats: existing.sale_price_sats ?? 0,
+            borrower: orig.borrower,
+          });
+          stmts.recomputeHighestSale.run({ inscription_number: orig.inscriptionNumber });
+        } else {
+          stmts.onOrigination.run({
+            inscription_number: orig.inscriptionNumber,
+            borrower: orig.borrower,
+          });
+        }
+        stmts.dequeueNotify.run({ id: existing.id });
+        writeStats.originations++;
+      }
+    }
+
     for (const o of originations) {
       const orig = o.origination;
       const raw = JSON.stringify({

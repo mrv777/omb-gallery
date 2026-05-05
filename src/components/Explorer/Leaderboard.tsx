@@ -203,6 +203,8 @@ function renderInscriptionMetric(row: ApiInscription, type: LeaderboardKey): str
       return formatBtc(row.highest_sale_sats) || '—';
     case 'most-loaned':
       return `${(row.loan_count ?? 0).toLocaleString()}`;
+    case 'currently-loaned':
+      return `${(row.active_loan_count ?? 0).toLocaleString()}`;
     case 'top-holders':
       return '';
   }

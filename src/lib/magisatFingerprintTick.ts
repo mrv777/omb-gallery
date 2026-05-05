@@ -29,7 +29,7 @@ type TickResult = {
 /**
  * Live Magisat sale detector. Walks `transferred` events the ord poll has
  * just written (cursor = highest event id we've previously checked) and, for
- * each, fetches the underlying tx and applies the §2.6 fingerprint from
+ * each, fetches the underlying tx and applies the §2.7 fingerprint from
  * ONCHAIN_TAGGING.md. On match the row is upgraded in place to `sold` with
  * `marketplace='magisat'` — the row id is preserved, so the activity feed
  * shows ONE entry that flips type, never a duplicate transfer + sale pair.

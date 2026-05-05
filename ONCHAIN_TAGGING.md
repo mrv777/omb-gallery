@@ -61,25 +61,42 @@ When a Liquidium loan resolves (default or unlock) via taproot script-path spend
 - **Counter-example (true negative):** `3bd09bfc7d229428cb99cfb44170e939b80a297b2f35f2e2ea2af7df0da22711` (different internal pubkey, single-leaf tree — NOT Liquidium).
 - **Tag rule:** Phase 4 detector (`src/lib/loanDetect.ts`) emits `loan-defaulted` / `loan-unlocked` / `loan-repaid` / `loan-originated` only when the spend's control-block internal pubkey equals `9367…d27a`. Enforced as of 2026-05-04 (DETECTOR_VERSION = 3). Historical rows from earlier detector versions are cleaned up by `scripts/cleanup-non-liquidium-loans.js` (see §7.2).
 
-### 2.3 Liquidium loan principal _cannot_ be detected on-chain for unspent escrows
+### 2.3 Active Liquidium escrows cannot be cryptographically proven until spend
 
 Given a candidate escrow output key Q and the known internal pubkey P, the relationship `Q = lift_x(P) + tweak·G` does not constrain Q (every output key admits this form for _some_ tweak). Computing the actual tweak requires the merkle root, which depends on per-loan parameters (CSV timestamp, lender pubkey, borrower pubkey) we don't have until the escrow spends.
 
 - **Confidence:** chain-truth (this is a property of BIP-341).
-- **Implication:** there is **no** on-chain detection rule for currently-active Liquidium loans. The previous `active_loan_escrows` table populated 32 false positives and was dropped in schema v26 (see §7.3). We will not maintain that table.
+- **Implication:** there is no cryptographic on-chain proof for currently-active Liquidium loans equivalent to §2.2. Any active-loan origination rule must remain a candidate/heuristic until backed by external confirmation and true negatives. The previous `active_loan_escrows` table populated false positives and was dropped in schema v26 (see §7.3). We will not maintain that table without Liquidium API data or a promoted fingerprint.
 
-### 2.4 Self-transfers (`old_owner == new_owner`) are not real transfers
+### 2.4 Modern Liquidium instant-loan origination fingerprint
+
+Twenty-nine user-verified OMB loans from 2026 share a narrow instant-loan origination shape:
+
+1. `vin[0]` spends the inscription's P2TR UTXO.
+2. `vin[1..]` all spend the same `v0_p2wsh` lender-vault address using a 1-of-2 multisig witness script (`OP_1 <pubkey> <pubkey> OP_2 OP_CHECKMULTISIG`).
+3. `vout[0]` is a new P2TR output with the same sat value as `vin[0]` — likely the collateral holder.
+4. `vout[1]` pays `bc1papmpmu0xzfvw4x9qe4jstgxfnfy5q8zhh6xredjxd86ca74uph3s59se9u`.
+5. `vout[2]` is a P2SH borrower-principal output.
+6. `vout[3]` returns change to the same P2WSH lender-vault address used by `vin[1..]`.
+
+**Confirmed loan fixtures:** #11523618 (`7b4855e7…`, 16d green), #11287305 (`5c2e3ba9…`, 30d green), #60578598 (`6fecd1ba…`, 30d orange), plus twenty-six more operator-verified loans. See §6.1.1.
+
+- **Confidence:** promoted chain-fingerprint for the strict P2SH-principal shape and the narrow P2TR-principal variant subset (`vout[2]=P2TR`, `vin.length <= 4`). We have 29 externally confirmed true positives for the strict shape and 15 confirmed close variants. Assuming the 2026-05-05 "no loan visible" review items are non-originations, P2SH/P2WPKH loose variants collide with non-starts and remain review-only.
+- **Code:** `src/lib/liquidiumOriginationFingerprint.ts` contains the production matcher. `src/lib/loanDetect.ts` runs it live against new `transferred` and `sold` events. `scripts/backfill-liquidium-originations.js` backfills historical rows and also promotes exact confirmed variant txids from `scripts/known-transactions.json`.
+- **Tag rule:** emit `loan-originated` for strict shape and promoted P2TR-principal variants. Exact confirmed P2SH/P2WPKH variant txids are backfilled from the fixture allowlist only; future broad P2SH/P2WPKH variant matches are not auto-tagged.
+
+### 2.5 Self-transfers (`old_owner == new_owner`) are not real transfers
 
 Postage moves, UTXO consolidation, and fee bumps within the same wallet appear as transfers in raw ord output but represent no change of ownership. Schema v21 deletes them retroactively and the live ord poll skips them.
 
 - **Confidence:** chain-truth (literally same address on both sides).
 - **Tag rule:** drop at insert time + already-backfilled.
 
-### 2.5 Satflow-recorded sales (legacy, kept under legacy-3rd-party tier)
+### 2.6 Satflow-recorded sales (legacy, kept under legacy-3rd-party tier)
 
 282 `sold` events have `marketplace = 'satflow'`. These came from Satflow's `/v1/activity/sales` endpoint pre-policy. Kept as legacy data; not extended (the API enrichment continues for now but new rules should target the on-chain Satflow PSBT signature directly — see §5).
 
-### 2.6 Magisat marketplace fingerprint (on-chain)
+### 2.7 Magisat marketplace fingerprint (on-chain)
 
 **Primary detection rule.** The Magisat PSBT marketplace appends a fixed P2SH fee output to every settled listing. Two on-chain signals together identify a Magisat sale unambiguously:
 
@@ -89,7 +106,7 @@ Postage moves, UTXO consolidation, and fee bumps within the same wallet appear a
 **Why both are required:** the fee address alone is sufficient (no other party would route fees to this Magisat-controlled P2SH), but checking the ACP signature alongside protects against a future spam attack where someone constructs a tx that sends dust to `3Ke21os…` to mislabel an unrelated movement.
 
 - **Confidence:** chain-fingerprint.
-- **Test fixtures:** 14 true positives (see §6.3 — every confirmed Magisat OMB sale matches). 2 true negatives (#11287305 tx `5c2e3ba9…`, #83309450 tx `b9a77cff…` — neither contains the fee address).
+- **Test fixtures:** 14 true positives (see §6.3 — every confirmed Magisat OMB sale matches). True negatives include #83309450 tx `b9a77cff…` — it does not contain the Magisat fee address.
 - **Price extraction:** SIGHASH_SINGLE commits input N's signature to output N. For each ACP input at index N whose prevout address equals the seller (`events.old_owner`), the seller's payment is `vout[N].value`. Sum across matching ACP inputs to get the total sale price. (Single-OMB sale → one matching ACP input → price = `vout[N].value`.) The existing `onchain-heuristic` Layer 1 detector already implements exactly this logic — Magisat is one of the marketplaces it was already detecting (just not labeling).
 - **Limitations:** if Magisat rotates their fee address, sales stop being tagged. Easy to detect (drop in Magisat-tagged sale rate) and easy to handle (add the new address to the rule). Multi-marketplace fees on the same tx would also tag as Magisat — implausible given they're competing PSBTs.
 
@@ -97,41 +114,42 @@ Postage moves, UTXO consolidation, and fee bumps within the same wallet appear a
 
 - **Live (`src/lib/magisatFingerprintTick.ts`):** runs in the 5-min `auto` poll, between `ord` and `satflow`. Walks new `transferred` events (cursor in `poll_state.magisat_fp`), bitcoind-RPC fetches each tx, applies `detectMarketplace`, upgrades matches **in place** to `sold` + `marketplace='magisat'` via `upgradeEventToSoldById`. Same `events.id` row preserved → activity feed shows ONE entry that flips type, never a duplicate transfer + sale pair. Per-tick budget: 200 events at concurrency 8. On first deploy after v25, cursor bootstraps to current MAX(events.id) so live ticks don't replay 36k+ historical rows.
 - **Historical (`scripts/backfill-magisat-fingerprint.js`):** one-shot bitcoind-driven sweep over all existing `transferred` and `marketplace IS NULL sold` rows. Run once after deploy. Idempotent; safe to re-run.
-- **Verification (`scripts/backfill-magisat-sales.js`):** API cross-reference per §2.7. Confirms the fingerprint isn't missing real sales.
+- **Verification (`scripts/backfill-magisat-sales.js`):** API cross-reference per §2.8. Confirms the fingerprint isn't missing real sales.
 
-### 2.7 Magisat sale verification via API (cross-reference, secondary)
+### 2.8 Magisat sale verification via API (cross-reference, secondary)
 
 Magisat's public `/activity/global` feed exposes finalized PURCHASE / OFFER_PURCHASED rows with a `buyerTxId` field — the on-chain tx id Magisat broadcast to settle the listing. Matching that against `events.txid` is a **verification path**, not the primary detector. Use it to:
 
-1. Spot-check that the §2.6 fingerprint isn't missing real sales (every API match should also fingerprint-match — if not, the fingerprint needs revisiting).
+1. Spot-check that the §2.7 fingerprint isn't missing real sales (every API match should also fingerprint-match — if not, the fingerprint needs revisiting).
 2. Bootstrap fixtures when introducing new fingerprint rules.
 3. Recover sales that pre-date a known fee-address rotation.
 
-- **Coverage as of 2026-05-04:** 14 OMB sales in their ~6,500-row public feed. All 14 ALSO match the §2.6 fingerprint — fingerprint coverage is exhaustive on the API-confirmed set.
+- **Coverage as of 2026-05-04:** 14 OMB sales in their ~6,500-row public feed. All 14 ALSO match the §2.7 fingerprint — fingerprint coverage is exhaustive on the API-confirmed set.
 - **Code:** `scripts/backfill-magisat-sales.js` (idempotent, safe to re-run). Adds `raw_json.magisat_backfill` for traceability.
 - **Confidence:** chain-truth (cross-referencing two on-chain identifiers — implausible failure modes).
 
 ## 3. Tagging rules currently active
 
-| `event_type`                                                           | When emitted                                                                                     | Source rule             | Confidence tier  | Marketplace tag |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------- | ---------------- | --------------- |
-| `transferred`                                                          | ord poll detects UTXO change for any inscription, OR `backfill-transfers.js` walks chain history | UTXO movement           | chain-truth      | NULL            |
-| `mint`                                                                 | `old_owner` matches a registered mint wallet (§2.1) AND inscription color matches                | Wallet → color map      | chain-truth      | NULL            |
-| `sold` (Magisat)                                                       | `magisat-fp` poll step finds the §2.6 fingerprint and upgrades the `transferred` row in place    | `src/lib/marketplaceFingerprint.ts` | chain-fingerprint | `'magisat'` |
-| `sold` (other paths)                                                   | (see §3.1 below — currently mixed quality)                                                       | Multiple paths          | mixed            | varies          |
-| `listed`                                                               | Satflow API listings stream                                                                      | Satflow                 | legacy-3rd-party | `'satflow'`     |
-| `loan-originated` / `loan-defaulted` / `loan-unlocked` / `loan-repaid` | Phase 4 detects an OP_CSV+OP_DROP script-path spend; traces back to origination                  | `src/lib/loanDetect.ts` | mixed (see §2.2) | NULL            |
+| `event_type`                                       | When emitted                                                                                     | Source rule                         | Confidence tier   | Marketplace tag |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------- | ----------------- | --------------- |
+| `transferred`                                      | ord poll detects UTXO change for any inscription, OR `backfill-transfers.js` walks chain history | UTXO movement                       | chain-truth       | NULL            |
+| `mint`                                             | `old_owner` matches a registered mint wallet (§2.1) AND inscription color matches                | Wallet → color map                  | chain-truth       | NULL            |
+| `sold` (Magisat)                                   | `magisat-fp` poll step finds the §2.7 fingerprint and upgrades the `transferred` row in place    | `src/lib/marketplaceFingerprint.ts` | chain-fingerprint | `'magisat'`     |
+| `sold` (other paths)                               | (see §3.1 below — currently mixed quality)                                                       | Multiple paths                      | mixed             | varies          |
+| `listed`                                           | Satflow API listings stream                                                                      | Satflow                             | legacy-3rd-party  | `'satflow'`     |
+| `loan-originated`                                  | Liquidium origination fingerprint (§2.4), or Phase 4 traces backward from a resolution spend     | `src/lib/loanDetect.ts`             | chain-fingerprint | NULL            |
+| `loan-defaulted` / `loan-unlocked` / `loan-repaid` | Phase 4 detects a Liquidium OP_CSV+OP_DROP script-path spend, then traces lifecycle txs          | `src/lib/loanDetect.ts`             | chain-fingerprint | NULL            |
 
 ### 3.1 `sold` events — current state of mixed quality
 
-| Source key in `raw_json`                                          | Count  | Tier                                                                 | Action                                |
-| ----------------------------------------------------------------- | ------ | -------------------------------------------------------------------- | ------------------------------------- |
-| `ord-net-history-backfill`                                        | 15,706 | legacy-3rd-party                                                     | Keep as-is. Marketplace already NULL. |
-| `reverted-from-coop-heuristic` (was: `onchain-coop-heuristic`)    | 5,085  | reverted to `transferred` in v26 (§7.1)                              | No further action.                    |
-| `onchain-heuristic` (Layer 1 ACP, confidence: high)               | 18     | chain-fingerprint candidate                                          | Verify and promote. See §6.2.         |
-| Satflow                                                           | 282    | legacy-3rd-party                                                     | Keep as-is.                           |
-| `onchain-magisat-fp` (live + historical via fingerprint)          | 14+    | chain-fingerprint                                                    | Primary path going forward. See §2.6. |
-| `magisat-api-backfill` (cross-reference, fallback verification)   | (n/a)  | chain-truth                                                          | Verification only. See §2.7.          |
+| Source key in `raw_json`                                        | Count  | Tier                                    | Action                                |
+| --------------------------------------------------------------- | ------ | --------------------------------------- | ------------------------------------- |
+| `ord-net-history-backfill`                                      | 15,706 | legacy-3rd-party                        | Keep as-is. Marketplace already NULL. |
+| `reverted-from-coop-heuristic` (was: `onchain-coop-heuristic`)  | 5,085  | reverted to `transferred` in v26 (§7.1) | No further action.                    |
+| `onchain-heuristic` (Layer 1 ACP, confidence: high)             | 18     | chain-fingerprint candidate             | Verify and promote. See §6.2.         |
+| Satflow                                                         | 282    | legacy-3rd-party                        | Keep as-is.                           |
+| `onchain-magisat-fp` (live + historical via fingerprint)        | 14+    | chain-fingerprint                       | Primary path going forward. See §2.7. |
+| `magisat-api-backfill` (cross-reference, fallback verification) | (n/a)  | chain-truth                             | Verification only. See §2.8.          |
 
 ## 4. Refuted hypotheses (do not re-introduce)
 
@@ -139,7 +157,7 @@ These were briefly believed and then disproven. Each is recorded so a future ses
 
 ### 4.1 ❌ "57 active Liquidium loans" matches reality
 
-The original Phase 7 detector matched 57 candidates against Liquidium's UI count. Audit showed 32 of 33 entries had `vout[1] = bc1papmpmu0…59se9u` (a marketplace fee output) — they were sales, not loans. The 57-match was coincidence. **Phase 7 is broken; cannot be salvaged from chain alone.**
+The original Phase 7 detector matched 57 candidates against Liquidium's UI count. It accepted the broad `vin[0]=P2TR + 4 outputs` shape and treated every matching fresh P2TR output as an active escrow. That was too loose: it could not distinguish marketplace/BNPL-style settlements, wallet moves, and actual loans. The 57-match was coincidence. **Do not restore Phase 7 as written.** The narrower §2.4 candidate is separate and still not promoted.
 
 ### 4.2 ❌ `bc1papmpmu0…59se9u` is the Magisat fee address
 
@@ -148,7 +166,7 @@ Briefly tagged 849 events as `marketplace = 'magisat'`. User-supplied counter-ev
 - Real Magisat sale of #11299610 used fee output `3Ke21os…` (P2SH), NOT `bc1papmpmu0…`
 - #83309450 (which had `bc1papmpmu0…` as vout[1]) does not appear on Magisat's UI
 
-Address is a real recurring fee-collector (57+ OMB 4-out sales / 30d window, fees ~0.7% of payout) but is **not** Magisat. Reverted in commit `fdfc6a98`. Don't relabel without external positive identification.
+Address is a real recurring fee/activation collector, but is **not** Magisat. Reverted in commit `fdfc6a98`. Don't relabel without external positive identification.
 
 ### 4.3 ❌ The 4-output `vin[0]=P2TR + vout[0]=P2TR` shape identifies Liquidium loans
 
@@ -168,15 +186,15 @@ These are the gaps. Each is a **specific** thing we'd need before we can tag con
 
 ### 5.1 What is `bc1papmpmu0xzfvw4x9qe4jstgxfnfy5q8zhh6xredjxd86ca74uph3s59se9u`?
 
-A real recurring fee-collector address but unidentified. Not Magisat, not Liquidium, not in any loan event role. Could be OKX, OrdSwap, ord.io, or a custom escrow service.
+A real recurring fee/activation collector address. It is not Magisat. Twenty-nine user-verified Liquidium loan originations pay it across the strict §2.4 shape, with 15 additional principal-output variants, so it may be Liquidium's instant-loan activation fee or a Liquidium-powered BNPL/settlement fee. It is not enough by itself to classify a tx.
 
-**To resolve:** check 3-5 of the txs that have this as vout[1] against each marketplace UI (or DM the marketplaces with the txid). Once positively identified by **2+ corroborating sources**, add a fingerprint rule.
+**To resolve:** check a sample of txs that have this as vout[1] against Liquidium active loans and each marketplace UI. Specifically find a true negative that matches the full §2.4 shape but is not a Liquidium loan, or prove none exist across a broad recent sample. Once positively identified by **2+ corroborating sources**, promote or reject the candidate rule.
 
-**Sample txs to spot-check:** `5c2e3ba9ab42fd5d2f3752d15cd5a0154b903668391fe6301f895e1ed1fa73d9` (#11287305, sold 3d ago — user already confirmed this one was a sale, marketplace unknown), `b9a77cffc3914af60564d49bb34a5d421075780e91cebaa20cad639530671d57` (#83309450, NOT on Magisat).
+**Sample txs to spot-check:** candidate Liquidium loans are listed in §6.1.1; non-Magisat sale `b9a77cffc3914af60564d49bb34a5d421075780e91cebaa20cad639530671d57` remains useful as a fee-address-only counterexample.
 
 ### 5.2 Magisat on-chain fingerprint
 
-**Resolved 2026-05-04** — see §2.6. The fee address `3Ke21osfhEbEryUeqdwAuAY8VKxm5B9uB2` recurs in 14/14 confirmed Magisat sales and is absent from 2/2 confirmed-not-Magisat sales. Fingerprint promoted to chain-fingerprint tier.
+**Resolved 2026-05-04** — see §2.7. The fee address `3Ke21osfhEbEryUeqdwAuAY8VKxm5B9uB2` recurs in 14/14 confirmed Magisat sales and is absent from confirmed-not-Magisat sales. Fingerprint promoted to chain-fingerprint tier.
 
 ### 5.3 Magic Eden / OKX / Ord.io / OrdSwap fingerprints
 
@@ -184,11 +202,11 @@ Zero confirmed fixtures so far. All `marketplace=NULL` `sold` rows from `ord-net
 
 **To resolve:** for each marketplace, gather ≥3 confirmed-true sale fixtures and ≥1 confirmed-true non-sale (or sale-from-different-marketplace) fixture. Then derive the on-chain pattern (fee output address, sighash flags, n_in/n_out shape, etc.).
 
-### 5.4 Modern Liquidium loan-origination shape (if any)
+### 5.4 Broader Liquidium loan-origination variants
 
-We've only confirmed legacy 4-out, 3PizFz9-lender era loans. Modern loans may use different shapes (single-tx with no lender input, separate-tx flows, etc.). Cannot detect any of them on-chain currently.
+Partially resolved in §2.4. Strict P2SH-principal originations and narrow P2TR-principal variants are promoted. Broad P2SH/P2WPKH loose variants are not promoted for future auto-tagging because assumed non-loan starts share the same shape.
 
-**To resolve:** wait for Liquidium API access. No on-chain path forward.
+**To resolve:** use Liquidium API access if available, or find additional discriminators for the broad P2SH/P2WPKH variants. Until then, only exact externally confirmed P2SH/P2WPKH txids from `known-transactions.json` are backfilled.
 
 ### 5.5 Other-color mint wallets
 
@@ -215,13 +233,88 @@ Authoritative known-good fixtures. Updated when new examples are confirmed. Mirr
 
 All three resolution-type fixtures verify against internal pubkey `9367…d27a`.
 
+### 6.1.1 Liquidium modern origination candidates (true positives, not promoted)
+
+Externally confirmed active loans supplied by the operator. These match the §2.4 instant-loan candidate shape, but they are not enough to live-tag without a confirmed true negative for the exact same shape.
+
+| Inscription | Type        | Tx                                                                 | Notes                |
+| ----------- | ----------- | ------------------------------------------------------------------ | -------------------- |
+| 11523618    | origination | `7b4855e7dfb1515ab231af9fd619cec2fa19e0302ba5033d0996c29395042bed` | 16d green-eyes loan  |
+| 11287305    | origination | `5c2e3ba9ab42fd5d2f3752d15cd5a0154b903668391fe6301f895e1ed1fa73d9` | 30d green-eyes loan  |
+| 60578598    | origination | `6fecd1ba736b2bcea3ec18727a04014419586f012497f6f87e7ad2124abb5dbe` | 30d orange-eyes loan |
+| 83311912    | origination | `5fdfe1557bb9fef77f7dfc391c95b344f64ba90f74e035f4b7088089da7c7689` | black-eyes loan      |
+| 11412779    | origination | `c6e4f029d2c873f5c405c68f507ac533089b209a0f182d7ae4da8ac98087cc94` | green-eyes loan      |
+| 60576752    | origination | `46406f17ea65086edbd0749d8cb4ddd2ffc0fef024da2c9ff69fa79307c9259f` | orange-eyes loan     |
+| 11209997    | origination | `a55d04f31a25f1413fb88b4c982d247fee227da65ec455568fb4f1926c380857` | green-eyes loan      |
+| 83311199    | origination | `4d801efc89608d9c0d31c059785d51fd92635a001999ef8ffa0441eb7ef5513f` | black-eyes loan      |
+| 11273327    | origination | `957956afa5fef3749fe2f1aa39edc8742a1b81bff4fb1c4cd202581d834594f1` | green-eyes loan      |
+| 11210011    | origination | `4e448ef5d063a51d4027cbbf612edb4780c90a127a06cbbf0002253371e73cd1` | green-eyes loan      |
+| 10827837    | origination | `3b28b071cea49aa8def81d3c2827d082baa58a54254d55f926343e16a06a9385` | green-eyes loan      |
+| 83313116    | origination | `ee0ace27c2476e6d7fa7e2c6834e10567c6ea42ade8c8f56497ac223598303a2` | black-eyes loan      |
+| 11181309    | origination | `395a6615f83ec6b1d3bdcae290147fd286c38e90d986e6fd9fa381f25f6c660e` | green-eyes loan      |
+| 11287298    | origination | `20333e9c3147a2460a2ccf87cbffb4c599f7c437dc35bfdcb304ca0f83d04675` | green-eyes loan      |
+| 11412785    | origination | `5f360b723c007d9ce907e6757dbb222d8349c782275e61e35c99f30ffde869f4` | green-eyes loan      |
+| 60577516    | origination | `c94f58c96f66d2eeb68f84b9647e0ff569c891f1afdfe1c282b6766cc668272e` | orange-eyes loan     |
+| 83310226    | origination | `86bb49503773b4911dbebc1653285258967b0bb1852d6ebcbdc67b6555348908` | black-eyes loan      |
+| 83314015    | origination | `befe43ff4debe758ff79b1268e4d819fcbdac4852db1047432c37fb9a71f0bca` | black-eyes loan      |
+| 60578441    | origination | `617ac4b6093d8c6d6caf5d2f83be9222ad5ecd759273d1b33bfb6ed5bfda94f1` | orange-eyes loan     |
+| 83296387    | origination | `d79938ee8d903463a18666f5109ed307bce83b269312fc7b65ca3b70df15d4ee` | black-eyes loan      |
+| 11273478    | origination | `64e025901f0969b2f8b5b4501b95ae27bd11d83909dd811a74f1d0b373df357f` | green-eyes loan      |
+| 60569712    | origination | `7bbd54b33b02985e347ac851a0e03fff01dd9d9ff255c6d34559dfd616973035` | orange-eyes loan     |
+| 60580346    | origination | `d82b96550a08453b6c383666d8b6bcb415ecb1175c1d011685926e32a3071788` | orange-eyes loan     |
+| 83310204    | origination | `7ad6ff5939fffcc3654e72d35fafb07c869726d4d3a36a8f2e4054325a2133a6` | black-eyes loan      |
+| 83313381    | origination | `7c473aa8e56a8158460cf82a291e3478df13f7d59796c3cb0b23afa3ed0c1686` | black-eyes loan      |
+| 83298014    | origination | `04913246ee3f86cf69ed64d90f5e681b1ea8fe67b40934ccaff4c896e0e7cad5` | black-eyes loan      |
+| 83310436    | origination | `d29767aba84a2e80122d23f928b5fb8104105e73a9af823907e8c9dd4f014d26` | black-eyes loan      |
+| 60570073    | origination | `e3cebfc538f3eca80438a59b173a40ab2fc9bbd5feb34eb93e11e4226849cb3c` | orange-eyes loan     |
+| 11299684    | origination | `752523a1a3cbadff35affcee7efdbf0af1b6fc8da52c508cb23ad713c7a4c014` | green-eyes loan      |
+
+Unconfirmed strict-shape candidates that should not be added to `known-transactions.json` until externally verified:
+
+| Inscription | Tx                                                                 | Notes                                                    |
+| ----------- | ------------------------------------------------------------------ | -------------------------------------------------------- |
+| 10827843    | `53403b0dfbbb60e8774393563676d85df0dcaca9636af5110bda26fca4599486` | Strict shape; not visible/confirmed in Liquidium UI yet. |
+| 83315113    | `fbe15fbff9b6d91a7b55f31c3a6931f77eea652012e2962da13c8782db27b0cd` | Strict shape; not visible/confirmed in Liquidium UI yet. |
+
+Known close variants that do not match the strict P2SH-principal rule yet:
+
+| Inscription | Tx                                                                 | Variant                        |
+| ----------- | ------------------------------------------------------------------ | ------------------------------ |
+| 11209953    | `271f9ed476bcc7794e2cbd15b511bddb2983b32b725de3c868939985c7f0fac5` | 2-input, P2WPKH principal      |
+| 11299682    | `3bdb0927d54909e5556648aa6fcfe4652253fc0f227f1cecc1da675ec431a14e` | 2-input, P2TR principal/output |
+| 60571179    | `a63030cdebfdd9c2b70e5f3a6c30a5dfc6412ce356e776d454b3e7cdfaf710e2` | 2-input, P2SH principal        |
+| 60580809    | `85897139589e8fd781c9cf28f6779a780e5e04f48a3c79076b5d29edbf5f2201` | 2-input, P2SH principal        |
+| 83296297    | `8fe3ee399ac1ac7eeee3709f983952ea0c59a9671dcbba7353181118f7dde8d9` | 2-input, P2WPKH principal      |
+| 60576225    | `ac36feb9f178a10ce02510031f8e2541af4569ce795e8bb8a24abb95393fac60` | 2-input, P2SH principal        |
+| 83316387    | `55f6031370baf5f49e3080a83afc24d87452195d936187505a79f4c5d786b00c` | 2-input, P2SH principal        |
+| 60578966    | `3e226ec40701acc1381d5eccc1912b6d258f7182e2f9fcea419fb2984f479dac` | 2-input, P2WPKH principal      |
+| 83295902    | `872fb86eb415c2db041fbc701419826dc06abce1f824703e009401887665ad2e` | multi-input, P2WPKH principal  |
+| 83307339    | `3f8022c740a23dac9dce59a6b6707522af21801c8eaafd36bfd8cc415b9e3c80` | 2-input, P2TR principal/output |
+| 60578991    | `a9cc5fabbcebd5511699590f6ce33c6572d05d897d0a9e1de3f9dc498811bcf8` | 2-input, P2SH principal        |
+| 11209362    | `7380b922ea8aeaf8e4c79f7eca821791f3893fd29f7d05a0f6cfbe89a204e71f` | multi-input, P2TR principal    |
+| 83313543    | `b08020802dd431a21c7f1b58a47fd3010b1cd51e7bd4207759992df28ae5d5fd` | 2-input, P2WPKH principal      |
+| 60563151    | `81488471b6dd9adbf9a013ee278af36ee47cd771c6a752fd4ca7d836e1594df4` | 2-input, P2SH principal        |
+| 60580576    | `7d62f433d3ce3af27f065ab57c7cb580125af2b4beee9339d589cecab56e5ed4` | 2-input, P2WPKH principal      |
+
+Unchecked / inconclusive variant-shaped candidates from the 45-day review. These are not fixtures and should not be used as true negatives without stronger external confirmation:
+
+| Inscription | Tx                                                                 | Review note                                                                                   |
+| ----------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| 11523683    | `528baccbe5abfb296232bbe6b61e8a85398fa8eab932e76a9b27956be55b4568` | No loan visible around tx day; may be non-start or missed associated tx.                      |
+| 60578644    | `04a6e51abc60c88175e4f9096c71f576317a6705aac7b0bd998a711eaee1bc6e` | No loan visible around tx day; may be non-start or missed associated tx.                      |
+| 83309473    | `c06c737b2ae808a7e0f52beca8b4ea03387f98f2d5264f4b196b9992c2502b99` | No loan visible around tx day; may be non-start or missed associated tx.                      |
+| 60583606    | `7db5169ac6ba64cb1d3a3c16f1d7d9e0d077b85d8021c15d0bb9602516485cfb` | No loan visible around tx day; may be non-start or missed associated tx.                      |
+| 83315138    | `8a646e2eb8aa89f02a3202ad4726843c7ba989c3a5d7191028e729597647186f` | No loan visible around tx day; may be non-start or missed associated tx.                      |
+| 60566708    | `0949c415a7da6adb335b8c9285950cef090c3d2708fb88fb586babcf0ff3f4f4` | No loan visible around tx day; may be non-start or missed associated tx.                      |
+| 83312962    | `d751130a39198be0f7aca1fbc6c3a934cab78275cae02e299233cb932385d9e5` | Loan visible around timestamp and matching color, but exact inscription missing; probable TP. |
+
 ### 6.2 ACP-style sale detection (Layer 1 onchain heuristic)
 
 18 events currently tagged. Need to spot-check a sample to confirm they're real sales (and identify which marketplaces use ACP). **Action item:** sample 5, verify externally, document findings here.
 
 ### 6.3 Magisat sales (true positives — N=14, fingerprint match rate 14/14)
 
-All 14 confirmed Magisat OMB sales discovered via the §2.7 API cross-reference contain `3Ke21osfhEbEryUeqdwAuAY8VKxm5B9uB2` as a vout AND at least one ACP-signed input. Position is vout[3] in the dominant 7-output shape (13 of 14) and vout[2] in the single 3-output outlier (#60583767).
+All 14 confirmed Magisat OMB sales discovered via the §2.8 API cross-reference contain `3Ke21osfhEbEryUeqdwAuAY8VKxm5B9uB2` as a vout AND at least one ACP-signed input. Position is vout[3] in the dominant 7-output shape (13 of 14) and vout[2] in the single 3-output outlier (#60583767).
 
 | Inscription | Tx                                                                 | n_in/n_out | Price (sats) |
 | ----------- | ------------------------------------------------------------------ | ---------- | ------------ |
@@ -249,7 +342,6 @@ See §2.1 for the full table. All five colors covered.
 | Tx                                                                             | Why this is NOT what it might appear to be                                                                                 |
 | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
 | `b9a77cffc3914af60564d49bb34a5d421075780e91cebaa20cad639530671d57` (#83309450) | Has `bc1papmpmu0…59se9u` as vout[1] — NOT a Magisat sale. Refutes §4.2.                                                    |
-| `5c2e3ba9ab42fd5d2f3752d15cd5a0154b903668391fe6301f895e1ed1fa73d9` (#11287305) | Has `bc1papmpmu0…59se9u` as vout[1] — confirmed sale but marketplace unknown. Refutes §4.3 (4-out shape ≠ loan).           |
 | `3bd09bfc7d229428cb99cfb44170e939b80a297b2f35f2e2ea2af7df0da22711` (#11299747) | OP_CSV-less, single-leaf tap-tree, internal pubkey `428a…` — Phase 4 misclassified as `loan-unlocked`. Refutes §4.5.       |
 | `d5196bd8b3ae4a1a23975e40d88edc7c30cc42ba5df47b7c2b41fa8a6d5aeba5` (#83296407) | 4-out borrower-self-funded shape, but routes 46k sats to `bc1qt40u…` which is a known non-Liquidium service. Refutes §4.4. |
 
@@ -263,11 +355,25 @@ Reverted in schema v26 (option (a) — "tear out anything we are not sure about"
 
 ### 7.2 3 misclassified loan resolutions — RESOLVED 2026-05-04
 
-Phase 4 (`src/lib/loanDetect.ts`) now enforces the §2.2 internal-pubkey check — only spends with control-block internal pubkey `9367…d27a` flip to `loan-*`. `DETECTOR_VERSION` bumped to 3 to mark rows that have passed this check. Existing rows tagged by earlier detector versions are cleaned up out-of-band by `scripts/cleanup-non-liquidium-loans.js` (runs once after deploy; idempotent — re-checks each loan-* event's witness via bitcoind RPC and reverts non-Liquidium ones to `transferred`). See DEPLOYMENT.md for the runbook.
+Phase 4 (`src/lib/loanDetect.ts`) now enforces the §2.2 internal-pubkey check — only spends with control-block internal pubkey `9367…d27a` flip to `loan-*`. `DETECTOR_VERSION` bumped to 3 to mark rows that have passed this check. Existing rows tagged by earlier detector versions are cleaned up out-of-band by `scripts/cleanup-non-liquidium-loans.js` (runs once after deploy; idempotent — re-checks each loan-\* event's witness via bitcoind RPC and reverts non-Liquidium ones to `transferred`). See DEPLOYMENT.md for the runbook.
 
-### 7.3 `active_loan_escrows` table — REMOVED 2026-05-04
+### 7.3 `active_loan_escrows` table — REMOVED 2026-05-04; active-loan leaderboard restored 2026-05-05
 
-Dropped entirely in schema v26 (table + `loanEscrowDetect.ts` + `/explorer/currently-loaned` route + `?mode=loan-escrows` poll mode + `safeLoanEscrows` plumbing). Per §2.3, no on-chain detection rule can satisfy §1's principles for currently-active Liquidium loans (BIP-341 makes the escrow tap-tree opaque until script-path spend). The lifetime "Most Borrowed Against" leaderboard (`/explorer/most-loaned`, derived from `inscriptions.loan_count` populated by Phase 4 chain-fingerprint resolutions) is the surviving accurate signal.
+Dropped entirely in schema v26 (table + `loanEscrowDetect.ts` + `?mode=loan-escrows` poll mode + `safeLoanEscrows` plumbing). Per §2.3, active Liquidium escrows cannot be cryptographically proven until spend, so the old escrow-address leaderboard is not coming back.
+
+The `/explorer/currently-loaned` leaderboard is restored as a different signal: it is derived from `inscriptions.active_loan_count`, which is incremented by confirmed/tagged `loan-originated` events (§2.4) and decremented when a matching `loan-repaid`, `loan-defaulted`, or `loan-unlocked` spend is observed. Treat it as "currently tagged open loan cycles," not as an independent proof that a specific escrow output is still active.
+
+The lifetime "Most Borrowed Against" leaderboard (`/explorer/most-loaned`, derived from `inscriptions.loan_count`) remains the historical counterpart.
+
+### 7.4 Modern Liquidium origination backfill — RUN AFTER DEPLOY
+
+Run once after deploying the §2.4 production matcher:
+
+```bash
+pnpm backfill-liquidium-originations
+```
+
+Use `pnpm backfill-liquidium-originations -- --dry-run` first when testing manually. The script requires `BITCOIN_RPC_URL` and uses `OMB_DB_PATH` (default `/data/app.db`). It reclassifies historical `transferred`/`sold` rows to `loan-originated`, unwinds stale sale/transfer aggregates, updates `loan_count` / `active_loan_count` / `effective_owner`, and drops obsolete notification queue entries for upgraded rows.
 
 ## 8. How to add a new tagging rule
 

@@ -6,7 +6,7 @@ import type { ColorFilter } from '@/lib/types';
 import type { LeaderboardKey } from './types';
 
 const PAGE_SIZE = 50;
-// Hard cap for the detail page. The four ranked leaderboards are bounded by
+// Hard cap for the detail page. The ranked leaderboards are bounded by
 // the collection size (~9k OMBs) and Top Holders by distinct holders (~3.8k);
 // 1000 is well past where the long tail becomes uninteresting and bounds DB
 // cost from a single tab scrolling indefinitely.
