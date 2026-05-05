@@ -576,8 +576,8 @@ export async function runLoanTick(
   // gets a chance to apply the stricter chain fingerprint.
   const targets = db
     .prepare(
-      `SELECT id, inscription_id, inscription_number, txid, old_owner, new_owner,
-              event_type, block_timestamp
+      `SELECT e.id, e.inscription_id, e.inscription_number, e.txid, e.old_owner, e.new_owner,
+              e.event_type, e.block_timestamp
          FROM events e
          JOIN inscriptions i USING (inscription_number)
         WHERE e.id > @cursor
