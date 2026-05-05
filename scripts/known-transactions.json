@@ -1045,6 +1045,24 @@
       "expected_type": "transferred",
       "description": "Counter-example for Phase 4 Liquidium loan-resolution detector: single-leaf taproot tap-tree, internal pubkey 428a... — NOT 9367...d27a. Phase 4 v2 detector misclassified as loan-unlocked; v3 (with Liquidium-pubkey check, ONCHAIN_TAGGING.md §2.2) correctly rejects.",
       "tags": ["transfer", "loan-fingerprint-tn", "non-liquidium-internal-pubkey"]
+    },
+    {
+      "txid": "c3f4becc98d85bf64d61bcf25972f0eae93e76d99f15fec0cf9a9ec66cf7cfa8",
+      "inscription_number": 60571179,
+      "expected_type": "sold",
+      "expected_marketplace": "ord-net",
+      "sale_price_sats": 2327499,
+      "description": "ord.net sale of #60571179 (user-verified externally). 9-in/7-out cooperative SIGHASH_ALL/DEFAULT shape. ord.net fee P2TR bc1pgkfga880836f5kp3m9vvya4m0whva80ddm58r7fyltzp9q8t08rs0rdnet appears at vout[0] (639-sat dust marker) AND vout[3] (real fee, ~2.5%). Seller payment at vout[2]. Recurring buyer-dummy bc1q0h8mu...anch0r at vin[0..1] + vout[4..5]. ONCHAIN_TAGGING.md §2.11.",
+      "tags": ["sale", "ord-net", "fingerprint-tp", "cooperative"]
+    },
+    {
+      "txid": "0e46cd272f741e8be56e8790c7664fb3e940e4b487c112a36792701355656959",
+      "inscription_number": 83313913,
+      "expected_type": "sold",
+      "expected_marketplace": "ord-net",
+      "sale_price_sats": 1980900,
+      "description": "ord.net sale of #83313913 (user-verified externally). 6-in/7-out cooperative SIGHASH_ALL/DEFAULT shape. Same ord.net fee P2TR at vout[0] (dust marker) + vout[3] (real fee). Seller payment at vout[2]. ONCHAIN_TAGGING.md §2.11.",
+      "tags": ["sale", "ord-net", "fingerprint-tp", "cooperative"]
     }
   ],
   "notes": {
@@ -1054,6 +1072,7 @@
     "escrow_pattern": "Escrow addresses are taproot outputs (bc1p...) created in origination txs. The taproot commits to two spend paths: key-path (borrower, for unlock) and script-path with CSV timelock (lender, for default claim).",
     "not_a_sale": "These loan transactions are NOT sales. The existing sales heuristic correctly skips them (cooperative layer finds no external outputs). The loan heuristic tags them as distinct event types to avoid confusion with marketplace sales.",
     "magisat_fingerprint": "Magisat sales are detected by the on-chain fingerprint in src/lib/marketplaceFingerprint.ts: any vout with address 3Ke21osfhEbEryUeqdwAuAY8VKxm5B9uB2 (P2SH fee) AND ≥1 vin with a 65-byte schnorr signature ending in 0x83 (SIGHASH_SINGLE | ANYONECANPAY). 14 TPs plus confirmed TNs in this corpus. Full design + price-extraction rule in ONCHAIN_TAGGING.md §2.7.",
+    "ord_net_fingerprint": "ord.net sales are detected by the on-chain fingerprint in src/lib/marketplaceFingerprint.ts: any vout with address ∈ ORD_NET_FEE_ADDRS = { bc1pgkfga880836f5kp3m9vvya4m0whva80ddm58r7fyltzp9q8t08rs0rdnet (P2TR, vanity-ends-in 'rdnet') }. Cooperative SIGHASH_ALL/DEFAULT shape only — no ACP path observed. The fee address is paid TWICE in the dominant 7/8-output layout: a 639-sat dust marker at vout[0] and the real ~2.5% fee at vout[3]. detectMarketplace picks the LAST occurrence so vout[feeVoutIdx-1] lands on the seller payment. Promoted 2026-05-05 with 2 user-confirmed OMB TPs anchored by a 50-sample mempool probe of the address (0/50 sweep-out, 100% fee-output, 0 co-occurrence with Magisat or either ME fee address). OMB volume on this marketplace is sparse (a probe across 400 recent OMB sales in ord.net's own feed surfaced exactly the 2 TPs and nothing else — most ord.net feed entries are aggregated from other marketplaces, not settled by ord.net themselves). Full design + price-extraction rule in ONCHAIN_TAGGING.md §2.11.",
     "magic_eden_fingerprint": "Magic Eden sales are detected by the on-chain fingerprint in src/lib/marketplaceFingerprint.ts: any vout with address ∈ MAGIC_EDEN_FEE_ADDRS = { bc1qcq2uv5nk6hec6kvag3wyevp6574qmsm9scjxc2 (P2WPKH, primary), 3P4WqXDbSLRhzo2H6MT6YFbvBKBDPLbVtQ (P2SH, secondary, used Dec 2023 → May 2024 then rotated out) }. Two shapes share these addresses: ACP/PSBT-listing (≥1 vin with 65-byte schnorr sig ending 0x83 = SIGHASH_SINGLE|ANYONECANPAY — same structure as Magisat, distinguished by fee address) and cooperative SIGHASH_ALL (no ACP — both parties co-sign atomically, plausibly buy-now or accept-offer). Promoted 2026-05-05 with 10 user-confirmed TPs + an on-chain probe over all 36k OMB candidate txids that found 2,163 secondary-fee txs all matching ME PSBT shapes; mutual-exclusion verified against 283 Satflow + 21 Magisat tagged events in our corpus. Counter-example: #11273300 is a user-flagged ME buy whose on-chain tx has no fee output and no seller payment (only the buyer pays a 840-sat fee) — almost certainly the inscription-delivery leg of an offer accept whose BTC moved in a sibling tx; the live rule correctly fingerprint-misses it. Full design + price-extraction rule in ONCHAIN_TAGGING.md §2.10.",
     "liquidium_internal_pubkey": "Phase 4 loan-resolution detection requires the spend's control-block internal pubkey to equal 93674766caa3db9c0f63c4b74f302510c509d6d0ffac9d67214d8f03cb2ed27a. Single-leaf tap-trees with other internal pubkeys (e.g. 428a... in 3bd09bfc) are NOT Liquidium and the v3 detector rejects them. See ONCHAIN_TAGGING.md §2.2 + §4.5.",
     "liquidium_modern_origination_candidate": "Twenty-nine user-verified Liquidium OMB loans from 2026 match a narrow instant-loan origination shape: vin[0] spends the inscription P2TR, vin[1..] spend one recurring P2WSH 1-of-2 lender vault, vout[0] keeps the inscription value in a new P2TR collateral holder, vout[1] pays bc1papmpmu0...59se9u, vout[2] pays borrower principal to P2SH, and vout[3] returns lender-vault change. Fifteen additional user-verified loans match close variants: P2SH/P2WPKH/P2TR principal-output variants with the same fee and lender-vault family. This is a candidate fingerprint only; do not live-tag variants until confirmed true negatives or a conservative production policy are added."

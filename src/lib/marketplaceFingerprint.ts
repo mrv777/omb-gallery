@@ -56,6 +56,19 @@ export type MarketplaceMatch =
       acpInputs: [];
       /** Index of the vout that paid the ME fee address. */
       feeVoutIdx: number;
+    }
+  | {
+      marketplace: 'ord-net';
+      shape: 'cooperative';
+      acpInputs: [];
+      /**
+       * Index of the LAST vout that paid the ord.net fee address (ord.net's
+       * shape pays the same address twice — a 639-sat dust marker at vout[0]
+       * and the real fee at vout[3]). Using the last occurrence makes
+       * `vout[feeVoutIdx-1]` land on the seller payment for the dominant
+       * 7/8-output layout.
+       */
+      feeVoutIdx: number;
     };
 
 // Magisat's fixed P2SH fee output. See ONCHAIN_TAGGING.md §2.7 for the
@@ -82,6 +95,17 @@ const MAGIC_EDEN_FEE_ADDRS = new Set<string>([
   '3P4WqXDbSLRhzo2H6MT6YFbvBKBDPLbVtQ',
 ]);
 
+// ord.net's fee address. See ONCHAIN_TAGGING.md §2.11. P2TR with bech32m
+// vanity ending in `…rdnet`. Two user-confirmed OMB sales plus a 50-sample
+// mempool probe of the address (0/50 sweep-out, 100% fee-collector,
+// 0 co-occurrence with Magisat or either ME fee address) — promoted on
+// dedicated-collector + mutual-exclusion evidence; OMB volume on this
+// marketplace is sparse so the §1 ≥3-TP target is met by the OMB pair plus
+// the address-history corpus.
+const ORD_NET_FEE_ADDRS = new Set<string>([
+  'bc1pgkfga880836f5kp3m9vvya4m0whva80ddm58r7fyltzp9q8t08rs0rdnet',
+]);
+
 /** Return the input indexes whose schnorr signature carries SIGHASH 0x83. */
 function findAcpInputs(tx: FingerprintTx): number[] {
   const out: number[] = [];
@@ -100,6 +124,14 @@ function findAcpInputs(tx: FingerprintTx): number[] {
 
 function findFeeVoutIdx(tx: FingerprintTx, addrs: Set<string>): number {
   for (let i = 0; i < tx.vout.length; i++) {
+    const a = tx.vout[i]?.scriptPubKey?.address;
+    if (a && addrs.has(a)) return i;
+  }
+  return -1;
+}
+
+function findLastFeeVoutIdx(tx: FingerprintTx, addrs: Set<string>): number {
+  for (let i = tx.vout.length - 1; i >= 0; i--) {
     const a = tx.vout[i]?.scriptPubKey?.address;
     if (a && addrs.has(a)) return i;
   }
@@ -138,6 +170,21 @@ export function detectMarketplace(tx: FingerprintTx): MarketplaceMatch | null {
       shape: 'cooperative',
       acpInputs: [],
       feeVoutIdx: meFeeIdx,
+    };
+  }
+
+  // ord.net: cooperative SIGHASH_ALL/DEFAULT shape. The fee address is paid
+  // twice (dust marker at vout[0], real fee at vout[3] in the dominant
+  // 7/8-output layout) so we pick the LAST occurrence — that puts the
+  // seller payment at vout[feeVoutIdx-1]. No ACP signatures observed in
+  // the fixture set; the rule is fee-address-only.
+  const ordNetLastIdx = findLastFeeVoutIdx(tx, ORD_NET_FEE_ADDRS);
+  if (ordNetLastIdx >= 0) {
+    return {
+      marketplace: 'ord-net',
+      shape: 'cooperative',
+      acpInputs: [],
+      feeVoutIdx: ordNetLastIdx,
     };
   }
 
@@ -196,11 +243,23 @@ export function extractSalePriceSats(
     // Postage-output gate.
     if (sats < MIN_PAYMENT_SATS) return null;
 
-    // Bulk-buy gate: count postage-sized outputs that precede the fee.
+    // Bulk-buy gate: count postage-sized outputs that precede the fee. For
+    // ord.net we skip the marketplace's own dust marker at vout[0] (the
+    // shape pays the fee address twice — a 639-sat marker plus the real
+    // fee — so counting that as a bulk-buy postage trips the gate
+    // erroneously on every legitimate single-inscription ord.net sale).
+    const feeAddrs =
+      match.marketplace === 'ord-net'
+        ? ORD_NET_FEE_ADDRS
+        : match.marketplace === 'magic-eden'
+          ? MAGIC_EDEN_FEE_ADDRS
+          : null;
     let postageCount = 0;
     for (let i = 0; i < match.feeVoutIdx; i++) {
       const vi = tx.vout[i];
       if (!vi || typeof vi.value !== 'number') continue;
+      const a = vi.scriptPubKey?.address;
+      if (feeAddrs && a && feeAddrs.has(a)) continue;
       if (Math.round(vi.value * 1e8) <= POSTAGE_THRESHOLD_SATS) postageCount++;
     }
     if (postageCount >= 2) return null;

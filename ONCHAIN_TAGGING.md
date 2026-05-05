@@ -188,6 +188,34 @@ Promoted on shape + time-concentration + mutual-exclusion evidence rather than d
 - **Test fixtures:** see §6.6.
 - **Code:** detection in `src/lib/marketplaceFingerprint.ts` (shared with Magisat — the unified `detectMarketplace` returns a discriminated union). Live tagger in `src/lib/magicEdenFingerprintTick.ts`, wired into the 5-min `auto` poll between `magisat-fp` and `satflow`. Historical sweep in `scripts/backfill-magic-eden-fingerprint.js`. Schema bump to v27 adds the `magic_eden_fp` poll_state stream.
 
+### 2.11 ord.net marketplace fingerprint (on-chain)
+
+**Status: promoted to chain-fingerprint 2026-05-05.** Live tagger at `src/lib/ordNetFingerprintTick.ts`, sibling to the Magisat / Magic Eden ticks. Wired into the 5-min `auto` poll between `magic-eden-fp` and `satflow`.
+
+ord.net runs a small in-house marketplace separate from their aggregator-style sales feed: they republish sales settled by other marketplaces (ME / Magisat / Satflow) but a thin slice of their feed is settled via their own PSBT path. Two user-flagged OMB sales (#60571179 `c3f4becc…`, #83313913 `0e46cd27…`) carry a fee output to **`bc1pgkfga880836f5kp3m9vvya4m0whva80ddm58r7fyltzp9q8t08rs0rdnet`** — a P2TR address whose bech32m encoding ends in the literal vanity `rdnet`. The fee address is paid **twice** in every observed sale: a 639-sat dust marker at `vout[0]` and the real ~2.5% fee at `vout[3]` in the dominant 7/8-output layout. Recurring buyer-dummy `bc1q0h8mujmkue3yvfwdg5dhqvgcpmmse050anch0r` at `vin[0..1]` + regenerated at `vout[4..5]` is additional same-infra evidence but not part of the rule.
+
+On-chain shape: cooperative SIGHASH_ALL / SIGHASH_DEFAULT — `vin[2]` (the inscription P2TR) carries a 64-byte schnorr signature (no sighash byte = DEFAULT) and the buyer P2WPKH inputs at `vin[0..1]` end in `0x01` (SIGHASH_ALL). No ACP signatures observed in the fixture set. Layout is consistent across 7-out and 8-out variants:
+
+- `vout[0]` = ord.net fee P2TR (639-sat dust marker)
+- `vout[1]` = inscription destination P2TR (postage 330–999 sats)
+- `vout[2]` = **seller payment** (P2SH or P2WPKH, varying)
+- `vout[3]` = ord.net fee P2TR (real fee, 340–58k+ sats)
+- `vout[4..]` = regenerated dummies + buyer change
+
+**Detection rule (live):** any `vout` whose `scriptPubKey.address` ∈ `ORD_NET_FEE_ADDRS = { bc1pgkfga…rdnet }`. No ACP / sighash gate — the rule is fee-address-only (cooperative-only marketplace).
+
+**Sale-price extraction:** `vout[feeVoutIdx - 1]` where `feeVoutIdx` is the **last** (highest-index) occurrence of the fee address — that's vout[2] for the dominant layout, the seller's payment. The dust-marker vout at the head of the tx is excluded from the bulk-buy postage count (otherwise it would be counted as a single-inscription dummy and the gate would trip on every legitimate sale). Returns null when the implied seller output is below the postage / min-payment floor or when ≥2 non-fee postage outputs precede the fee — that's a multi-inscription bulk buy where per-inscription price can't be attributed from chain structure alone.
+
+**Cooperative no-payment gate.** ord.net is cooperative-only, so we mirror the §2.10 / §7.7 policy: refuse to upgrade rows where `extractSalePriceSats` returns null AND the existing `sale_price_sats` is also null. The marketplace tag is sound, but the upgrade requires a price.
+
+**Mutual exclusion:** a 50-sample mempool probe of the fee address found 0 co-occurrence with the Magisat fee `3Ke21os…`, 0 with ME-primary `bc1qcq2uv5n…`, and 0 with ME-secondary `3P4Wq…`. The address itself is purely an output collector (0/50 spend FROM it, 50/50 receive INTO it) — dedicated fee account, never sweeped within the sample window.
+
+**Confidence:** chain-fingerprint. 2 user-confirmed OMB TPs + dedicated-collector evidence + clean mutual-exclusion across the 14-fixture Magisat and 10-fixture Magic Eden corpora. OMB volume on this marketplace is sparse — a probe across the 400 most-recent OMB sales in ord.net's own feed found exactly the 2 TPs and nothing else (the rest are aggregated from other marketplaces). §1's ≥3-TP target is met by the OMB pair plus the address-history corpus of recurring same-shape settlements.
+
+**Counter-example (mutual-exclusion class):** every Magisat fixture in §6.3 and every Magic Eden fixture in §6.6 — none carry the ord.net fee address, and the live rule correctly fingerprint-misses them.
+
+**Code:** detection in `src/lib/marketplaceFingerprint.ts` (unified `detectMarketplace` returns a discriminated union extended with the `'ord-net'` cooperative variant). Live tagger in `src/lib/ordNetFingerprintTick.ts`. Historical sweep in `scripts/backfill-ord-net-fingerprint.js`. Schema bump to v28 adds the `ord_net_fp` poll_state stream. Cursor bootstraps to current `MAX(events.id)` on first tick — historical events are NOT replayed live; operators run `pnpm backfill-ord-net-fingerprint` once for the historical sweep.
+
 ## 3. Tagging rules currently active
 
 | `event_type`                                       | When emitted                                                                                     | Source rule                         | Confidence tier   | Marketplace tag |
@@ -196,6 +224,7 @@ Promoted on shape + time-concentration + mutual-exclusion evidence rather than d
 | `mint`                                             | `old_owner` matches a registered mint wallet (§2.1) AND inscription color matches                | Wallet → color map                  | chain-truth       | NULL            |
 | `sold` (Magisat)                                   | `magisat-fp` poll step finds the §2.8 fingerprint and upgrades the `transferred` row in place    | `src/lib/marketplaceFingerprint.ts` | chain-fingerprint | `'magisat'`     |
 | `sold` (Magic Eden)                                | `magic-eden-fp` poll step finds the §2.10 fingerprint and upgrades the `transferred` row in place| `src/lib/marketplaceFingerprint.ts` | chain-fingerprint | `'magic-eden'`  |
+| `sold` (ord.net)                                   | `ord-net-fp` poll step finds the §2.11 fingerprint and upgrades the `transferred` row in place   | `src/lib/marketplaceFingerprint.ts` | chain-fingerprint | `'ord-net'`     |
 | `sold` (other paths)                               | (see §3.1 below — currently mixed quality)                                                       | Multiple paths                      | mixed             | varies          |
 | `listed`                                           | Satflow API listings stream                                                                      | Satflow                             | legacy-3rd-party  | `'satflow'`     |
 | `loan-originated`                                  | Liquidium origination fingerprint (§2.4), or Phase 4 traces backward from a resolution spend     | `src/lib/loanDetect.ts`             | chain-fingerprint | NULL            |
@@ -211,6 +240,7 @@ Promoted on shape + time-concentration + mutual-exclusion evidence rather than d
 | Satflow                                                         | 282    | legacy-3rd-party                        | Keep as-is.                           |
 | `onchain-magisat-fp` (live + historical via fingerprint)        | 14+    | chain-fingerprint                       | Primary path going forward. See §2.8. |
 | `onchain-magic-eden-fp` (live + historical via fingerprint)     | 10+    | chain-fingerprint                       | Primary path going forward. See §2.10.|
+| `onchain-ord-net-fp` (live + historical via fingerprint)        | 2+     | chain-fingerprint                       | Primary path going forward. See §2.11.|
 | `magisat-api-backfill` (cross-reference, fallback verification) | (n/a)  | chain-truth                             | Verification only. See §2.9.          |
 
 ## 4. Refuted hypotheses (do not re-introduce)
@@ -261,6 +291,8 @@ A real recurring fee/activation collector address. It is not Magisat. Twenty-nin
 ### 5.3 Magic Eden / OKX / Ord.io / OrdSwap fingerprints
 
 **Magic Eden — fully resolved 2026-05-05** (see §2.10). Both the primary P2WPKH fee address `bc1qcq2uv5n…m9scjxc2` and the secondary P2SH fee address `3P4Wq…vtQ` promoted to chain-fingerprint and shipping in the live `MAGIC_EDEN_FEE_ADDRS` set. Mutual-exclusion verified against Satflow + Magisat fixture corpora. Two complementary on-chain shapes (PSBT-listing ACP and cooperative SIGHASH_ALL) handled by a single `detectMarketplace` rule.
+
+**ord.net — fully resolved 2026-05-05** (see §2.11). Live `ord-net-fp` tagger ships in the `auto` poll. ord.net runs a small in-house marketplace separate from their aggregator-style sales feed; the on-chain fee P2TR `bc1pgkfga…rdnet` appears at vout[0] (dust marker) and vout[3] (real fee). Note: this is distinct from the historical `ord-net-history-backfill` rows in §3.1, which carry `marketplace=NULL` because that path uses ord.net's republishing feed, not their own settlement.
 
 **OKX / Ord.io / OrdSwap — unresolved.** Zero confirmed fixtures. All `marketplace=NULL` `sold` rows from `ord-net-history-backfill` could still be from any of these.
 
@@ -442,6 +474,19 @@ User-flagged ME sales spanning blocks 796440 → 886371 (~16 months). All 10 car
 
 Fee/sale ratios: 2.51% – 2.55% across all 10 — strong corroborating signal independent of the address-recurrence rule.
 
+### 6.7 ord.net sales (true positives — N=2 confirmed OMB)
+
+User-flagged ord.net sales. Both carry the candidate fee P2TR `bc1pgkfga880836f5kp3m9vvya4m0whva80ddm58r7fyltzp9q8t08rs0rdnet` at vout[0] (639-sat dust marker) AND vout[3] (real fee). Cooperative SIGHASH_ALL/DEFAULT shape; 0 ACP signatures. Seller payment at vout[2].
+
+| Inscription | Tx                                                                 | n_in/n_out | Sale (sats) | Fee (sats) |
+| ----------- | ------------------------------------------------------------------ | ---------- | ----------- | ---------- |
+| 60571179    | `c3f4becc98d85bf64d61bcf25972f0eae93e76d99f15fec0cf9a9ec66cf7cfa8` | 9/7        | 2,327,499   | 58,090     |
+| 83313913    | `0e46cd272f741e8be56e8790c7664fb3e940e4b487c112a36792701355656959` | 6/7        | 1,980,900   | 49,340     |
+
+A probe across the 400 most-recent OMB sales in ord.net's own `__data.json` feed found exactly these 2 fingerprint matches and nothing else — the rest are aggregated from other marketplaces (Magic Eden / Magisat / Satflow), not settled by ord.net themselves. The OMB-specific TP set is small but the rule is anchored by mempool address-history evidence: 50/50 sample txs to the fee address are output-only (0 sweep-out → dedicated fee account), 0 co-occurrence with Magisat or either Magic Eden fee address.
+
+The TN class is the union of §6.3 (14 Magisat fixtures) and §6.6 (10 Magic Eden fixtures) — none carry the ord.net fee address, and the live rule correctly fingerprint-misses each.
+
 ## 7. Audit + cleanup status
 
 All three groups identified during the v26 audit have been resolved or are tracked.
@@ -491,6 +536,16 @@ pnpm backfill-magic-eden-fingerprint
 ```
 
 Use `pnpm backfill-magic-eden-fingerprint -- --dry-run` first to preview. Required env: `BITCOIN_RPC_URL`, `OMB_DB_PATH` (default `/data/app.db`). Upgrades `transferred` rows in place to `sold` with `marketplace='magic-eden'`, extracts `sale_price_sats` per the §2.10 shape rules, recomputes per-inscription `transfer_count` / `sale_count` / `total_volume_sats` / `highest_sale_sats`. Skips rows already tagged with a non-ME marketplace (logs the count but doesn't touch them). Idempotent — safe to re-run. Notify queue is **not** enqueued for backfilled rows (matches the §7.4/§7.5 policy).
+
+### 7.8 Modern ord.net tagger backfill — RUN AFTER DEPLOY
+
+Run once after deploying the §2.11 detector + schema v28. The live `ord-net-fp` tick bootstraps its cursor to current `MAX(events.id)` and only fingerprints forward — historical `transferred` rows + `marketplace IS NULL` `sold` rows that are actually ord.net sales need the one-shot sweep.
+
+```bash
+pnpm backfill-ord-net-fingerprint
+```
+
+Use `pnpm backfill-ord-net-fingerprint -- --dry-run` first to preview. Required env: `BITCOIN_RPC_URL`, `OMB_DB_PATH` (default `/data/app.db`). Upgrades `transferred` rows in place to `sold` with `marketplace='ord-net'`, extracts `sale_price_sats` per the §2.11 cooperative shape rule, recomputes per-inscription `transfer_count` / `sale_count` / `total_volume_sats` / `highest_sale_sats`. Skips rows already tagged with a non-ord-net marketplace. Idempotent — safe to re-run. Notify queue is **not** enqueued for backfilled rows (matches the §7.4–§7.6 policy).
 
 ### 7.7 Magic Eden cooperative no-payment revert — RAN 2026-05-05
 

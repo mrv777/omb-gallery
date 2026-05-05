@@ -18,6 +18,7 @@
     "backfill-liquidium-modern-resolutions": "node scripts/backfill-liquidium-modern-resolutions.js",
     "backfill-magisat-fingerprint": "node scripts/backfill-magisat-fingerprint.js",
     "backfill-magic-eden-fingerprint": "node scripts/backfill-magic-eden-fingerprint.js",
+    "backfill-ord-net-fingerprint": "node scripts/backfill-ord-net-fingerprint.js",
     "revert-magic-eden-coop-no-price": "node scripts/revert-magic-eden-coop-no-price.js",
     "test": "vitest run",
     "test:watch": "vitest"
