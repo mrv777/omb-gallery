@@ -136,23 +136,37 @@ db.pragma('busy_timeout = 5000');
 // Find every transferred row that came out of a modern-loan escrow but hasn't
 // been reclassified yet. Joining on origination → escrow → exit-event picks up
 // only rows we have a good reason to inspect (no full chain scan).
+//
+// Ordering trap: `events.id` is NOT chronological for rows inserted by
+// scripts/backfill-transfers.js — that script walks each inscription's chain
+// backward from the current satpoint, so older events get higher ids than
+// newer ones. Joining on `e.id > m.orig_id` would silently miss every
+// pre-backfill resolution. Use block_timestamp/block_height instead.
 const rows = db
   .prepare(
     `
     WITH modern_origs AS (
-      SELECT inscription_number, new_owner AS escrow_addr, id AS orig_id
+      SELECT inscription_number,
+             new_owner       AS escrow_addr,
+             id              AS orig_id,
+             block_timestamp AS orig_ts,
+             block_height    AS orig_height
         FROM events
        WHERE event_type = 'loan-originated'
          AND json_extract(raw_json, '$.source') IN
              ('liquidium-modern-origination-fingerprint','known-liquidium-origination-fixture')
     )
-    SELECT e.id, e.inscription_id, e.inscription_number, e.txid,
-           e.event_type, e.old_owner, e.new_owner
+    SELECT DISTINCT e.id, e.inscription_id, e.inscription_number, e.txid,
+                    e.event_type, e.old_owner, e.new_owner
       FROM events e
       JOIN modern_origs m
         ON m.inscription_number = e.inscription_number
-       AND e.id > m.orig_id
        AND e.old_owner = m.escrow_addr
+       AND (
+         (e.block_height IS NOT NULL AND m.orig_height IS NOT NULL AND e.block_height > m.orig_height)
+         OR (e.block_height IS NULL OR m.orig_height IS NULL)
+            AND e.block_timestamp >= m.orig_ts
+       )
      WHERE e.event_type = 'transferred'
      ORDER BY e.id ASC
      ${LIMIT > 0 ? 'LIMIT @limit' : ''}
