@@ -164,7 +164,7 @@ Ten user-flagged Magic Eden OMB sales spanning blocks 796440 (~2023-05) → 8863
 
 **Detection rule (live):**
 
-- Any `vout` whose `scriptPubKey.address` ∈ `MAGIC_EDEN_FEE_ADDRS = { bc1qcq2uv5n…m9scjxc2 }`.
+- Any `vout` whose `scriptPubKey.address` ∈ `MAGIC_EDEN_FEE_ADDRS = { bc1qcq2uv5n…m9scjxc2, 3P4WqXDb…vtQ }`.
 - Shape sub-discrimination: if ≥1 `vin` carries a 65-byte schnorr signature ending in `0x83` (`SIGHASH_SINGLE | SIGHASH_ANYONECANPAY`), tag as ACP shape and record `acpInputs[]`. Otherwise, tag as cooperative shape.
 
 **Sale-price extraction:**
@@ -172,11 +172,17 @@ Ten user-flagged Magic Eden OMB sales spanning blocks 796440 (~2023-05) → 8863
 - **ACP shape:** SIGHASH_SINGLE commits input N's signature to output N. Sum `vout[N].value` for each ACP input N whose prevout address equals `events.old_owner`. Same logic as Magisat.
 - **Cooperative shape:** the fixed layout puts the seller payment at `vout[feeVoutIdx - 1]` across every fixture in §6.6 — read directly. Returns null when the implied index points at the inscription destination (`vout[0]`) — that's the no-payment delivery-leg shape (#11273300, refuted §6.5), not a real sale, and we mustn't tag a price.
 
-**Secondary candidate fee address (NOT promoted):** `3P4WqXDbSLRhzo2H6MT6YFbvBKBDPLbVtQ` (P2SH) appears in 2 spring-2024 fixtures (#213924 in block 832583, #60563128 in block 835705) — both cooperative SIGHASH_ALL with ~2.55% fee ratio matching the modern address. This could be a pre-rotation ME fee splitter, a different ME flow, or an unrelated royalty router. With only 2 fixtures and no true negative, we cannot promote it. Recorded as `fingerprint-tp-secondary` in `known-transactions.json`. **At runtime these two fixtures continue to fingerprint-miss until `3P4Wq…` is added to `MAGIC_EDEN_FEE_ADDRS` in `src/lib/marketplaceFingerprint.ts`** — gated explicitly by reviewer agreement, not a code TODO.
+**Secondary fee address `3P4WqXDbSLRhzo2H6MT6YFbvBKBDPLbVtQ` (P2SH) — promoted 2026-05-05.** Initial promotion of the primary fee address left this address in candidate state (only 2 user-confirmed TPs). A targeted on-chain probe across all 36k unique candidate txids found:
+
+- **2,163 txs carry this address**, all matching the ME PSBT shapes from §2.10 (4-in/7-out ACP, 2-in/4-out / 2-in/3-out cooperative, plus a handful of multi-inscription bulk buys).
+- **Tight time concentration:** Dec 2023 (63) → Jan 2024 (109) → Feb 2024 (170) → Mar 2024 (1252, peak) → Apr 2024 (545) → May 2024 (24) → zero after. Textbook fee-rotation signature, not a continuously-running shared utility.
+- **Zero co-occurrence with the primary ME fee** (so they're alternatives, not splitters), nor with **any of the 283 Satflow- or 21 Magisat-tagged fixtures** in our corpus — exhaustive mutual-exclusion across all marketplaces we currently identify.
+
+Promoted on shape + time-concentration + mutual-exclusion evidence rather than direct UI verification (ME UI is deprecated). Risk acknowledged: it could in principle be a different marketplace that operated only in this window — but the on-chain shape matches ME exactly, and the user-confirmed TPs cover both ACP and cooperative variants.
 
 **Counter-example (fingerprint-miss):** #11273300 (`ee5e2159…`, block 932122) was user-flagged as a Magic Eden buy but the tx is a 2-in/2-out movement with **no fee output and no seller payment** (only the buyer pays 840 sats fee). Almost certainly the inscription-delivery leg of an accept-offer flow whose BTC moved in a sibling tx. ME UI is no longer accessible to verify so this fixture stays as a documented unverifiable case, not a TP. The live rule correctly does not match it.
 
-- **Confidence:** chain-fingerprint. 10 user-confirmed TPs spanning ~16 months on the primary fee address; 14-fixture Magisat-mutual-exclusion accepted as TN class; #11273300 plus the 14 Magisat fixtures all correctly fail the rule.
+- **Confidence:** chain-fingerprint. 10 user-confirmed TPs across both fee addresses (8 primary + 2 secondary); on-chain probe over all 36k OMB candidate txids found 2,163 secondary-only txs all matching ME shapes; mutual-exclusion verified against the 283 Satflow + 21 Magisat tagged events in our corpus and against the 6,720 primary-fee-tagged ME events; #11273300 plus the 14 Magisat fixtures all correctly fail the rule.
 - **Test fixtures:** see §6.6.
 - **Code:** detection in `src/lib/marketplaceFingerprint.ts` (shared with Magisat — the unified `detectMarketplace` returns a discriminated union). Live tagger in `src/lib/magicEdenFingerprintTick.ts`, wired into the 5-min `auto` poll between `magisat-fp` and `satflow`. Historical sweep in `scripts/backfill-magic-eden-fingerprint.js`. Schema bump to v27 adds the `magic_eden_fp` poll_state stream.
 
@@ -252,7 +258,7 @@ A real recurring fee/activation collector address. It is not Magisat. Twenty-nin
 
 ### 5.3 Magic Eden / OKX / Ord.io / OrdSwap fingerprints
 
-**Magic Eden — resolved 2026-05-05** (see §2.10). Primary fee address `bc1qcq2uv5nk6hec6kvag3wyevp6574qmsm9scjxc2` promoted to chain-fingerprint with 10 confirmed TPs and 14-fixture Magisat-mutual-exclusion accepted as TN class. Live tagger ships in the same commit. Secondary P2SH candidate `3P4Wq…` documented but NOT in the live `MAGIC_EDEN_FEE_ADDRS` set — blocked on additional spring-2024 fixtures.
+**Magic Eden — fully resolved 2026-05-05** (see §2.10). Both the primary P2WPKH fee address `bc1qcq2uv5n…m9scjxc2` and the secondary P2SH fee address `3P4Wq…vtQ` promoted to chain-fingerprint and shipping in the live `MAGIC_EDEN_FEE_ADDRS` set. Mutual-exclusion verified against Satflow + Magisat fixture corpora. Two complementary on-chain shapes (PSBT-listing ACP and cooperative SIGHASH_ALL) handled by a single `detectMarketplace` rule.
 
 **OKX / Ord.io / OrdSwap — unresolved.** Zero confirmed fixtures. All `marketplace=NULL` `sold` rows from `ord-net-history-backfill` could still be from any of these.
 

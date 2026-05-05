@@ -133,6 +133,23 @@ export async function runMagicEdenFingerprintTick(opts: { live: boolean }): Prom
     return result;
   }
 
+  // Multi-inscription bulk-buy safety net. The lib's cooperative gate already
+  // catches the structural cases, but if the rows of a bulk-buy tx split
+  // across multiple ticks (or the structure ever drifts), nulling price for
+  // any txid that has >1 candidate row in our DB is a redundant guard.
+  const bulkTxids = (() => {
+    if (candidates.length === 0) return new Set<string>();
+    const placeholders = candidates.map(() => '?').join(',');
+    const rows = db
+      .prepare(
+        `SELECT txid FROM events
+          WHERE txid IN (${placeholders})
+          GROUP BY txid HAVING COUNT(*) > 1`
+      )
+      .all(candidates.map(c => c.txid)) as Array<{ txid: string }>;
+    return new Set(rows.map(r => r.txid));
+  })();
+
   type Probe = {
     cand: (typeof candidates)[number];
     marketplace: 'magic-eden' | null;
@@ -162,7 +179,8 @@ export async function runMagicEdenFingerprintTick(opts: { live: boolean }): Prom
         probes[idx] = { cand: c, marketplace: null, salePriceSats: null, rpcFail: false };
         continue;
       }
-      const price = c.old_owner ? extractSalePriceSats(tx, match, c.old_owner) : null;
+      let price = c.old_owner ? extractSalePriceSats(tx, match, c.old_owner) : null;
+      if (bulkTxids.has(c.txid)) price = null;
       probes[idx] = {
         cand: c,
         marketplace: match.marketplace,

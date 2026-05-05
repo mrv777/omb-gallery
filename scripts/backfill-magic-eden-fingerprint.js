@@ -118,7 +118,10 @@ async function rpc(method, params = []) {
 }
 
 // ---- fingerprint (mirrors src/lib/marketplaceFingerprint.ts) ----
-const ME_FEE_ADDRS = new Set(['bc1qcq2uv5nk6hec6kvag3wyevp6574qmsm9scjxc2']);
+const ME_FEE_ADDRS = new Set([
+  'bc1qcq2uv5nk6hec6kvag3wyevp6574qmsm9scjxc2',
+  '3P4WqXDbSLRhzo2H6MT6YFbvBKBDPLbVtQ',
+]);
 
 function addressFromSpk(spk) {
   if (!spk || typeof spk !== 'object') return null;
@@ -163,13 +166,26 @@ function btcToSats(v) {
   return 0;
 }
 
+// Mirrors src/lib/marketplaceFingerprint.ts gates for cooperative shape.
+const POSTAGE_THRESHOLD_SATS = 12_000;
+const MIN_PAYMENT_SATS = 50_000;
+
 function extractPriceSats(tx, match, sellerAddress) {
   if (match.shape === 'cooperative') {
     const idx = match.feeVoutIdx - 1;
     if (idx <= 0) return null;
     const v = tx.vout[idx];
     if (!v || v.value == null) return null;
-    return btcToSats(v.value);
+    const sats = btcToSats(v.value);
+    if (sats < MIN_PAYMENT_SATS) return null;
+    let postageCount = 0;
+    for (let i = 0; i < match.feeVoutIdx; i++) {
+      const vi = tx.vout[i];
+      if (!vi || vi.value == null) continue;
+      if (btcToSats(vi.value) <= POSTAGE_THRESHOLD_SATS) postageCount++;
+    }
+    if (postageCount >= 2) return null;
+    return sats;
   }
   let total = 0;
   let n = 0;
@@ -221,6 +237,26 @@ async function main() {
   const events = db.prepare(sql).all(params);
   console.log(`[magic-eden-fp] candidates: ${events.length}`);
 
+  // Multi-inscription txid safety net: any txid that appears in 2+ candidate
+  // rows represents a bulk buy — even if our structural cooperative-shape
+  // gates miss it, we override price to null here. The marketplace tag is
+  // still applied. This is redundant with the postage/bulk-buy gates inside
+  // extractPriceSats, but cheap to compute and protects against extractor
+  // edge cases we haven't seen yet.
+  const bulkTxids = new Set(
+    db
+      .prepare(
+        `SELECT txid FROM events
+          WHERE ${conds.join(' AND ')}
+          GROUP BY txid HAVING COUNT(*) > 1`
+      )
+      .all(params)
+      .map(r => r.txid)
+  );
+  if (bulkTxids.size > 0) {
+    console.log(`[magic-eden-fp] bulk-buy txids (multi-inscription): ${bulkTxids.size}`);
+  }
+
   const upgradeTransferred = db.prepare(`
     UPDATE events
        SET event_type      = 'sold',
@@ -269,13 +305,16 @@ async function main() {
       const match = detectMagicEden(tx);
       if (!match) continue;
       matched++;
-      const priceSats = ev.old_owner ? extractPriceSats(tx, match, ev.old_owner) : null;
+      let priceSats = ev.old_owner ? extractPriceSats(tx, match, ev.old_owner) : null;
+      const isBulk = bulkTxids.has(ev.txid);
+      if (isBulk) priceSats = null;
       const meta = JSON.stringify({
         source: 'onchain-magic-eden-fp',
         shape: match.shape,
         acp_inputs: match.acpInputs,
         fee_vout_idx: match.feeVoutIdx,
         extracted_price_sats: priceSats,
+        bulk_tx: isBulk || undefined,
         matched_at: Math.floor(Date.now() / 1000),
       });
       if (ev.event_type === 'transferred') {

@@ -63,15 +63,23 @@ export type MarketplaceMatch =
 // confirmed-not-Magisat examples do not).
 const MAGISAT_FEE_ADDRS = new Set<string>(['3Ke21osfhEbEryUeqdwAuAY8VKxm5B9uB2']);
 
-// Magic Eden's primary on-chain fee output (P2WPKH). See ONCHAIN_TAGGING.md
-// §2.10. Recurs across 8 confirmed ME OMB sales spanning blocks 796440 →
-// 886371 (~16 months); ~2.5% of seller payment. Mutual-exclusion checked
-// against 3 Magisat fixtures. The secondary candidate `3P4Wq…` (P2SH, 2
-// fixtures from spring 2024) is documented in §2.10 but NOT promoted to the
-// live rule pending an explicit TN — those rows continue to fingerprint-miss
-// at runtime and are picked up only when `3P4Wq…` is added here.
+// Magic Eden on-chain fee outputs. See ONCHAIN_TAGGING.md §2.10.
+//
+// `bc1qcq2uv5n…m9scjxc2` (P2WPKH) — primary. 8 user-confirmed ME OMB sales
+// spanning blocks 796440 → 886371 (~16 months); ~2.5% of seller payment.
+//
+// `3P4WqXDb…vtQ` (P2SH) — secondary, promoted 2026-05-05. 2 user-confirmed
+// ME TPs anchor it; on-chain probe found 2,163 candidate txs that carry it,
+// all matching ME PSBT shapes (4-in/7-out ACP or 2-in/4-out cooperative),
+// concentrated in a tight Dec 2023 → May 2024 window (textbook signature of
+// a rotated-out fee address). Zero co-occurrence with the primary ME fee
+// or with the 283 Satflow + 21 Magisat tagged fixtures in our corpus —
+// strong mutual-exclusion across all known marketplaces. Promoted on shape
+// + time-concentration + mutual-exclusion evidence; no direct UI
+// verification possible (ME UI deprecated).
 const MAGIC_EDEN_FEE_ADDRS = new Set<string>([
   'bc1qcq2uv5nk6hec6kvag3wyevp6574qmsm9scjxc2',
+  '3P4WqXDbSLRhzo2H6MT6YFbvBKBDPLbVtQ',
 ]);
 
 /** Return the input indexes whose schnorr signature carries SIGHASH 0x83. */
@@ -136,20 +144,42 @@ export function detectMarketplace(tx: FingerprintTx): MarketplaceMatch | null {
   return null;
 }
 
+// Heuristics for the cooperative-shape extractor.
+//
+// POSTAGE_THRESHOLD_SATS: any output ≤ this value is treated as inscription
+// postage, not a payment. OMB inscriptions move with 600 / 900 / 999 / 10_000
+// / 12_000 sat dust outputs in our corpus. 12_000 is chosen as the line.
+//
+// MIN_PAYMENT_SATS: seller payments below this floor are rejected as
+// implausible. Real OMB sales have always been ≫ 0.0005 BTC; under-floor
+// reads almost always indicate the extractor landed on a postage output.
+const POSTAGE_THRESHOLD_SATS = 12_000;
+const MIN_PAYMENT_SATS = 50_000;
+
 /**
  * Extract the seller's BTC payment from a matched tx.
  *
  * - **Magisat / Magic Eden ACP shape:** SIGHASH_SINGLE commits input N's
  *   signature to output N. Sum `vout[N].value` for each ACP input N whose
- *   prevout address equals `sellerAddress`.
- * - **Magic Eden cooperative shape:** the fixed layout puts the seller
- *   payment at `vout[feeVoutIdx - 1]` across every fixture in §6.6; we use
- *   that directly. Defaults to null when the implied index points to the
- *   inscription destination (vout[0]) — that's the no-payment delivery-leg
- *   shape from #11273300, NOT a real sale and we shouldn't tag a price.
+ *   prevout address equals `sellerAddress`. ACP is per-input-correct even in
+ *   bulk buys, so no extra gating is needed.
+ * - **Magic Eden cooperative shape:** the per-fixture layout in §6.6 puts
+ *   the seller payment at `vout[feeVoutIdx - 1]` for single-inscription
+ *   sales. Multi-inscription bulk buys break that rule — the fee can sit
+ *   between dest outputs and seller payments, so `vout[feeVoutIdx-1]` lands
+ *   on a postage output (returns 999/900) or aggregates multiple sales
+ *   (returns the combined price). Two structural gates keep us safe:
  *
- * Returns null when no payment can be extracted (caller should treat as
- * `marketplace=<x>, sale_price_sats=null` rather than misattributing).
+ *     1. **Postage-output gate:** if `vout[feeVoutIdx-1].value` is ≤ the
+ *        postage threshold or below the minimum-payment floor, return null.
+ *     2. **Bulk-buy gate:** count outputs in `vout[0..feeVoutIdx-1]` that
+ *        look like inscription postage (value ≤ POSTAGE_THRESHOLD_SATS). If
+ *        ≥2, the tx is a multi-inscription bulk buy and we can't safely
+ *        attribute the per-inscription seller payment from on-chain
+ *        structure alone — return null.
+ *
+ *   Returning null lets the caller still tag the marketplace; downstream
+ *   queries for sale price simply skip rows where `sale_price_sats IS NULL`.
  */
 export function extractSalePriceSats(
   tx: FingerprintTx,
@@ -161,7 +191,21 @@ export function extractSalePriceSats(
     if (idx <= 0) return null;
     const v = tx.vout[idx];
     if (!v || typeof v.value !== 'number') return null;
-    return Math.round(v.value * 1e8);
+    const sats = Math.round(v.value * 1e8);
+
+    // Postage-output gate.
+    if (sats < MIN_PAYMENT_SATS) return null;
+
+    // Bulk-buy gate: count postage-sized outputs that precede the fee.
+    let postageCount = 0;
+    for (let i = 0; i < match.feeVoutIdx; i++) {
+      const vi = tx.vout[i];
+      if (!vi || typeof vi.value !== 'number') continue;
+      if (Math.round(vi.value * 1e8) <= POSTAGE_THRESHOLD_SATS) postageCount++;
+    }
+    if (postageCount >= 2) return null;
+
+    return sats;
   }
 
   let totalBtc = 0;
