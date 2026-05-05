@@ -182,21 +182,31 @@ function ThumbLink({
   isExternal,
   className,
   children,
+  ref,
+  ...rest
 }: {
   href: string;
   isExternal: boolean;
   className: string;
   children: React.ReactNode;
-}) {
+  ref?: React.Ref<HTMLAnchorElement>;
+} & React.HTMLAttributes<HTMLAnchorElement>) {
   if (isExternal) {
     return (
-      <a href={href} target="_blank" rel="noopener noreferrer" className={className}>
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={className}
+        ref={ref}
+        {...rest}
+      >
         {children}
       </a>
     );
   }
   return (
-    <Link href={href} prefetch={false} className={className}>
+    <Link href={href} prefetch={false} className={className} ref={ref} {...rest}>
       {children}
     </Link>
   );
