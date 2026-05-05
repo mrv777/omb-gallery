@@ -15,7 +15,6 @@ const TYPES = [
   'top-volume',
   'highest-sale',
   'most-loaned',
-  'currently-loaned',
   'top-holders',
 ] as const;
 type LeaderboardType = (typeof TYPES)[number];
@@ -85,8 +84,6 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ type: strin
         return stmts.topByHighestSalePaged;
       case 'most-loaned':
         return stmts.topByLoansPaged;
-      case 'currently-loaned':
-        return stmts.topActiveLoansPaged;
     }
   })();
 
@@ -146,8 +143,6 @@ function buildInscriptionCursor(
       return `${row.highest_sale_sats}:${num}`;
     case 'most-loaned':
       return `${row.loan_count ?? 0}:${num}`;
-    case 'currently-loaned':
-      return row.loan_funded_at != null ? `${row.loan_funded_at}:${num}` : null;
   }
 }
 

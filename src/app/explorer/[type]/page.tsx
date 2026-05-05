@@ -16,7 +16,6 @@ const VALID: LeaderboardKey[] = [
   'top-volume',
   'highest-sale',
   'most-loaned',
-  'currently-loaned',
   'top-holders',
 ];
 
@@ -108,8 +107,6 @@ export default async function LeaderboardDetailPage({
           return stmts.topByHighestSalePaged;
         case 'most-loaned':
           return stmts.topByLoansPaged;
-        case 'currently-loaned':
-          return stmts.topActiveLoansPaged;
         default:
           throw new Error(`unhandled type ${type}`);
       }
@@ -159,7 +156,5 @@ function buildInscriptionCursor(
       return `${row.highest_sale_sats}:${num}`;
     case 'most-loaned':
       return `${row.loan_count ?? 0}:${num}`;
-    case 'currently-loaned':
-      return row.loan_funded_at != null ? `${row.loan_funded_at}:${num}` : null;
   }
 }

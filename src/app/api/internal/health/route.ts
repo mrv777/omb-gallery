@@ -17,7 +17,7 @@ const STALE_THRESHOLD_SEC: Record<string, number> = {
   matrica: 2 * 24 * 60 * 60,
   notify: 900,
   loans: 900,
-  loan_escrows: 900,
+  magisat_fp: 900,
 };
 const DEFAULT_STALE_SEC = 600;
 

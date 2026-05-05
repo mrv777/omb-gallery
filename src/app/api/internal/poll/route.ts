@@ -30,8 +30,7 @@ import {
 import { fetchWalletProfile, MatricaError } from '@/lib/matrica';
 import { runNotifyFanout } from '@/lib/notify';
 import { runLoanTick } from '@/lib/loanDetect';
-import { runLoanEscrowTick } from '@/lib/loanEscrowDetect';
-import { bitcoindConfigured } from '@/lib/bitcoind';
+import { runMagisatFingerprintTick } from '@/lib/magisatFingerprintTick';
 import { log } from '@/lib/log';
 
 export const dynamic = 'force-dynamic';
@@ -185,8 +184,8 @@ async function handle(req: NextRequest): Promise<NextResponse> {
       case 'loans':
         result = await safeLoans();
         break;
-      case 'loan-escrows':
-        result = await safeLoanEscrows();
+      case 'magisat-fp':
+        result = await safeMagisatFp();
         break;
       case 'auto':
       default: {
@@ -196,18 +195,20 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         // ?mode=matrica cron at 0 5 * * *.
         //
         // Order matters: ord first (writes new transferred events), then
-        // satflow (upgrades transferred → sold for marketplace fills), then
-        // loans (reclassifies remaining transferred rows that are loan
-        // movements — must run AFTER satflow so we don't reclassify a sale
-        // as a loan). listings is independent. notify last so it sees the
-        // final event_type for each row.
+        // magisat-fp (chain-fingerprint upgrade for Magisat sales — runs
+        // before satflow so the marketplace tag is set in the same tick the
+        // transfer landed). satflow upgrades remaining transferred → sold
+        // for Satflow-API fills. loans reclassifies remaining transferred
+        // rows that are loan movements (must run AFTER satflow so we don't
+        // reclassify a sale as a loan). listings is independent. notify
+        // last so it sees the final event_type for each row.
         const ord = await runOrdTick();
+        const magisatFp = await safeMagisatFp();
         const satflow = await iterateSatflowCollections(onlyCollection, {});
         const listings = await iterateListingsCollections(onlyCollection, { force: false });
         const loans = await safeLoans();
-        const loanEscrows = await safeLoanEscrows();
         const notify = await safeNotify();
-        result = [ord, ...satflow, ...listings, loans, loanEscrows, notify];
+        result = [ord, magisatFp, ...satflow, ...listings, loans, notify];
         break;
       }
     }
@@ -323,17 +324,13 @@ async function safeLoans(): Promise<TickResult> {
   }
 }
 
-async function safeLoanEscrows(): Promise<TickResult> {
-  if (!bitcoindConfigured()) {
-    return { mode: 'loan-escrows', skipped: 'not-configured' };
-  }
+async function safeMagisatFp(): Promise<TickResult> {
   try {
-    const r = await runLoanEscrowTick();
-    return { mode: 'loan-escrows', done: true, ...r } as TickResult;
+    return (await runMagisatFingerprintTick({ live: true })) as TickResult;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    log.error('poll/loan-escrows', 'tick failed', { error: msg });
-    return { mode: 'loan-escrows', error: msg };
+    log.error('poll/magisat-fp', 'tick failed', { error: msg });
+    return { mode: 'magisat-fp', error: msg };
   }
 }
 

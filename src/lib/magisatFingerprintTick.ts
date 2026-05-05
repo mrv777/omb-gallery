@@ -1,0 +1,263 @@
+import 'server-only';
+
+import { getDb, getStmts } from './db';
+import { bitcoindConfigured, getRawTransaction } from './bitcoind';
+import { detectMarketplace, extractSalePriceSats } from './marketplaceFingerprint';
+import { log } from './log';
+
+// Per-tick budget: scan up to this many candidate rows. Sized to keep a tick
+// inside the 30s curl deadline at our prod bitcoind latency (~1-3ms/call over
+// localhost, batched 8-wide = 100 calls in well under a second).
+const PER_TICK_LIMIT = 200;
+const RPC_CONCURRENCY = 8;
+
+const STREAM = 'magisat_fp';
+const COLLECTION = 'omb';
+
+type TickResult = {
+  mode: 'magisat-fp';
+  scanned: number;
+  matched: number;
+  upgraded: number;
+  rpc_failures: number;
+  cursor_advanced: boolean;
+  duration_ms: number;
+  skipped?: 'not-configured' | 'concurrent';
+  error?: string;
+};
+
+/**
+ * Live Magisat sale detector. Walks `transferred` events the ord poll has
+ * just written (cursor = highest event id we've previously checked) and, for
+ * each, fetches the underlying tx and applies the §2.6 fingerprint from
+ * ONCHAIN_TAGGING.md. On match the row is upgraded in place to `sold` with
+ * `marketplace='magisat'` — the row id is preserved, so the activity feed
+ * shows ONE entry that flips type, never a duplicate transfer + sale pair.
+ *
+ * On first run after deploy, cursor is bootstrapped to the current MAX(events.id)
+ * so we don't replay the entire backlog. The historical sweep is the
+ * `scripts/backfill-magisat-fingerprint.js` job.
+ */
+export async function runMagisatFingerprintTick(opts: { live: boolean }): Promise<TickResult> {
+  const startedAt = Date.now();
+  const result: TickResult = {
+    mode: 'magisat-fp',
+    scanned: 0,
+    matched: 0,
+    upgraded: 0,
+    rpc_failures: 0,
+    cursor_advanced: false,
+    duration_ms: 0,
+  };
+
+  if (!bitcoindConfigured()) {
+    return { ...result, skipped: 'not-configured', duration_ms: Date.now() - startedAt };
+  }
+
+  const db = getDb();
+  const stmts = getStmts();
+
+  // Bootstrap or read cursor.
+  const stateRow = db
+    .prepare(`SELECT last_cursor FROM poll_state WHERE stream = ? AND collection_slug = ?`)
+    .get(STREAM, COLLECTION) as { last_cursor: string | null } | undefined;
+
+  let cursor: number;
+  if (!stateRow) {
+    log.warn('poll/magisat-fp', 'poll_state row missing — aborting', { stream: STREAM });
+    return { ...result, error: 'poll-state-row-missing', duration_ms: Date.now() - startedAt };
+  }
+  if (stateRow.last_cursor == null) {
+    // First run: skip historical events. Operators run the backfill script
+    // for those. Cursor jumps to current MAX(id) - 1 so the next tick picks
+    // up anything written after this point.
+    const max = db.prepare(`SELECT COALESCE(MAX(id), 0) AS m FROM events`).get() as {
+      m: number;
+    };
+    cursor = Math.max(0, max.m);
+    db.prepare(
+      `UPDATE poll_state
+          SET last_cursor = @c, last_run_at = unixepoch(), last_status = 'bootstrapped'
+        WHERE stream = @s AND collection_slug = @col`
+    ).run({ c: String(cursor), s: STREAM, col: COLLECTION });
+    log.info('poll/magisat-fp', 'cursor bootstrapped', { cursor });
+    return {
+      ...result,
+      cursor_advanced: true,
+      duration_ms: Date.now() - startedAt,
+    };
+  }
+  cursor = parseInt(stateRow.last_cursor, 10);
+  if (!Number.isFinite(cursor)) cursor = 0;
+
+  // Pull candidate batch. We process strictly in id order so the cursor advance
+  // is always meaningful even when only some matched.
+  const candidates = db
+    .prepare(
+      `SELECT id, txid, old_owner, inscription_number
+         FROM events
+        WHERE id > @cursor
+          AND event_type = 'transferred'
+          AND marketplace IS NULL
+        ORDER BY id ASC
+        LIMIT @lim`
+    )
+    .all({ cursor, lim: PER_TICK_LIMIT }) as Array<{
+    id: number;
+    txid: string;
+    old_owner: string | null;
+    inscription_number: number;
+  }>;
+
+  if (candidates.length === 0) {
+    // Even with no candidates, advance cursor to MAX(id) so we don't re-scan
+    // the same dead range every tick if no transferred-marketplace-null rows
+    // exist past it. Read MAX once; cheap.
+    const max = db.prepare(`SELECT COALESCE(MAX(id), @c) AS m FROM events`).get({ c: cursor }) as {
+      m: number;
+    };
+    if (max.m > cursor) {
+      db.prepare(
+        `UPDATE poll_state
+            SET last_cursor = @c, last_run_at = unixepoch(), last_status = 'idle'
+          WHERE stream = @s AND collection_slug = @col`
+      ).run({ c: String(max.m), s: STREAM, col: COLLECTION });
+      result.cursor_advanced = true;
+    }
+    result.duration_ms = Date.now() - startedAt;
+    return result;
+  }
+
+  // Bounded-concurrency probe.
+  type Probe = {
+    cand: (typeof candidates)[number];
+    marketplace: 'magisat' | null;
+    salePriceSats: number | null;
+    rpcFail: boolean;
+  };
+  const probes: Probe[] = [];
+  let next = 0;
+  async function worker(): Promise<void> {
+    while (next < candidates.length) {
+      const idx = next++;
+      const c = candidates[idx];
+      let tx;
+      try {
+        tx = await getRawTransaction(c.txid);
+      } catch (e) {
+        probes[idx] = { cand: c, marketplace: null, salePriceSats: null, rpcFail: true };
+        log.warn('poll/magisat-fp', 'rpc failed', {
+          inscription_number: c.inscription_number,
+          txid: c.txid,
+          error: e instanceof Error ? e.message : String(e),
+        });
+        continue;
+      }
+      const match = detectMarketplace(tx);
+      if (!match) {
+        probes[idx] = { cand: c, marketplace: null, salePriceSats: null, rpcFail: false };
+        continue;
+      }
+      const price = c.old_owner ? extractSalePriceSats(tx, match, c.old_owner) : null;
+      probes[idx] = {
+        cand: c,
+        marketplace: match.marketplace,
+        salePriceSats: price,
+        rpcFail: false,
+      };
+    }
+  }
+  await Promise.all(Array.from({ length: RPC_CONCURRENCY }, () => worker()));
+
+  result.scanned = candidates.length;
+  for (const p of probes) {
+    if (!p) continue;
+    if (p.rpcFail) {
+      result.rpc_failures++;
+    } else if (p.marketplace === 'magisat') {
+      result.matched++;
+    }
+  }
+
+  // Apply upgrades in a single transaction. Highest-id-among-upgrades does not
+  // determine cursor advance — we always move cursor to the highest scanned id
+  // (matched or not) so a transient RPC failure doesn't endlessly re-poke the
+  // same rows. RPC failures are rare on a co-located bitcoind; if they persist
+  // for a row, the next-tick re-scan covers them by virtue of cursor not
+  // advancing past unscanned rows above this batch.
+  //
+  // Preserve the original raw_json (ord's `{source:'ord', state, enriched}`)
+  // and merge in our annotation under `magisat_fp` via `json_set`. Passing
+  // raw_json=null to upgradeEventToSoldById's COALESCE keeps the row's
+  // existing raw_json untouched at upgrade time, then mergeMagisatFpMeta
+  // applies the annotation on top.
+  const upgrades = probes.filter(p => p && p.marketplace === 'magisat');
+  if (upgrades.length > 0) {
+    const annotateRawJson = db.prepare(
+      `UPDATE events
+          SET raw_json = json_set(COALESCE(raw_json, '{}'), '$.magisat_fp', json(@meta))
+        WHERE id = @id`
+    );
+    const apply = db.transaction(() => {
+      for (const p of upgrades) {
+        const meta = JSON.stringify({
+          source: 'onchain-magisat-fp',
+          extracted_price_sats: p.salePriceSats,
+          matched_at: Math.floor(Date.now() / 1000),
+        });
+        const r = stmts.upgradeEventToSoldById.run({
+          id: p.cand.id,
+          marketplace: 'magisat',
+          sale_price_sats: p.salePriceSats,
+          raw_json: null,
+        });
+        if (r.changes > 0) {
+          annotateRawJson.run({ id: p.cand.id, meta });
+          result.upgraded++;
+          stmts.unbumpTransferOnUpgrade.run({
+            inscription_number: p.cand.inscription_number,
+            sale_price_sats: p.salePriceSats ?? 0,
+          });
+          // Re-enqueue notify only on live ticks so sales-only subscribers can
+          // see the type change. Backfill ticks must not replay history as
+          // fresh alerts (matches the satflow upgrade-path policy).
+          if (opts.live) stmts.enqueueNotify.run(p.cand.id);
+        }
+      }
+    });
+    apply();
+  }
+
+  // Advance cursor to the highest candidate id we examined, even if some were
+  // skipped (rpc fails) — they'll be retried via the backfill script if they
+  // matter. Per-row retry inside the live tick would unbound budget.
+  const newCursor = candidates[candidates.length - 1].id;
+  db.prepare(
+    `UPDATE poll_state
+        SET last_cursor       = @c,
+            last_run_at       = unixepoch(),
+            last_status       = @status,
+            last_event_count  = @upgraded
+      WHERE stream = @s AND collection_slug = @col`
+  ).run({
+    c: String(newCursor),
+    status: result.upgraded > 0 ? 'upgrades' : 'idle',
+    upgraded: result.upgraded,
+    s: STREAM,
+    col: COLLECTION,
+  });
+  result.cursor_advanced = true;
+  result.duration_ms = Date.now() - startedAt;
+
+  if (result.upgraded > 0 || result.rpc_failures > 0) {
+    log.info('poll/magisat-fp', 'tick complete', {
+      scanned: result.scanned,
+      matched: result.matched,
+      upgraded: result.upgraded,
+      rpc_failures: result.rpc_failures,
+      cursor: newCursor,
+      duration_ms: result.duration_ms,
+    });
+  }
+  return result;
+}

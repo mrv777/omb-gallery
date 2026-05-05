@@ -207,7 +207,7 @@ function classifySpendSide(tx: RawTx): Verdict {
   if (!tx || !Array.isArray(tx.vin) || !Array.isArray(tx.vout)) {
     return { kind: 'skip', reason: 'bad-tx' };
   }
-  if (tx.vin.some((v) => v && v.coinbase)) {
+  if (tx.vin.some(v => v && v.coinbase)) {
     return { kind: 'skip', reason: 'coinbase' };
   }
 
@@ -329,9 +329,7 @@ async function traceOrigination(
     return { kind: 'skip', reason: 'bad-orig-tx' };
   }
 
-  const escrowVout = tx.vout.findIndex(
-    (o) => addressFromScriptPubKey(o.scriptPubKey) === escrowAddr
-  );
+  const escrowVout = tx.vout.findIndex(o => addressFromScriptPubKey(o.scriptPubKey) === escrowAddr);
   if (escrowVout < 0) return { kind: 'skip', reason: 'escrow-not-here' };
 
   const inputBy = new Map<string, number>();
@@ -641,7 +639,11 @@ export async function runLoanTick(
     origination: Origination & { inscriptionNumber: number; inscriptionId: string };
     source: 'default' | 'unlock';
   }> = [];
-  const unlocks: Array<{ verdict: UnlockCandidate; events: typeof targets; escrowInfo: EscrowInfo }> = [];
+  const unlocks: Array<{
+    verdict: UnlockCandidate;
+    events: typeof targets;
+    escrowInfo: EscrowInfo;
+  }> = [];
 
   for (const d of defaults) {
     if (overBudget()) break;
@@ -694,7 +696,7 @@ export async function runLoanTick(
 
   // Phase 3: trace repayments for each unlock (best-effort).
   const repayments: Array<{
-    unlockEntry: typeof unlocks[number];
+    unlockEntry: (typeof unlocks)[number];
     repayment: { txid: string; blockTimestamp: number | null; paymentSats: number };
   }> = [];
   for (const u of unlocks) {
@@ -913,7 +915,10 @@ export async function runLoanTick(
 
   const dur = Date.now() - startedAt;
   const budgetExhausted = dur > budgetMs;
-  if (writeStats.defaults + writeStats.originations + writeStats.unlocks + writeStats.repayments > 0) {
+  if (
+    writeStats.defaults + writeStats.originations + writeStats.unlocks + writeStats.repayments >
+    0
+  ) {
     log.info('poll/loans', 'tick complete', {
       scanned,
       defaults: writeStats.defaults,

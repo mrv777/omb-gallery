@@ -8,8 +8,8 @@ A zoomable gallery for showcasing OMB ordinal images plus an on-chain activity f
 
 - **Zoomable gallery**: pinch / scroll / drag to move around, click any inscription to open the modal with arrow-key navigation
 - **Color filter**: red / blue / green / orange / black, with the chosen filter persisted across the activity / explorer surfaces too
-- **Activity feed** (`/activity`): live transfers, sales, listings, and loan events for OMB inscriptions. Backed by an `ord` UTXO-diff poller plus Satflow sale enrichment.
-- **Explorer** (`/explorer`): leaderboards — most-transferred, longest-unmoved, top sale volume, highest single sale, most borrowed against, **currently loaned out** (active Liquidium loan escrows detected on-chain), and top holders.
+- **Activity feed** (`/activity`): live transfers, sales, listings, mints, and loan events for OMB inscriptions. Backed by an `ord` UTXO-diff poller plus on-chain marketplace fingerprinting (Magisat) and Satflow sale enrichment.
+- **Explorer** (`/explorer`): leaderboards — most-transferred, longest-unmoved, top sale volume, highest single sale, most borrowed against, currently loaned out, and top holders.
 - **Slideshow + share**: play a filtered set sequentially or randomly, optionally fullscreen, and mint a shareable short-link to the snapshot.
 - **Notifications**: opt-in Telegram or Discord webhook alerts for per-inscription / per-color / firehose events.
 
@@ -24,7 +24,8 @@ A zoomable gallery for showcasing OMB ordinal images plus an on-chain activity f
 
 ### Prerequisites
 
-- Node.js 18.17 or later
+- Node.js 24 (LTS, pinned via `engines` and used in the production Docker image)
+- pnpm 10.30+ (`corepack enable && corepack prepare pnpm@latest --activate`)
 
 ### Setup
 
@@ -38,7 +39,7 @@ A zoomable gallery for showcasing OMB ordinal images plus an on-chain activity f
 2. Install dependencies:
 
    ```bash
-   npm install
+   pnpm install
    ```
 
 3. Generate optimized thumbnails from `public/images/`:

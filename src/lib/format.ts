@@ -58,6 +58,7 @@ const MARKETPLACE_LABELS: Record<string, string> = {
   'magic-eden': 'Magic Eden',
   magic_eden: 'Magic Eden',
   satflow: 'Satflow',
+  magisat: 'Magisat',
   okx: 'OKX',
   unisat: 'Unisat',
   ordinalswallet: 'Ordinals Wallet',

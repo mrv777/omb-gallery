@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 24;
+const SCHEMA_VERSION = 26;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -156,6 +156,8 @@ function migrate(db: DB): void {
         upgradeV21ToV22(db);
         upgradeV22ToV23(db);
         upgradeV23ToV24(db);
+        upgradeV24ToV25(db);
+        upgradeV25ToV26(db);
       } else {
         initSchemaLatest(db);
       }
@@ -183,6 +185,8 @@ function migrate(db: DB): void {
       if (current < 22) upgradeV21ToV22(db);
       if (current < 23) upgradeV22ToV23(db);
       if (current < 24) upgradeV23ToV24(db);
+      if (current < 25) upgradeV24ToV25(db);
+      if (current < 26) upgradeV25ToV26(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -308,7 +312,7 @@ function initSchemaLatest(db: DB): void {
     -- one batch poll covers every inscription regardless of collection. The
     -- 'matrica' stream is also collection-agnostic — one row keyed to 'omb'.
     CREATE TABLE IF NOT EXISTS poll_state (
-      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica','notify','loans','loan_escrows')),
+      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica','notify','loans','magisat_fp')),
       collection_slug           TEXT NOT NULL REFERENCES collections (slug),
       last_cursor               TEXT,
       last_run_at               INTEGER,
@@ -326,7 +330,7 @@ function initSchemaLatest(db: DB): void {
       ('matrica', 'omb'),
       ('notify', 'omb'),
       ('loans', 'omb'),
-      ('loan_escrows', 'omb');
+      ('magisat_fp', 'omb');
 
     -- Matrica wallet-linking (Phase 5). matrica_users holds one row per
     -- distinct Matrica user we've seen (across any wallet); wallet_links
@@ -364,22 +368,6 @@ function initSchemaLatest(db: DB): void {
       FOREIGN KEY (inscription_number) REFERENCES inscriptions (inscription_number) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_listings_price ON active_listings (price_sats);
-
-    -- Active loan escrow tracking (v22). Inscriptions whose latest movement
-    -- was into a Liquidium-shaped escrow (single-use bc1p, 4-output funding
-    -- tx with vin[0]=P2TR + vout[0]=P2TR). Refreshed by the loan_escrows
-    -- poll mode; rows are removed when the inscription moves off the escrow
-    -- (loan resolution).
-    CREATE TABLE IF NOT EXISTS active_loan_escrows (
-      inscription_number INTEGER PRIMARY KEY,
-      escrow_addr        TEXT    NOT NULL,
-      funding_txid       TEXT    NOT NULL,
-      funded_at          INTEGER NOT NULL,
-      detected_at        INTEGER NOT NULL DEFAULT (unixepoch()),
-      refreshed_at       INTEGER NOT NULL DEFAULT (unixepoch()),
-      FOREIGN KEY (inscription_number) REFERENCES inscriptions (inscription_number) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_ale_funded_at ON active_loan_escrows (funded_at DESC);
 
     -- Rolling counter for Satflow API call quota visibility. Single row.
     CREATE TABLE IF NOT EXISTS satflow_call_budget (
@@ -900,7 +888,7 @@ function upgradeV18ToV19(db: DB): void {
   // (which can happen on prod where v18 was set by the script before this
   // db.ts upgrade existed) is safe.
   const cols = db.pragma('table_info(inscriptions)') as Array<{ name: string }>;
-  const colNames = new Set(cols.map((c) => c.name));
+  const colNames = new Set(cols.map(c => c.name));
   if (!colNames.has('loan_count')) {
     db.exec(`ALTER TABLE inscriptions ADD COLUMN loan_count INTEGER NOT NULL DEFAULT 0`);
   }
@@ -909,7 +897,9 @@ function upgradeV18ToV19(db: DB): void {
   }
   if (!colNames.has('effective_owner')) {
     db.exec(`ALTER TABLE inscriptions ADD COLUMN effective_owner TEXT`);
-    db.exec(`UPDATE inscriptions SET effective_owner = current_owner WHERE effective_owner IS NULL`);
+    db.exec(
+      `UPDATE inscriptions SET effective_owner = current_owner WHERE effective_owner IS NULL`
+    );
   }
   db.exec(`CREATE INDEX IF NOT EXISTS idx_insc_eff_owner ON inscriptions (effective_owner)`);
 }
@@ -1176,6 +1166,134 @@ function upgradeV23ToV24(db: DB): void {
   `);
 }
 
+function upgradeV24ToV25(db: DB): void {
+  // Add the 'magisat_fp' poll stream — cursor for the live Magisat
+  // fingerprint detector that walks new `transferred` events and upgrades
+  // them to `sold` + marketplace='magisat' when the on-chain fingerprint
+  // matches (ONCHAIN_TAGGING.md §2.6).
+  //
+  // SQLite can't ALTER a CHECK in place — copy-and-swap, same pattern as
+  // v6 / v9 / v12 / v14 / v20 / v22.
+  //
+  // Cursor bootstrap: leave last_cursor NULL so the first live tick jumps to
+  // current MAX(events.id) instead of replaying 36k+ historical transferred
+  // rows. Operators run scripts/backfill-magisat-fingerprint.js for the
+  // historical sweep.
+  db.exec(`
+    CREATE TABLE poll_state_v25 (
+      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica','notify','loans','loan_escrows','magisat_fp')),
+      collection_slug           TEXT NOT NULL REFERENCES collections (slug),
+      last_cursor               TEXT,
+      last_run_at               INTEGER,
+      last_status               TEXT,
+      last_event_count          INTEGER,
+      is_backfilling            INTEGER NOT NULL DEFAULT 0,
+      last_known_height         INTEGER,
+      backfill_unresolved_seen  INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (stream, collection_slug)
+    );
+    INSERT INTO poll_state_v25 SELECT * FROM poll_state;
+    DROP TABLE poll_state;
+    ALTER TABLE poll_state_v25 RENAME TO poll_state;
+    INSERT OR IGNORE INTO poll_state (stream, collection_slug) VALUES ('magisat_fp', 'omb');
+  `);
+}
+
+function upgradeV25ToV26(db: DB): void {
+  // Phase 7 teardown + onchain-coop-heuristic revert.
+  //
+  // Per ONCHAIN_TAGGING.md §7.1 / §7.3 — "tear out anything we are not sure
+  // about" — this migration:
+  //
+  //   1. Reverts the 5,085 `onchain-coop-heuristic` `sold` events back to
+  //      `transferred` and clears their marketplace + sale_price_sats. The
+  //      Layer 2 cooperative-sale detector had at least one verified false
+  //      positive (#83309450) and structural shape between real cooperative
+  //      sales and coincidental flows can't be separated on-chain. Stamps
+  //      raw_json.source = 'reverted-from-coop-heuristic' for traceability so
+  //      we can audit how many real sales we lost if we ever revisit.
+  //
+  //   2. Drops `active_loan_escrows` (Phase 7) entirely. ONCHAIN_TAGGING.md
+  //      §2.3 proves there is no on-chain detection rule for currently-active
+  //      Liquidium loans — the previous detector populated 32 false positives.
+  //      The /explorer/currently-loaned route, loan-escrows poll mode, and
+  //      loanEscrowDetect.ts are removed in the same commit.
+  //
+  //   3. Removes 'loan_escrows' from poll_state.stream CHECK + drops the row.
+  //
+  //   4. Recomputes per-inscription aggregates so transfer_count, sale_count,
+  //      total_volume_sats, and highest_sale_sats reflect the reverted rows.
+  //      Single-pass GROUP BY + UPDATE...FROM (same shape as v24).
+  //
+  // Cleanup of the 3 historical loan-* events with non-Liquidium internal
+  // pubkeys (§7.2) is handled out-of-band by `scripts/cleanup-non-liquidium-
+  // loans.js` because identifying them requires bitcoind RPC to re-check each
+  // event's witness — not safe inside a sync migration.
+
+  db.exec(`
+    UPDATE events
+       SET event_type      = 'transferred',
+           marketplace     = NULL,
+           sale_price_sats = NULL,
+           raw_json        = json_set(
+             COALESCE(raw_json, '{}'),
+             '$.source',      'reverted-from-coop-heuristic',
+             '$.reverted_at', unixepoch(),
+             '$.prior_source','onchain-coop-heuristic'
+           )
+     WHERE event_type = 'sold'
+       AND json_extract(raw_json, '$.source') = 'onchain-coop-heuristic';
+  `);
+
+  db.exec(`DROP TABLE IF EXISTS active_loan_escrows;`);
+
+  db.exec(`
+    CREATE TABLE poll_state_v26 (
+      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica','notify','loans','magisat_fp')),
+      collection_slug           TEXT NOT NULL REFERENCES collections (slug),
+      last_cursor               TEXT,
+      last_run_at               INTEGER,
+      last_status               TEXT,
+      last_event_count          INTEGER,
+      is_backfilling            INTEGER NOT NULL DEFAULT 0,
+      last_known_height         INTEGER,
+      backfill_unresolved_seen  INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (stream, collection_slug)
+    );
+    INSERT INTO poll_state_v26
+      SELECT * FROM poll_state WHERE stream != 'loan_escrows';
+    DROP TABLE poll_state;
+    ALTER TABLE poll_state_v26 RENAME TO poll_state;
+  `);
+
+  // Recompute aggregates for every inscription whose row count changed.
+  // Affected = inscriptions referenced by any reverted event. Cheaper to
+  // simply recompute over every inscription that has at least one event,
+  // since v25→v26 only runs once and the aggregate query is bounded.
+  db.exec(`
+    WITH agg AS (
+      SELECT e.inscription_number                                                       AS num,
+             SUM(CASE WHEN e.event_type = 'transferred' THEN 1 ELSE 0 END)              AS xfer,
+             SUM(CASE WHEN e.event_type = 'sold'        THEN 1 ELSE 0 END)              AS sold_n,
+             COALESCE(SUM(CASE WHEN e.event_type='sold' THEN e.sale_price_sats END),0)  AS vol,
+             COALESCE(MAX(CASE WHEN e.event_type='sold' THEN e.sale_price_sats END),0)  AS hi
+      FROM events e
+      WHERE e.inscription_number IN (
+        SELECT DISTINCT inscription_number FROM events
+         WHERE json_extract(raw_json, '$.source') = 'reverted-from-coop-heuristic'
+      )
+      GROUP BY e.inscription_number
+    )
+    UPDATE inscriptions
+       SET transfer_count    = agg.xfer,
+           sale_count        = agg.sold_n,
+           total_volume_sats = agg.vol,
+           highest_sale_sats = agg.hi
+      FROM agg
+     WHERE inscriptions.inscription_number = agg.num;
+  `);
+}
+
 function upgradeV15ToV16(db: DB): void {
   // Phase 6.1: extend events.event_type CHECK to allow 'listed' so the
   // listings poll can emit fan-out-eligible rows. SQLite can't ALTER a CHECK
@@ -1385,14 +1503,6 @@ type Stmts = {
   topByHighestSale: ReturnType<DB['prepare']>;
   topByLoans: ReturnType<DB['prepare']>;
   topHolders: ReturnType<DB['prepare']>;
-  // Active loan escrow tracking
-  findActiveLoanEscrowCandidates: ReturnType<DB['prepare']>;
-  getActiveLoanEscrow: ReturnType<DB['prepare']>;
-  upsertActiveLoanEscrow: ReturnType<DB['prepare']>;
-  deleteActiveLoanEscrow: ReturnType<DB['prepare']>;
-  expireResolvedLoanEscrows: ReturnType<DB['prepare']>;
-  topActiveLoans: ReturnType<DB['prepare']>;
-  topActiveLoansPaged: ReturnType<DB['prepare']>;
   // leaderboards (cursor-paginated, with stable secondary sort by
   // inscription_number for keyset pagination on the /explorer/[type] detail
   // pages).
@@ -2384,126 +2494,6 @@ export function getStmts(): Stmts {
       LIMIT @limit
     `),
 
-    // Top lenders: wallets that have funded the most loan-originated events.
-    // Mirrors topHoldersGrouped's Matrica-collapse so a lender with several
-    // funding wallets surfaces as one identity. The lender address lives in
-    // raw_json.lender_addr (set by both the live runtime and the historical
-    // backfill). `inscription_count` here is the loan count — reusing the
-    // ApiHolder column name keeps the rendering pipeline unchanged.
-    // Active loan escrow detection. Pulls candidates: inscriptions whose
-    // current_owner is a single-use bc1p (received once, never spent), the
-    // inscription is parked at that bc1p, and the latest movement was within
-    // the detection window (30d default — Liquidium's max term). The detector
-    // then probes each candidate's funding tx via bitcoind to verify the
-    // Liquidium-canonical shape (vin[0] P2TR + vout[0] P2TR + n_out=4) before
-    // upserting into active_loan_escrows.
-    findActiveLoanEscrowCandidates: db.prepare(`
-      WITH addr_stats AS (
-        SELECT new_owner AS addr,
-               (SELECT COUNT(*) FROM events WHERE new_owner = e.new_owner) AS recv_n,
-               (SELECT COUNT(*) FROM events WHERE old_owner = e.new_owner) AS sent_n
-        FROM events e WHERE e.new_owner LIKE 'bc1p%' GROUP BY e.new_owner
-      ),
-      latest_in AS (
-        SELECT e.inscription_number, e.new_owner, e.txid, e.block_timestamp, e.event_type,
-               ROW_NUMBER() OVER (PARTITION BY e.inscription_number ORDER BY e.block_height DESC, e.id DESC) AS rn
-        FROM events e
-        JOIN inscriptions i ON i.inscription_number = e.inscription_number
-        WHERE e.event_type IN ('transferred','sold')
-          AND i.collection_slug = 'omb'
-          AND e.new_owner LIKE 'bc1p%'
-          AND e.new_owner = i.current_owner
-          AND e.block_timestamp > @cutoff
-      )
-      -- Only the latest event in the window is considered. If that event is
-      -- 'sold', the destination is a buyer (not a loan escrow) — exclude.
-      -- A loan origination always lands as 'transferred' (no sale price).
-      SELECT li.inscription_number,
-             li.new_owner   AS escrow_addr,
-             li.txid        AS funding_txid,
-             li.block_timestamp AS funded_at
-      FROM latest_in li
-      JOIN addr_stats s ON s.addr = li.new_owner
-      WHERE li.rn = 1
-        AND li.event_type = 'transferred'
-        AND s.recv_n = 1
-        AND s.sent_n = 0
-    `),
-
-    getActiveLoanEscrow: db.prepare(`
-      SELECT * FROM active_loan_escrows WHERE inscription_number = @inscription_number
-    `),
-
-    upsertActiveLoanEscrow: db.prepare(`
-      INSERT INTO active_loan_escrows (inscription_number, escrow_addr, funding_txid, funded_at, refreshed_at)
-      VALUES (@inscription_number, @escrow_addr, @funding_txid, @funded_at, @now)
-      ON CONFLICT(inscription_number) DO UPDATE SET
-        escrow_addr  = excluded.escrow_addr,
-        funding_txid = excluded.funding_txid,
-        funded_at    = excluded.funded_at,
-        refreshed_at = excluded.refreshed_at
-    `),
-
-    deleteActiveLoanEscrow: db.prepare(`
-      DELETE FROM active_loan_escrows WHERE inscription_number = @inscription_number
-    `),
-
-    // Expire any active_loan_escrows row that's no longer a candidate. The
-    // candidate set is "single-use bc1p, inscription still parked, last
-    // movement within 30d." If the inscription has moved off the escrow
-    // (loan resolved) it'll be missing from the candidate set on this tick.
-    expireResolvedLoanEscrows: db.prepare(`
-      DELETE FROM active_loan_escrows
-      WHERE inscription_number NOT IN (
-        SELECT li.inscription_number FROM (
-          SELECT e.inscription_number, e.new_owner, e.event_type,
-                 ROW_NUMBER() OVER (PARTITION BY e.inscription_number ORDER BY e.block_height DESC, e.id DESC) AS rn
-          FROM events e
-          JOIN inscriptions i ON i.inscription_number = e.inscription_number
-          WHERE e.event_type IN ('transferred','sold')
-            AND i.collection_slug = 'omb'
-            AND e.new_owner LIKE 'bc1p%'
-            AND e.new_owner = i.current_owner
-            AND e.block_timestamp > @cutoff
-        ) li
-        JOIN (
-          SELECT new_owner AS addr,
-                 (SELECT COUNT(*) FROM events WHERE new_owner = e.new_owner) AS recv_n,
-                 (SELECT COUNT(*) FROM events WHERE old_owner = e.new_owner) AS sent_n
-          FROM events e WHERE e.new_owner LIKE 'bc1p%' GROUP BY e.new_owner
-        ) s ON s.addr = li.new_owner
-        WHERE li.rn = 1 AND li.event_type = 'transferred' AND s.recv_n = 1 AND s.sent_n = 0
-      )
-    `),
-
-    // Currently-loaned leaderboard (overview). Joins inscriptions to
-    // active_loan_escrows; ordered by funded_at DESC so freshest loans
-    // surface first.
-    topActiveLoans: db.prepare(`
-      SELECT i.*, ale.funded_at AS loan_funded_at, ale.escrow_addr AS loan_escrow_addr
-      FROM inscriptions i
-      JOIN active_loan_escrows ale ON ale.inscription_number = i.inscription_number
-      WHERE i.collection_slug = @collection
-        AND (@color IS NULL OR i.color = @color)
-      ORDER BY ale.funded_at DESC, i.inscription_number ASC
-      LIMIT @limit
-    `),
-
-    topActiveLoansPaged: db.prepare(`
-      SELECT i.*, ale.funded_at AS loan_funded_at, ale.escrow_addr AS loan_escrow_addr
-      FROM inscriptions i
-      JOIN active_loan_escrows ale ON ale.inscription_number = i.inscription_number
-      WHERE i.collection_slug = @collection
-        AND (@color IS NULL OR i.color = @color)
-        AND (
-          @cursor_primary IS NULL
-          OR ale.funded_at < @cursor_primary
-          OR (ale.funded_at = @cursor_primary AND i.inscription_number > @cursor_secondary)
-        )
-      ORDER BY ale.funded_at DESC, i.inscription_number ASC
-      LIMIT @limit
-    `),
-
     // Count distinct identities (Matrica user OR raw wallet). Replaces the
     // raw-wallet countHolders for the explorer's "N holders" stat once we
     // wire it up.
@@ -2793,7 +2783,15 @@ export type EventRow = {
   id: number;
   inscription_id: string;
   inscription_number: number;
-  event_type: 'inscribed' | 'transferred' | 'sold' | 'mint' | 'loan-originated' | 'loan-defaulted' | 'loan-repaid' | 'loan-unlocked';
+  event_type:
+    | 'inscribed'
+    | 'transferred'
+    | 'sold'
+    | 'mint'
+    | 'loan-originated'
+    | 'loan-defaulted'
+    | 'loan-repaid'
+    | 'loan-unlocked';
   block_height: number | null;
   block_timestamp: number;
   new_satpoint: string | null;
@@ -2823,9 +2821,6 @@ export type InscriptionRow = {
   loan_count: number;
   active_loan_count: number;
   effective_owner: string | null;
-  /** Joined from active_loan_escrows on the topActiveLoans queries; undefined elsewhere. */
-  loan_funded_at?: number;
-  loan_escrow_addr?: string;
 };
 
 export type ActiveListingRow = {

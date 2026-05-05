@@ -52,8 +52,6 @@ export type ApiInscription = {
   highest_sale_sats: number;
   loan_count?: number;
   active_loan_count?: number;
-  loan_funded_at?: number;
-  loan_escrow_addr?: string;
 };
 
 /** One identity in the top-holders leaderboard. When `is_user`, multiple
