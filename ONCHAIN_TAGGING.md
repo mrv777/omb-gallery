@@ -172,6 +172,8 @@ Ten user-flagged Magic Eden OMB sales spanning blocks 796440 (~2023-05) → 8863
 - **ACP shape:** SIGHASH_SINGLE commits input N's signature to output N. Sum `vout[N].value` for each ACP input N whose prevout address equals `events.old_owner`. Same logic as Magisat.
 - **Cooperative shape:** the fixed layout puts the seller payment at `vout[feeVoutIdx - 1]` across every fixture in §6.6 — read directly. Returns null when the implied index points at the inscription destination (`vout[0]`) — that's the no-payment delivery-leg shape (#11273300, refuted §6.5), not a real sale, and we mustn't tag a price.
 
+**Cooperative null-price upgrade gate (added 2026-05-05).** A cooperative match where `extractSalePriceSats` returns null is structurally indistinguishable from the no-payment delivery-leg case: ME fee output is present, but no BTC actually flows to the seller in this tx. The live tick (`src/lib/magicEdenFingerprintTick.ts`) and the historical backfill (`scripts/backfill-magic-eden-fingerprint.js`) both **skip the upgrade** in that case — the row stays `transferred` with `marketplace=NULL`. The ACP shape always tags regardless of price (per-input SIGHASH_SINGLE binds the fee address cryptographically to a real listing PSBT). This narrows the cooperative path's recall on a hypothetical bulk-buy where price is unknowable per-inscription (no such fixtures in our §6.6 corpus); precision wins over recall here. Reverted-row cleanup is `scripts/revert-magic-eden-coop-no-price.js` (see §7.7).
+
 **Secondary fee address `3P4WqXDbSLRhzo2H6MT6YFbvBKBDPLbVtQ` (P2SH) — promoted 2026-05-05.** Initial promotion of the primary fee address left this address in candidate state (only 2 user-confirmed TPs). A targeted on-chain probe across all 36k unique candidate txids found:
 
 - **2,163 txs carry this address**, all matching the ME PSBT shapes from §2.10 (4-in/7-out ACP, 2-in/4-out / 2-in/3-out cooperative, plus a handful of multi-inscription bulk buys).
@@ -489,6 +491,20 @@ pnpm backfill-magic-eden-fingerprint
 ```
 
 Use `pnpm backfill-magic-eden-fingerprint -- --dry-run` first to preview. Required env: `BITCOIN_RPC_URL`, `OMB_DB_PATH` (default `/data/app.db`). Upgrades `transferred` rows in place to `sold` with `marketplace='magic-eden'`, extracts `sale_price_sats` per the §2.10 shape rules, recomputes per-inscription `transfer_count` / `sale_count` / `total_volume_sats` / `highest_sale_sats`. Skips rows already tagged with a non-ME marketplace (logs the count but doesn't touch them). Idempotent — safe to re-run. Notify queue is **not** enqueued for backfilled rows (matches the §7.4/§7.5 policy).
+
+### 7.7 Magic Eden cooperative no-payment revert — RAN 2026-05-05
+
+The initial §2.10 backfill upgraded any `transferred` row whose tx matched the cooperative shape (ME fee output + no ACP signatures), even when `extractSalePriceSats` returned null. In practice, every observed null-price cooperative tx is the no-payment delivery-leg pattern (#11273300, §6.5): ME fee output is present but no BTC actually flows to the seller — not a sale. User spot-check on `bc1ps2gh7q…vnw` surfaced this. 3,768 rows across 2,471 inscriptions were mistakenly flipped to `sold + marketplace='magic-eden'`.
+
+Fix shipped in two parts:
+
+1. **Code gate** in `src/lib/magicEdenFingerprintTick.ts` and `scripts/backfill-magic-eden-fingerprint.js`: skip the upgrade when `match.shape === 'cooperative' && extractedPrice == null && existing sale_price_sats == null`. Cooperative rows where another path (ord-net, satflow) already supplied a trusted price stay tagged.
+2. **Cleanup** via `pnpm revert-magic-eden-coop-no-price` (one-shot). Selection: `event_type='sold' AND marketplace='magic-eden' AND sale_price_sats IS NULL AND raw_json.magic_eden_fp.shape='cooperative'`. Per row: flips back to `transferred`, clears marketplace, decrements `inscriptions.sale_count` / increments `transfer_count` (volume/highest unaffected since price was null), drops the matching `notify_pending` entry. Annotates `raw_json` with `source='reverted-from-magic-eden-fp'`, `prior_*` fields, `revert_reason='me-coop:no-extractable-payment'`. Idempotent — once flipped, the WHERE filter excludes the row.
+
+```bash
+pnpm revert-magic-eden-coop-no-price            # dry-run
+pnpm revert-magic-eden-coop-no-price -- --apply # commit
+```
 
 ## 8. How to add a new tagging rule
 

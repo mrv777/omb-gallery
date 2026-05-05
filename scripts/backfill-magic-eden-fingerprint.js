@@ -308,6 +308,21 @@ async function main() {
       let priceSats = ev.old_owner ? extractPriceSats(tx, match, ev.old_owner) : null;
       const isBulk = bulkTxids.has(ev.txid);
       if (isBulk) priceSats = null;
+      // Cooperative shape with no extractable seller payment is the
+      // no-payment delivery-leg pattern (#11273300, ONCHAIN_TAGGING.md §6.5):
+      // the fee output is present but no BTC actually flows to the seller in
+      // this tx, so it isn't a sale. Skip — leave the row as-is. We only
+      // skip when the existing column also has no price; if some other path
+      // (ord-net, satflow) already provided sale_price_sats, that's a real
+      // sale and we just can't extract per-tx — keep tagging as ME.
+      if (match.shape === 'cooperative' && priceSats == null && ev.sale_price_sats == null) {
+        if (ARGS.verbose) {
+          console.log(
+            `[magic-eden-fp] SKIP-NO-PAYMENT insc=${ev.inscription_number} tx=${ev.txid.slice(0, 12)} shape=cooperative`
+          );
+        }
+        continue;
+      }
       const meta = JSON.stringify({
         source: 'onchain-magic-eden-fp',
         shape: match.shape,

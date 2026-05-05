@@ -181,6 +181,16 @@ export async function runMagicEdenFingerprintTick(opts: { live: boolean }): Prom
       }
       let price = c.old_owner ? extractSalePriceSats(tx, match, c.old_owner) : null;
       if (bulkTxids.has(c.txid)) price = null;
+      // Cooperative shape with no extractable seller payment is the
+      // no-payment delivery-leg pattern (#11273300, ONCHAIN_TAGGING.md §6.5):
+      // ME fee output is present but no BTC actually flows to the seller, so
+      // the tx isn't a sale. Leave as `transferred`. ACP shape stays trusted
+      // even without a price match (per-input SIGHASH_SINGLE binds the fee
+      // address to a real listing PSBT cryptographically).
+      if (match.shape === 'cooperative' && price == null) {
+        probes[idx] = { cand: c, marketplace: null, salePriceSats: null, rpcFail: false };
+        continue;
+      }
       probes[idx] = {
         cand: c,
         marketplace: match.marketplace,
