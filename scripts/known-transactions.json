@@ -216,6 +216,104 @@
       "tags": ["sale", "magisat", "fingerprint-tp"]
     },
     {
+      "txid": "217789a1f411ebfcbdb562541cf751d90220e8b4c7de08e0fa2fdfdc0da143cc",
+      "inscription_number": 10610550,
+      "expected_type": "sold",
+      "expected_marketplace": "magic-eden",
+      "sale_price_sats": 32745500,
+      "description": "Magic Eden sale of #10610550 (block 796440, ~2023-05). Modern ME PSBT listing shape: 4-in/7-out, vin[0..1] buyer dummy P2SH 600-sat utxos, vin[2] inscription P2TR with schnorr 0x83 (SIGHASH_SINGLE|ANYONECANPAY), vin[3] buyer funding. vout[3]=bc1qcq2uv5nk6hec6kvag3wyevp6574qmsm9scjxc2 ME fee (822,500 sats ≈ 2.51%). Earliest fixture for the modern fee address. ONCHAIN_TAGGING.md §2.10.",
+      "tags": ["sale", "magic-eden", "fingerprint-tp", "shape-acp-7out"]
+    },
+    {
+      "txid": "1f2f75c03f2ef731286c7b96f4d62d12135c674b17747d86d2fd9ba6efce4630",
+      "inscription_number": 10611504,
+      "expected_type": "sold",
+      "expected_marketplace": "magic-eden",
+      "sale_price_sats": 34835000,
+      "description": "Magic Eden sale of #10611504 (block 796750, ~2023-05). Modern ME PSBT listing shape: 4-in/7-out, ACP signature on vin[2] inscription, vout[3] ME fee 875,000 sats (~2.51%). First of two recorded ME sales for this inscription.",
+      "tags": ["sale", "magic-eden", "fingerprint-tp", "shape-acp-7out"]
+    },
+    {
+      "txid": "8c20f030cf9f5612875cdc338fcfc9d23fb6da93553842181f33e902c4efdd55",
+      "inscription_number": 10611504,
+      "expected_type": "sold",
+      "expected_marketplace": "magic-eden",
+      "sale_price_sats": 39710500,
+      "description": "Magic Eden re-sale of #10611504 (block 796923, ~2023-05). Modern ME PSBT listing shape: 4-in/7-out, ACP signature on vin[2], vout[3] ME fee 997,500 sats (~2.51%). Note vout[1]=bc1ps2gh7q...79vnw matches vin[2] of the previous sale (1f2f75c0...) — same buyer relisted and re-sold within ~3 days.",
+      "tags": ["sale", "magic-eden", "fingerprint-tp", "shape-acp-7out", "relisted-quickly"]
+    },
+    {
+      "txid": "067e6a26db80546ff1c1ec3f434c31411f1c936f3d42370db11a78300bc98f00",
+      "inscription_number": 10827825,
+      "expected_type": "sold",
+      "expected_marketplace": "magic-eden",
+      "sale_price_sats": 37820000,
+      "description": "Magic Eden sale of #10827825 (block 798149, ~2023-06). Modern ME PSBT listing shape: 4-in/7-out, ACP signature on vin[2], vout[3] ME fee 950,000 sats (~2.51%).",
+      "tags": ["sale", "magic-eden", "fingerprint-tp", "shape-acp-7out"]
+    },
+    {
+      "txid": "154ea6484dc569217ca4e85bd2106ec0dcd1a7142e9d3ee9e01f83dbc79316a2",
+      "inscription_number": 11183491,
+      "expected_type": "sold",
+      "expected_marketplace": "magic-eden",
+      "sale_price_sats": 27870000,
+      "description": "Magic Eden sale of #11183491 (block 798599, ~2023-06). Modern ME PSBT listing shape: 6-in/7-out variant (extra buyer-funded P2SH inputs), ACP signature on vin[2] inscription, vout[3] ME fee 700,000 sats (~2.51%). Earliest ME fee-rate fixture matching the 2.5% norm.",
+      "tags": ["sale", "magic-eden", "fingerprint-tp", "shape-acp-7out"]
+    },
+    {
+      "txid": "5793cc95580a34809ff8681cff157acc1295e9a5a15b01451ef524d48dad4fc8",
+      "inscription_number": 83315561,
+      "expected_type": "sold",
+      "expected_marketplace": "magic-eden",
+      "sale_price_sats": 4179900,
+      "description": "Magic Eden sale of #83315561 (block 886371, ~2024-09). Modern ME PSBT listing shape: 4-in/7-out, vin[2] inscription P2TR with schnorr 0x83 ACP, vout[3] ME fee 105,000 sats (~2.51%). Most recent ME fixture; fee address still bc1qcq2uv5n...m9scjxc2 in 2024-09 → ≥16-month tenure since block 796440.",
+      "tags": ["sale", "magic-eden", "fingerprint-tp", "shape-acp-7out"]
+    },
+    {
+      "txid": "1d3f7c1fbdd8e025e068b37436e2dfa4361371d2dfca68279bb063678abde7f7",
+      "inscription_number": 83295649,
+      "expected_type": "sold",
+      "expected_marketplace": "magic-eden",
+      "sale_price_sats": 5880900,
+      "description": "Magic Eden sale of #83295649 (block 885624, ~2024-09). Cooperative SIGHASH_ALL flow (2-in/4-out): vin[0] inscription P2TR signed schnorr SIGHASH_DEFAULT (0x00), vin[1] buyer P2WPKH funding, vout[1] seller P2SH 5,880,900, vout[2] ME fee bc1qcq2uv5n...m9scjxc2 150,000 sats (~2.55%), vout[3] buyer change. User-suspected accept-offer (seller-initiated atomic settle); cannot prove offer-vs-listing direction from chain alone.",
+      "tags": ["sale", "magic-eden", "fingerprint-tp", "shape-coop-4out", "user-suspected-accept-offer"]
+    },
+    {
+      "txid": "a97b3ccd791140494cbdf920a60002e3398d1b863a6d99a5b4b4a99ac05c8538",
+      "inscription_number": 83296358,
+      "expected_type": "sold",
+      "expected_marketplace": "magic-eden",
+      "sale_price_sats": 6992900,
+      "description": "Magic Eden sale of #83296358 (block 885756, ~2024-09). Cooperative SIGHASH_ALL flow (2-in/4-out): vin[0] inscription P2TR signed SIGHASH_DEFAULT, vin[1] buyer P2WPKH (same buyer wallet as #83295649). vout[1] seller P2TR 6,992,900 — destination address equals vin[0] address (seller paid back to same address that held the inscription, characteristic of accept-offer flow). vout[2] ME fee 178,750 sats (~2.55%).",
+      "tags": ["sale", "magic-eden", "fingerprint-tp", "shape-coop-4out", "seller-self-payout"]
+    },
+    {
+      "txid": "aeab14bbd42561d8011336747010a930102e74daf2d6ffae63f3ace304cffe61",
+      "inscription_number": 213924,
+      "expected_type": "sold",
+      "expected_marketplace": "magic-eden",
+      "sale_price_sats": 284210000,
+      "description": "Magic Eden sale of #213924 (block 832583, ~2024-03). Cooperative SIGHASH_ALL flow (8-in/4-out): vin[0] inscription P2TR signed schnorr SIGHASH_ALL (0x01), vin[1..7] all from same buyer P2WPKH (multi-utxo consolidation to fund 2.84 BTC sale). vout[1] seller P2SH 284,210,000, vout[2] ME fee P2SH 3P4WqXDbSLRhzo2H6MT6YFbvBKBDPLbVtQ 7,250,000 sats (~2.55%). Older fee-address era (P2SH not P2WPKH); 3P4Wq... is a CANDIDATE secondary fingerprint and is NOT promoted to live-tag yet.",
+      "tags": ["sale", "magic-eden", "fingerprint-tp-secondary", "shape-coop-multiin", "older-p2sh-fee-3p4wq"]
+    },
+    {
+      "txid": "b41008e15cff4de04453d828802e9ded1fbf86b321cd808635907e8245599e9e",
+      "inscription_number": 60563128,
+      "expected_type": "sold",
+      "expected_marketplace": "magic-eden",
+      "sale_price_sats": 107504059,
+      "description": "Magic Eden sale of #60563128 (block 835705, ~2024-04). Cooperative SIGHASH_ALL flow (2-in/4-out): vin[0] inscription P2TR signed SIGHASH_ALL, vin[1] buyer P2SH 130M sats. vout[1] seller P2SH 107,504,059, vout[2] ME fee P2SH 3P4WqXDbSLRhzo2H6MT6YFbvBKBDPLbVtQ 2,742,425 sats (~2.55%). Older fee-address era; user-suspected accept-offer. Same secondary candidate fee address as #213924.",
+      "tags": ["sale", "magic-eden", "fingerprint-tp-secondary", "shape-coop-4out", "older-p2sh-fee-3p4wq", "user-suspected-accept-offer"]
+    },
+    {
+      "txid": "ee5e21593176efc432d88d5a0ec74afab5265670c036861b54dada4a22b87235",
+      "inscription_number": 11273300,
+      "expected_type": "transferred",
+      "expected_marketplace": null,
+      "description": "User-flagged ME buy of #11273300 (block 932122) but on-chain shape (2-in/2-out, no fee output, no seller payment, only buyer paying 840 sats fee) is structurally NOT a complete sale. Most likely the inscription-delivery leg of an accept-offer flow whose BTC payment moved in a separate sibling tx. ME UI no longer accessible to verify, so this fixture is recorded as a fingerprint-miss / unverifiable counterexample, NOT a true positive.",
+      "tags": ["transfer", "magic-eden-flagged", "fingerprint-miss", "delivery-leg-only", "unverifiable"]
+    },
+    {
       "txid": "7b4855e7dfb1515ab231af9fd619cec2fa19e0302ba5033d0996c29395042bed",
       "inscription_number": 11523618,
       "expected_type": "loan-originated",
@@ -956,6 +1054,7 @@
     "escrow_pattern": "Escrow addresses are taproot outputs (bc1p...) created in origination txs. The taproot commits to two spend paths: key-path (borrower, for unlock) and script-path with CSV timelock (lender, for default claim).",
     "not_a_sale": "These loan transactions are NOT sales. The existing sales heuristic correctly skips them (cooperative layer finds no external outputs). The loan heuristic tags them as distinct event types to avoid confusion with marketplace sales.",
     "magisat_fingerprint": "Magisat sales are detected by the on-chain fingerprint in src/lib/marketplaceFingerprint.ts: any vout with address 3Ke21osfhEbEryUeqdwAuAY8VKxm5B9uB2 (P2SH fee) AND ≥1 vin with a 65-byte schnorr signature ending in 0x83 (SIGHASH_SINGLE | ANYONECANPAY). 14 TPs plus confirmed TNs in this corpus. Full design + price-extraction rule in ONCHAIN_TAGGING.md §2.7.",
+    "magic_eden_fingerprint_candidate": "Ten user-flagged Magic Eden OMB sales spanning blocks 796440 (2023-05) → 886371 (2024-09) all carry a fee output to bc1qcq2uv5nk6hec6kvag3wyevp6574qmsm9scjxc2 (P2WPKH, ~2.5% of seller payment). Two on-chain shapes share this fee address: (1) modern PSBT listing — 4-in/7-out with vin[2] inscription P2TR signed schnorr 0x83 (SIGHASH_SINGLE|ANYONECANPAY), structurally the same as Magisat but with a different fee address (mutual exclusion verified against 3 sampled Magisat fixtures); and (2) cooperative SIGHASH_ALL — 2-in/4-out (and an 8-in variant) where the inscription input is signed SIGHASH_ALL/DEFAULT and both parties co-sign atomically, plausibly the buy-now or accept-offer codepath. A SECONDARY candidate fee address 3P4WqXDbSLRhzo2H6MT6YFbvBKBDPLbVtQ (P2SH) appears in two spring-2024 fixtures (#213924, #60563128) and is NOT promoted yet — could be a pre-rotation ME fee splitter or an unrelated royalty router; needs more spring-2024 ME fixtures to disambiguate. Counter-example: #11273300 was user-flagged as a Magic Eden buy but the tx has no fee output and no seller payment, almost certainly the inscription-delivery leg of an offer accept whose BTC moved in a sibling tx — recorded as a fingerprint-miss. ONCHAIN_TAGGING.md §2.10 documents the candidate rule; not yet promoted to chain-fingerprint or wired into live tagging.",
     "liquidium_internal_pubkey": "Phase 4 loan-resolution detection requires the spend's control-block internal pubkey to equal 93674766caa3db9c0f63c4b74f302510c509d6d0ffac9d67214d8f03cb2ed27a. Single-leaf tap-trees with other internal pubkeys (e.g. 428a... in 3bd09bfc) are NOT Liquidium and the v3 detector rejects them. See ONCHAIN_TAGGING.md §2.2 + §4.5.",
     "liquidium_modern_origination_candidate": "Twenty-nine user-verified Liquidium OMB loans from 2026 match a narrow instant-loan origination shape: vin[0] spends the inscription P2TR, vin[1..] spend one recurring P2WSH 1-of-2 lender vault, vout[0] keeps the inscription value in a new P2TR collateral holder, vout[1] pays bc1papmpmu0...59se9u, vout[2] pays borrower principal to P2SH, and vout[3] returns lender-vault change. Fifteen additional user-verified loans match close variants: P2SH/P2WPKH/P2TR principal-output variants with the same fee and lender-vault family. This is a candidate fingerprint only; do not live-tag variants until confirmed true negatives or a conservative production policy are added."
   }

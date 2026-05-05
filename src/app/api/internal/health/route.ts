@@ -18,6 +18,7 @@ const STALE_THRESHOLD_SEC: Record<string, number> = {
   notify: 900,
   loans: 900,
   magisat_fp: 900,
+  magic_eden_fp: 900,
 };
 const DEFAULT_STALE_SEC = 600;
 

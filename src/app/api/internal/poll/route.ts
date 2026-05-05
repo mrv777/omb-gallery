@@ -31,6 +31,7 @@ import { fetchWalletProfile, MatricaError } from '@/lib/matrica';
 import { runNotifyFanout } from '@/lib/notify';
 import { runLoanTick } from '@/lib/loanDetect';
 import { runMagisatFingerprintTick } from '@/lib/magisatFingerprintTick';
+import { runMagicEdenFingerprintTick } from '@/lib/magicEdenFingerprintTick';
 import { log } from '@/lib/log';
 
 export const dynamic = 'force-dynamic';
@@ -187,6 +188,9 @@ async function handle(req: NextRequest): Promise<NextResponse> {
       case 'magisat-fp':
         result = await safeMagisatFp();
         break;
+      case 'magic-eden-fp':
+        result = await safeMagicEdenFp();
+        break;
       case 'auto':
       default: {
         // Matrica is intentionally NOT in 'auto'. Auto runs every 5min;
@@ -195,20 +199,24 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         // ?mode=matrica cron at 0 5 * * *.
         //
         // Order matters: ord first (writes new transferred events), then
-        // magisat-fp (chain-fingerprint upgrade for Magisat sales — runs
-        // before satflow so the marketplace tag is set in the same tick the
-        // transfer landed). satflow upgrades remaining transferred → sold
-        // for Satflow-API fills. loans reclassifies remaining transferred
-        // rows that are loan movements (must run AFTER satflow so we don't
-        // reclassify a sale as a loan). listings is independent. notify
-        // last so it sees the final event_type for each row.
+        // the chain-fingerprint marketplace taggers (magisat-fp + magic-
+        // eden-fp) — run before satflow so the marketplace tag is set in
+        // the same tick the transfer landed. The two taggers are mutually
+        // exclusive (different fee addresses; verified in
+        // ONCHAIN_TAGGING.md §2.10), so order between them doesn't matter.
+        // satflow upgrades remaining transferred → sold for Satflow-API
+        // fills. loans reclassifies remaining transferred rows that are
+        // loan movements (must run AFTER satflow so we don't reclassify a
+        // sale as a loan). listings is independent. notify last so it sees
+        // the final event_type for each row.
         const ord = await runOrdTick();
         const magisatFp = await safeMagisatFp();
+        const magicEdenFp = await safeMagicEdenFp();
         const satflow = await iterateSatflowCollections(onlyCollection, {});
         const listings = await iterateListingsCollections(onlyCollection, { force: false });
         const loans = await safeLoans();
         const notify = await safeNotify();
-        result = [ord, magisatFp, ...satflow, ...listings, loans, notify];
+        result = [ord, magisatFp, magicEdenFp, ...satflow, ...listings, loans, notify];
         break;
       }
     }
@@ -331,6 +339,16 @@ async function safeMagisatFp(): Promise<TickResult> {
     const msg = e instanceof Error ? e.message : String(e);
     log.error('poll/magisat-fp', 'tick failed', { error: msg });
     return { mode: 'magisat-fp', error: msg };
+  }
+}
+
+async function safeMagicEdenFp(): Promise<TickResult> {
+  try {
+    return (await runMagicEdenFingerprintTick({ live: true })) as TickResult;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    log.error('poll/magic-eden-fp', 'tick failed', { error: msg });
+    return { mode: 'magic-eden-fp', error: msg };
   }
 }
 

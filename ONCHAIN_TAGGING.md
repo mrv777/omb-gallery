@@ -151,6 +151,35 @@ Magisat's public `/activity/global` feed exposes finalized PURCHASE / OFFER_PURC
 - **Code:** `scripts/backfill-magisat-sales.js` (idempotent, safe to re-run). Adds `raw_json.magisat_backfill` for traceability.
 - **Confidence:** chain-truth (cross-referencing two on-chain identifiers — implausible failure modes).
 
+### 2.10 Magic Eden marketplace fingerprint (on-chain)
+
+**Status: promoted to chain-fingerprint 2026-05-05.** Live tagger at `src/lib/magicEdenFingerprintTick.ts`, sibling to the Magisat tick. Ran with 10 confirmed TPs, mutual-exclusion vs the 14-fixture Magisat corpus accepted as the TN class.
+
+Ten user-flagged Magic Eden OMB sales spanning blocks 796440 (~2023-05) → 886371 (~2024-09) all carry a fee output to **`bc1qcq2uv5nk6hec6kvag3wyevp6574qmsm9scjxc2`** (P2WPKH, ~2.5% of seller payment). The fee address recurs across two distinct on-chain shapes:
+
+1. **Modern PSBT listing — 4-in/7-out (6 fixtures).** `vin[0..1]` are buyer dummy 600-sat utxos (P2SH or P2WPKH); `vin[2]` is the inscription P2TR signed schnorr **`0x83`** (`SIGHASH_SINGLE | SIGHASH_ANYONECANPAY`); `vin[3]` is the buyer funding input. `vout[0]` is a regenerated 1200-sat dummy; `vout[1]` is the inscription destination P2TR (10000 or 900 sats); `vout[2]` is the seller payment (typically P2SH); `vout[3]` is the ME fee output; `vout[4..5]` are dummies regenerated; `vout[6]` is buyer change. Structurally this is the **same fingerprint shape as Magisat** (§2.8) — distinguished only by the fee address.
+2. **Cooperative SIGHASH_ALL — 2-in/4-out and an 8-in variant (4 fixtures).** `vin[0]` is the inscription P2TR signed schnorr `SIGHASH_ALL` or `SIGHASH_DEFAULT`; `vin[1..]` are buyer-funding inputs. `vout[0]` is the inscription destination; `vout[1]` is the seller payment (P2SH or P2TR — sometimes paid back to the seller's own inscription P2TR, characteristic of accept-offer); `vout[2]` is the ME fee; `vout[3]` is buyer change. Both parties co-sign atomically — plausibly the buy-now or accept-offer codepath. Cannot determine offer-vs-listing direction from chain alone.
+
+**Mutual exclusion with Magisat.** A 3-fixture sample of confirmed Magisat sales (`35448512…`, `a05018db…`, `b9a77cff…`) was checked for the ME fee address — none contains `bc1qcq2uv5n…`. Conversely none of the 10 ME fixtures contains Magisat's `3Ke21os…`. Sufficient evidence that the two PSBT marketplaces don't co-route fees, so a single-vout-address rule disambiguates them. The 14-fixture Magisat-mutual-exclusion class is treated as the §1-required TN evidence for promotion.
+
+**Detection rule (live):**
+
+- Any `vout` whose `scriptPubKey.address` ∈ `MAGIC_EDEN_FEE_ADDRS = { bc1qcq2uv5n…m9scjxc2 }`.
+- Shape sub-discrimination: if ≥1 `vin` carries a 65-byte schnorr signature ending in `0x83` (`SIGHASH_SINGLE | SIGHASH_ANYONECANPAY`), tag as ACP shape and record `acpInputs[]`. Otherwise, tag as cooperative shape.
+
+**Sale-price extraction:**
+
+- **ACP shape:** SIGHASH_SINGLE commits input N's signature to output N. Sum `vout[N].value` for each ACP input N whose prevout address equals `events.old_owner`. Same logic as Magisat.
+- **Cooperative shape:** the fixed layout puts the seller payment at `vout[feeVoutIdx - 1]` across every fixture in §6.6 — read directly. Returns null when the implied index points at the inscription destination (`vout[0]`) — that's the no-payment delivery-leg shape (#11273300, refuted §6.5), not a real sale, and we mustn't tag a price.
+
+**Secondary candidate fee address (NOT promoted):** `3P4WqXDbSLRhzo2H6MT6YFbvBKBDPLbVtQ` (P2SH) appears in 2 spring-2024 fixtures (#213924 in block 832583, #60563128 in block 835705) — both cooperative SIGHASH_ALL with ~2.55% fee ratio matching the modern address. This could be a pre-rotation ME fee splitter, a different ME flow, or an unrelated royalty router. With only 2 fixtures and no true negative, we cannot promote it. Recorded as `fingerprint-tp-secondary` in `known-transactions.json`. **At runtime these two fixtures continue to fingerprint-miss until `3P4Wq…` is added to `MAGIC_EDEN_FEE_ADDRS` in `src/lib/marketplaceFingerprint.ts`** — gated explicitly by reviewer agreement, not a code TODO.
+
+**Counter-example (fingerprint-miss):** #11273300 (`ee5e2159…`, block 932122) was user-flagged as a Magic Eden buy but the tx is a 2-in/2-out movement with **no fee output and no seller payment** (only the buyer pays 840 sats fee). Almost certainly the inscription-delivery leg of an accept-offer flow whose BTC moved in a sibling tx. ME UI is no longer accessible to verify so this fixture stays as a documented unverifiable case, not a TP. The live rule correctly does not match it.
+
+- **Confidence:** chain-fingerprint. 10 user-confirmed TPs spanning ~16 months on the primary fee address; 14-fixture Magisat-mutual-exclusion accepted as TN class; #11273300 plus the 14 Magisat fixtures all correctly fail the rule.
+- **Test fixtures:** see §6.6.
+- **Code:** detection in `src/lib/marketplaceFingerprint.ts` (shared with Magisat — the unified `detectMarketplace` returns a discriminated union). Live tagger in `src/lib/magicEdenFingerprintTick.ts`, wired into the 5-min `auto` poll between `magisat-fp` and `satflow`. Historical sweep in `scripts/backfill-magic-eden-fingerprint.js`. Schema bump to v27 adds the `magic_eden_fp` poll_state stream.
+
 ## 3. Tagging rules currently active
 
 | `event_type`                                       | When emitted                                                                                     | Source rule                         | Confidence tier   | Marketplace tag |
@@ -158,6 +187,7 @@ Magisat's public `/activity/global` feed exposes finalized PURCHASE / OFFER_PURC
 | `transferred`                                      | ord poll detects UTXO change for any inscription, OR `backfill-transfers.js` walks chain history | UTXO movement                       | chain-truth       | NULL            |
 | `mint`                                             | `old_owner` matches a registered mint wallet (§2.1) AND inscription color matches                | Wallet → color map                  | chain-truth       | NULL            |
 | `sold` (Magisat)                                   | `magisat-fp` poll step finds the §2.8 fingerprint and upgrades the `transferred` row in place    | `src/lib/marketplaceFingerprint.ts` | chain-fingerprint | `'magisat'`     |
+| `sold` (Magic Eden)                                | `magic-eden-fp` poll step finds the §2.10 fingerprint and upgrades the `transferred` row in place| `src/lib/marketplaceFingerprint.ts` | chain-fingerprint | `'magic-eden'`  |
 | `sold` (other paths)                               | (see §3.1 below — currently mixed quality)                                                       | Multiple paths                      | mixed             | varies          |
 | `listed`                                           | Satflow API listings stream                                                                      | Satflow                             | legacy-3rd-party  | `'satflow'`     |
 | `loan-originated`                                  | Liquidium origination fingerprint (§2.4), or Phase 4 traces backward from a resolution spend     | `src/lib/loanDetect.ts`             | chain-fingerprint | NULL            |
@@ -172,6 +202,7 @@ Magisat's public `/activity/global` feed exposes finalized PURCHASE / OFFER_PURC
 | `onchain-heuristic` (Layer 1 ACP, confidence: high)             | 18     | chain-fingerprint candidate             | Verify and promote. See §6.2.         |
 | Satflow                                                         | 282    | legacy-3rd-party                        | Keep as-is.                           |
 | `onchain-magisat-fp` (live + historical via fingerprint)        | 14+    | chain-fingerprint                       | Primary path going forward. See §2.8. |
+| `onchain-magic-eden-fp` (live + historical via fingerprint)     | 10+    | chain-fingerprint                       | Primary path going forward. See §2.10.|
 | `magisat-api-backfill` (cross-reference, fallback verification) | (n/a)  | chain-truth                             | Verification only. See §2.9.          |
 
 ## 4. Refuted hypotheses (do not re-introduce)
@@ -221,9 +252,11 @@ A real recurring fee/activation collector address. It is not Magisat. Twenty-nin
 
 ### 5.3 Magic Eden / OKX / Ord.io / OrdSwap fingerprints
 
-Zero confirmed fixtures so far. All `marketplace=NULL` `sold` rows from `ord-net-history-backfill` could be from any of these.
+**Magic Eden — resolved 2026-05-05** (see §2.10). Primary fee address `bc1qcq2uv5nk6hec6kvag3wyevp6574qmsm9scjxc2` promoted to chain-fingerprint with 10 confirmed TPs and 14-fixture Magisat-mutual-exclusion accepted as TN class. Live tagger ships in the same commit. Secondary P2SH candidate `3P4Wq…` documented but NOT in the live `MAGIC_EDEN_FEE_ADDRS` set — blocked on additional spring-2024 fixtures.
 
-**To resolve:** for each marketplace, gather ≥3 confirmed-true sale fixtures and ≥1 confirmed-true non-sale (or sale-from-different-marketplace) fixture. Then derive the on-chain pattern (fee output address, sighash flags, n_in/n_out shape, etc.).
+**OKX / Ord.io / OrdSwap — unresolved.** Zero confirmed fixtures. All `marketplace=NULL` `sold` rows from `ord-net-history-backfill` could still be from any of these.
+
+**To resolve (per remaining marketplace):** gather ≥3 confirmed-true sale fixtures and ≥1 confirmed-true non-sale (or sale-from-different-marketplace) fixture. Then derive the on-chain pattern (fee output address, sighash flags, n_in/n_out shape, etc.).
 
 ### 5.4 Broader Liquidium loan-origination variants
 
@@ -380,6 +413,26 @@ See §2.1 for the full table. All five colors covered.
 | `b9a77cffc3914af60564d49bb34a5d421075780e91cebaa20cad639530671d57` (#83309450) | Has `bc1papmpmu0…59se9u` as vout[1] — NOT a Magisat sale. Refutes §4.2.                                                    |
 | `3bd09bfc7d229428cb99cfb44170e939b80a297b2f35f2e2ea2af7df0da22711` (#11299747) | OP_CSV-less, single-leaf tap-tree, internal pubkey `428a…` — Phase 4 misclassified as `loan-unlocked`. Refutes §4.5.       |
 | `d5196bd8b3ae4a1a23975e40d88edc7c30cc42ba5df47b7c2b41fa8a6d5aeba5` (#83296407) | 4-out borrower-self-funded shape, but routes 46k sats to `bc1qt40u…` which is a known non-Liquidium service. Refutes §4.4. |
+| `ee5e21593176efc432d88d5a0ec74afab5265670c036861b54dada4a22b87235` (#11273300) | User-flagged as a Magic Eden buy but has no fee output and no seller payment — almost certainly the inscription-delivery leg of an offer accept whose BTC moved in a sibling tx. Candidate ME rule (§2.10) correctly does NOT match it. |
+
+### 6.6 Magic Eden sales (true positives — N=10, candidate fingerprint not yet promoted)
+
+User-flagged ME sales spanning blocks 796440 → 886371 (~16 months). All 10 carry the candidate primary fee address `bc1qcq2uv5nk6hec6kvag3wyevp6574qmsm9scjxc2`; the two oldest also carry the secondary P2SH candidate `3P4WqXDbSLRhzo2H6MT6YFbvBKBDPLbVtQ`. Modern PSBT shape is the dominant 4-in/7-out ACP variant; cooperative SIGHASH_ALL fixtures (#83295649, #83296358, #213924, #60563128) are user-suspected accept-offer flows.
+
+| Inscription | Tx                                                                 | Block  | Shape          | Sale (sats) | Fee (sats) |
+| ----------- | ------------------------------------------------------------------ | ------ | -------------- | ----------- | ---------- |
+| 10610550    | `217789a1f411ebfcbdb562541cf751d90220e8b4c7de08e0fa2fdfdc0da143cc` | 796440 | acp-7out       | 32,745,500  | 822,500    |
+| 10611504    | `1f2f75c03f2ef731286c7b96f4d62d12135c674b17747d86d2fd9ba6efce4630` | 796750 | acp-7out       | 34,835,000  | 875,000    |
+| 10611504    | `8c20f030cf9f5612875cdc338fcfc9d23fb6da93553842181f33e902c4efdd55` | 796923 | acp-7out       | 39,710,500  | 997,500    |
+| 10827825    | `067e6a26db80546ff1c1ec3f434c31411f1c936f3d42370db11a78300bc98f00` | 798149 | acp-7out       | 37,820,000  | 950,000    |
+| 11183491    | `154ea6484dc569217ca4e85bd2106ec0dcd1a7142e9d3ee9e01f83dbc79316a2` | 798599 | acp-7out (6in) | 27,870,000  | 700,000    |
+| 213924      | `aeab14bbd42561d8011336747010a930102e74daf2d6ffae63f3ace304cffe61` | 832583 | coop-multiin   | 284,210,000 | 7,250,000  |
+| 60563128    | `b41008e15cff4de04453d828802e9ded1fbf86b321cd808635907e8245599e9e` | 835705 | coop-4out      | 107,504,059 | 2,742,425  |
+| 83295649    | `1d3f7c1fbdd8e025e068b37436e2dfa4361371d2dfca68279bb063678abde7f7` | 885624 | coop-4out      | 5,880,900   | 150,000    |
+| 83296358    | `a97b3ccd791140494cbdf920a60002e3398d1b863a6d99a5b4b4a99ac05c8538` | 885756 | coop-4out      | 6,992,900   | 178,750    |
+| 83315561    | `5793cc95580a34809ff8681cff157acc1295e9a5a15b01451ef524d48dad4fc8` | 886371 | acp-7out       | 4,179,900   | 105,000    |
+
+Fee/sale ratios: 2.51% – 2.55% across all 10 — strong corroborating signal independent of the address-recurrence rule.
 
 ## 7. Audit + cleanup status
 
@@ -420,6 +473,16 @@ pnpm backfill-liquidium-modern-resolutions
 ```
 
 Use `pnpm backfill-liquidium-modern-resolutions -- --dry-run` first when testing manually. Same env vars as §7.4. Upgrades each `transferred` row that comes out of a modern escrow to `loan-repaid`, `loan-defaulted`, or `loan-unlocked` based on the leaf shape, decrements `inscriptions.active_loan_count`, and drops the obsolete notify-queue entries. Idempotent.
+
+### 7.6 Modern Magic Eden tagger backfill — RUN AFTER DEPLOY
+
+Run once after deploying the §2.10 detector + schema v27. The live `magic-eden-fp` tick bootstraps its cursor to current `MAX(events.id)` and only fingerprints forward — historical `transferred` rows + `marketplace IS NULL` `sold` rows that are actually ME sales need the one-shot sweep.
+
+```bash
+pnpm backfill-magic-eden-fingerprint
+```
+
+Use `pnpm backfill-magic-eden-fingerprint -- --dry-run` first to preview. Required env: `BITCOIN_RPC_URL`, `OMB_DB_PATH` (default `/data/app.db`). Upgrades `transferred` rows in place to `sold` with `marketplace='magic-eden'`, extracts `sale_price_sats` per the §2.10 shape rules, recomputes per-inscription `transfer_count` / `sale_count` / `total_volume_sats` / `highest_sale_sats`. Skips rows already tagged with a non-ME marketplace (logs the count but doesn't touch them). Idempotent — safe to re-run. Notify queue is **not** enqueued for backfilled rows (matches the §7.4/§7.5 policy).
 
 ## 8. How to add a new tagging rule
 

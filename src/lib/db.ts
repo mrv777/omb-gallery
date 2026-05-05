@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 26;
+const SCHEMA_VERSION = 27;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -187,6 +187,7 @@ function migrate(db: DB): void {
       if (current < 24) upgradeV23ToV24(db);
       if (current < 25) upgradeV24ToV25(db);
       if (current < 26) upgradeV25ToV26(db);
+      if (current < 27) upgradeV26ToV27(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -312,7 +313,7 @@ function initSchemaLatest(db: DB): void {
     -- one batch poll covers every inscription regardless of collection. The
     -- 'matrica' stream is also collection-agnostic — one row keyed to 'omb'.
     CREATE TABLE IF NOT EXISTS poll_state (
-      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica','notify','loans','magisat_fp')),
+      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica','notify','loans','magisat_fp','magic_eden_fp')),
       collection_slug           TEXT NOT NULL REFERENCES collections (slug),
       last_cursor               TEXT,
       last_run_at               INTEGER,
@@ -330,7 +331,8 @@ function initSchemaLatest(db: DB): void {
       ('matrica', 'omb'),
       ('notify', 'omb'),
       ('loans', 'omb'),
-      ('magisat_fp', 'omb');
+      ('magisat_fp', 'omb'),
+      ('magic_eden_fp', 'omb');
 
     -- Matrica wallet-linking (Phase 5). matrica_users holds one row per
     -- distinct Matrica user we've seen (across any wallet); wallet_links
@@ -1293,6 +1295,33 @@ function upgradeV25ToV26(db: DB): void {
            highest_sale_sats = agg.hi
       FROM agg
      WHERE inscriptions.inscription_number = agg.num;
+  `);
+}
+
+function upgradeV26ToV27(db: DB): void {
+  // Add the 'magic_eden_fp' poll stream — cursor for the live Magic Eden
+  // fingerprint detector, sibling to the existing magisat tagger
+  // (ONCHAIN_TAGGING.md §2.10). Same shape as v25's `magisat_fp` add: copy-
+  // and-swap the CHECK constraint, leave last_cursor NULL so the first live
+  // tick bootstraps to current MAX(events.id) and operators run
+  // scripts/backfill-magic-eden-fingerprint.js for the historical sweep.
+  db.exec(`
+    CREATE TABLE poll_state_v27 (
+      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica','notify','loans','magisat_fp','magic_eden_fp')),
+      collection_slug           TEXT NOT NULL REFERENCES collections (slug),
+      last_cursor               TEXT,
+      last_run_at               INTEGER,
+      last_status               TEXT,
+      last_event_count          INTEGER,
+      is_backfilling            INTEGER NOT NULL DEFAULT 0,
+      last_known_height         INTEGER,
+      backfill_unresolved_seen  INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (stream, collection_slug)
+    );
+    INSERT INTO poll_state_v27 SELECT * FROM poll_state;
+    DROP TABLE poll_state;
+    ALTER TABLE poll_state_v27 RENAME TO poll_state;
+    INSERT OR IGNORE INTO poll_state (stream, collection_slug) VALUES ('magic_eden_fp', 'omb');
   `);
 }
 

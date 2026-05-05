@@ -5,17 +5,15 @@ import { bitcoindConfigured, getRawTransaction } from './bitcoind';
 import { detectMarketplace, extractSalePriceSats } from './marketplaceFingerprint';
 import { log } from './log';
 
-// Per-tick budget: scan up to this many candidate rows. Sized to keep a tick
-// inside the 30s curl deadline at our prod bitcoind latency (~1-3ms/call over
-// localhost, batched 8-wide = 100 calls in well under a second).
+// Per-tick budget. Same shape as the Magisat sibling tick.
 const PER_TICK_LIMIT = 200;
 const RPC_CONCURRENCY = 8;
 
-const STREAM = 'magisat_fp';
+const STREAM = 'magic_eden_fp';
 const COLLECTION = 'omb';
 
 type TickResult = {
-  mode: 'magisat-fp';
+  mode: 'magic-eden-fp';
   scanned: number;
   matched: number;
   upgraded: number;
@@ -27,21 +25,22 @@ type TickResult = {
 };
 
 /**
- * Live Magisat sale detector. Walks `transferred` events the ord poll has
- * just written (cursor = highest event id we've previously checked) and, for
- * each, fetches the underlying tx and applies the §2.7 fingerprint from
- * ONCHAIN_TAGGING.md. On match the row is upgraded in place to `sold` with
- * `marketplace='magisat'` — the row id is preserved, so the activity feed
- * shows ONE entry that flips type, never a duplicate transfer + sale pair.
+ * Live Magic Eden sale detector. Sibling of `runMagisatFingerprintTick`.
+ * Walks `transferred` events the ord poll has just written (cursor = highest
+ * event id we've previously checked) and, for each, fetches the underlying
+ * tx and applies the §2.10 fingerprint from ONCHAIN_TAGGING.md. On match the
+ * row is upgraded in place to `sold` with `marketplace='magic-eden'` — the
+ * row id is preserved, so the activity feed shows ONE entry that flips type,
+ * never a duplicate transfer + sale pair.
  *
- * On first run after deploy, cursor is bootstrapped to the current MAX(events.id)
- * so we don't replay the entire backlog. The historical sweep is the
- * `scripts/backfill-magisat-fingerprint.js` job.
+ * On first run after deploy, cursor is bootstrapped to the current
+ * MAX(events.id) so we don't replay the entire backlog. The historical
+ * sweep is the `scripts/backfill-magic-eden-fingerprint.js` job.
  */
-export async function runMagisatFingerprintTick(opts: { live: boolean }): Promise<TickResult> {
+export async function runMagicEdenFingerprintTick(opts: { live: boolean }): Promise<TickResult> {
   const startedAt = Date.now();
   const result: TickResult = {
-    mode: 'magisat-fp',
+    mode: 'magic-eden-fp',
     scanned: 0,
     matched: 0,
     upgraded: 0,
@@ -64,7 +63,7 @@ export async function runMagisatFingerprintTick(opts: { live: boolean }): Promis
 
   let cursor: number;
   if (!stateRow) {
-    log.warn('poll/magisat-fp', 'poll_state row missing — aborting', { stream: STREAM });
+    log.warn('poll/magic-eden-fp', 'poll_state row missing — aborting', { stream: STREAM });
     return { ...result, error: 'poll-state-row-missing', duration_ms: Date.now() - startedAt };
   }
   if (stateRow.last_cursor == null) {
@@ -72,12 +71,10 @@ export async function runMagisatFingerprintTick(opts: { live: boolean }): Promis
     // for those. Cursor jumps to current MAX(id) so the next tick picks up
     // anything written after this point.
     //
-    // CAUTION: any unprocessed Magisat sale that landed BEFORE this bootstrap
-    // tick (i.e. event written by ord on a prior deploy without magisat-fp
-    // wired in) will silently stay tagged `transferred` until someone runs
-    // the historical sweep. We've been bitten by this — see the post-deploy
-    // checklist in DEPLOYMENT.md. The warn-level log below is the one
-    // operator-facing nudge to do it.
+    // CAUTION: any unprocessed Magic Eden sale that landed BEFORE this
+    // bootstrap tick will silently stay tagged `transferred` until someone
+    // runs the historical sweep. The warn-level log below is the one
+    // operator-facing nudge to do it. See DEPLOYMENT.md → Post-deploy.
     const max = db.prepare(`SELECT COALESCE(MAX(id), 0) AS m FROM events`).get() as {
       m: number;
     };
@@ -87,9 +84,9 @@ export async function runMagisatFingerprintTick(opts: { live: boolean }): Promis
           SET last_cursor = @c, last_run_at = unixepoch(), last_status = 'bootstrapped'
         WHERE stream = @s AND collection_slug = @col`
     ).run({ c: String(cursor), s: STREAM, col: COLLECTION });
-    log.warn('poll/magisat-fp', 'cursor bootstrapped — historical sweep REQUIRED', {
+    log.warn('poll/magic-eden-fp', 'cursor bootstrapped — historical sweep REQUIRED', {
       cursor,
-      action: 'run scripts/backfill-magisat-fingerprint.js once on this DB',
+      action: 'run scripts/backfill-magic-eden-fingerprint.js once on this DB',
       docs: 'DEPLOYMENT.md → Post-deploy checklist',
     });
     return {
@@ -121,9 +118,6 @@ export async function runMagisatFingerprintTick(opts: { live: boolean }): Promis
   }>;
 
   if (candidates.length === 0) {
-    // Even with no candidates, advance cursor to MAX(id) so we don't re-scan
-    // the same dead range every tick if no transferred-marketplace-null rows
-    // exist past it. Read MAX once; cheap.
     const max = db.prepare(`SELECT COALESCE(MAX(id), @c) AS m FROM events`).get({ c: cursor }) as {
       m: number;
     };
@@ -139,13 +133,9 @@ export async function runMagisatFingerprintTick(opts: { live: boolean }): Promis
     return result;
   }
 
-  // Bounded-concurrency probe. This tick is the magisat-only tagger — ME
-  // matches are handled by `runMagicEdenFingerprintTick`. Each tick uses its
-  // own cursor, so the duplicate detectMarketplace work across ticks is
-  // bounded by the per-tick budget.
   type Probe = {
     cand: (typeof candidates)[number];
-    marketplace: 'magisat' | null;
+    marketplace: 'magic-eden' | null;
     salePriceSats: number | null;
     rpcFail: boolean;
   };
@@ -160,7 +150,7 @@ export async function runMagisatFingerprintTick(opts: { live: boolean }): Promis
         tx = await getRawTransaction(c.txid);
       } catch (e) {
         probes[idx] = { cand: c, marketplace: null, salePriceSats: null, rpcFail: true };
-        log.warn('poll/magisat-fp', 'rpc failed', {
+        log.warn('poll/magic-eden-fp', 'rpc failed', {
           inscription_number: c.inscription_number,
           txid: c.txid,
           error: e instanceof Error ? e.message : String(e),
@@ -168,7 +158,7 @@ export async function runMagisatFingerprintTick(opts: { live: boolean }): Promis
         continue;
       }
       const match = detectMarketplace(tx);
-      if (!match || match.marketplace !== 'magisat') {
+      if (!match || match.marketplace !== 'magic-eden') {
         probes[idx] = { cand: c, marketplace: null, salePriceSats: null, rpcFail: false };
         continue;
       }
@@ -188,40 +178,28 @@ export async function runMagisatFingerprintTick(opts: { live: boolean }): Promis
     if (!p) continue;
     if (p.rpcFail) {
       result.rpc_failures++;
-    } else if (p.marketplace === 'magisat') {
+    } else if (p.marketplace === 'magic-eden') {
       result.matched++;
     }
   }
 
-  // Apply upgrades in a single transaction. Highest-id-among-upgrades does not
-  // determine cursor advance — we always move cursor to the highest scanned id
-  // (matched or not) so a transient RPC failure doesn't endlessly re-poke the
-  // same rows. RPC failures are rare on a co-located bitcoind; if they persist
-  // for a row, the next-tick re-scan covers them by virtue of cursor not
-  // advancing past unscanned rows above this batch.
-  //
-  // Preserve the original raw_json (ord's `{source:'ord', state, enriched}`)
-  // and merge in our annotation under `magisat_fp` via `json_set`. Passing
-  // raw_json=null to upgradeEventToSoldById's COALESCE keeps the row's
-  // existing raw_json untouched at upgrade time, then mergeMagisatFpMeta
-  // applies the annotation on top.
-  const upgrades = probes.filter(p => p && p.marketplace === 'magisat');
+  const upgrades = probes.filter(p => p && p.marketplace === 'magic-eden');
   if (upgrades.length > 0) {
     const annotateRawJson = db.prepare(
       `UPDATE events
-          SET raw_json = json_set(COALESCE(raw_json, '{}'), '$.magisat_fp', json(@meta))
+          SET raw_json = json_set(COALESCE(raw_json, '{}'), '$.magic_eden_fp', json(@meta))
         WHERE id = @id`
     );
     const apply = db.transaction(() => {
       for (const p of upgrades) {
         const meta = JSON.stringify({
-          source: 'onchain-magisat-fp',
+          source: 'onchain-magic-eden-fp',
           extracted_price_sats: p.salePriceSats,
           matched_at: Math.floor(Date.now() / 1000),
         });
         const r = stmts.upgradeEventToSoldById.run({
           id: p.cand.id,
-          marketplace: 'magisat',
+          marketplace: 'magic-eden',
           sale_price_sats: p.salePriceSats,
           raw_json: null,
         });
@@ -232,9 +210,9 @@ export async function runMagisatFingerprintTick(opts: { live: boolean }): Promis
             inscription_number: p.cand.inscription_number,
             sale_price_sats: p.salePriceSats ?? 0,
           });
-          // Re-enqueue notify only on live ticks so sales-only subscribers can
-          // see the type change. Backfill ticks must not replay history as
-          // fresh alerts (matches the satflow upgrade-path policy).
+          // Re-enqueue notify only on live ticks so sales-only subscribers
+          // can see the type change. Backfill ticks must not replay history
+          // as fresh alerts.
           if (opts.live) stmts.enqueueNotify.run(p.cand.id);
         }
       }
@@ -242,9 +220,6 @@ export async function runMagisatFingerprintTick(opts: { live: boolean }): Promis
     apply();
   }
 
-  // Advance cursor to the highest candidate id we examined, even if some were
-  // skipped (rpc fails) — they'll be retried via the backfill script if they
-  // matter. Per-row retry inside the live tick would unbound budget.
   const newCursor = candidates[candidates.length - 1].id;
   db.prepare(
     `UPDATE poll_state
@@ -264,7 +239,7 @@ export async function runMagisatFingerprintTick(opts: { live: boolean }): Promis
   result.duration_ms = Date.now() - startedAt;
 
   if (result.upgraded > 0 || result.rpc_failures > 0) {
-    log.info('poll/magisat-fp', 'tick complete', {
+    log.info('poll/magic-eden-fp', 'tick complete', {
       scanned: result.scanned,
       matched: result.matched,
       upgraded: result.upgraded,

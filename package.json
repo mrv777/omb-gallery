@@ -16,6 +16,8 @@
     "optimize-images": "node scripts/optimize-images.js",
     "backfill-liquidium-originations": "node scripts/backfill-liquidium-originations.js",
     "backfill-liquidium-modern-resolutions": "node scripts/backfill-liquidium-modern-resolutions.js",
+    "backfill-magisat-fingerprint": "node scripts/backfill-magisat-fingerprint.js",
+    "backfill-magic-eden-fingerprint": "node scripts/backfill-magic-eden-fingerprint.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
