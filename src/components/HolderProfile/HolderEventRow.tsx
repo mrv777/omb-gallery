@@ -12,6 +12,7 @@ import { EVENT_DISPLAY, isLoanEvent } from '@/lib/eventDisplay';
 import { loanAmountSats } from '@/lib/eventMeta';
 import SafeImg from '@/components/SafeImg';
 import { Tooltip } from '../ui/Tooltip';
+import { HoverImagePreview } from '../ui/HoverImagePreview';
 
 const COLOR_TILE_BG: Record<string, string> = {
   red: 'bg-accent-red/20',
@@ -134,7 +135,11 @@ export default function HolderEventRow({ event, wallets }: { event: EventRow; wa
     <div
       className={`flex items-center gap-x-3 sm:gap-x-4 px-2 sm:px-4 py-2 border-b border-ink-2 ${rowTint}`}
     >
-      <Tooltip content={tooltipLabel}>
+      <HoverImagePreview
+        src={hit?.thumbnail}
+        alt={tooltipLabel}
+        external={isExternal}
+      >
         {isExternal ? (
           <a
             href={inscriptionLink}
@@ -149,7 +154,7 @@ export default function HolderEventRow({ event, wallets }: { event: EventRow; wa
             {thumb}
           </Link>
         )}
-      </Tooltip>
+      </HoverImagePreview>
 
       {isExternal ? (
         <a href={inscriptionLink} target="_blank" rel="noopener noreferrer" className={numberClass}>
