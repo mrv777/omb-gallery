@@ -12,19 +12,26 @@
 // known false positives (2× pubkey `428a…`, 1× pubkey `2e8f…`) and may
 // have produced others that escaped notice.
 //
-// What this script does:
-//   1. Finds every event row of type loan-originated / loan-defaulted /
-//      loan-unlocked / loan-repaid whose raw_json.detector_version != 3
-//      (or is missing, i.e. older row). These are the "needs reverification"
-//      rows.
-//   2. For each, fetches the spend tx via bitcoind RPC and re-extracts the
-//      taproot script-path control block.
-//   3. If the internal pubkey != `9367…d27a`, reverts the row to
-//      `transferred` + clears marketplace + sale_price_sats, stamps
-//      raw_json.source = 'reverted-from-non-liquidium-loan'.
-//   4. Recomputes per-inscription `loan_count` / `active_loan_count` /
-//      `effective_owner` for every affected inscription so leaderboards stay
-//      consistent.
+// Only `loan-defaulted` and `loan-unlocked` events have script-path
+// witness data on their own `txid` — those are the spend txs whose witness
+// reveals the internal pubkey. `loan-originated` (escrow funding tx, plain
+// key-path) and `loan-repaid` (borrower → lender BTC payment tx, also no
+// script-path) are derivative rows that get inserted by Phase 4 ONLY in
+// response to a confirmed default/unlock. So:
+//
+//   1. Walk loan-defaulted + loan-unlocked rows with
+//      raw_json.detector_version < 3 (or missing). Refetch each spend tx
+//      and verify the control-block internal pubkey is Liquidium's.
+//   2. For non-Liquidium spends: also pull the matching loan-originated
+//      and loan-repaid rows by `raw_json.escrow_addr` (Phase 4 tags every
+//      loan-* row in the chain with the same escrow_addr). Revert the
+//      whole chain together — leaving an orphaned origination would
+//      keep loan_count high and the lender wallet credited.
+//   3. Revert each row to `transferred` + clear marketplace +
+//      sale_price_sats, stamp raw_json.source = 'reverted-from-non-
+//      liquidium-loan' with the prior event_type preserved.
+//   4. Recompute per-inscription loan_count / active_loan_count /
+//      effective_owner so leaderboards stay consistent.
 //
 // Required env:
 //   BITCOIN_RPC_URL    e.g. http://user:<password>@127.0.0.1:8332
@@ -129,42 +136,36 @@ async function checkRow(row) {
   } catch (e) {
     return { row, isLiquidium: null, error: e.message };
   }
-  // A loan resolution spends the escrow output via script-path. The escrow
-  // is the input whose prevout = old_owner. If we can't identify it, fall
-  // back to "any vin with a script-path control block" — Liquidium spends
-  // are always script-path, so the answer is invariant: if NONE of the
-  // script-path vins have the Liquidium pubkey, this isn't Liquidium.
-  let sawLiquidiumPubkey = false;
-  let sawAnyScriptPath = false;
+  // A loan resolution (default/unlock) spends the escrow output via
+  // script-path. Walk every vin; if at least one has the Liquidium pubkey
+  // in its control block, this is a Liquidium spend.
   for (const vin of tx.vin ?? []) {
     const pk = internalPubkeyFromVin(vin);
     if (pk == null) continue;
-    sawAnyScriptPath = true;
-    if (pk === LIQUIDIUM_INTERNAL_PUBKEY) {
-      sawLiquidiumPubkey = true;
-      break;
-    }
+    if (pk === LIQUIDIUM_INTERNAL_PUBKEY) return { row, isLiquidium: true, error: null };
   }
-  if (!sawAnyScriptPath) {
-    // No script-path spend at all — definitely not a loan resolution.
-    return { row, isLiquidium: false, error: null };
-  }
-  return { row, isLiquidium: sawLiquidiumPubkey, error: null };
+  // No vin had a Liquidium control block — either there's no script-path
+  // at all (definitely not a loan resolution) or the pubkey doesn't match
+  // (some other escrow service mis-tagged as Liquidium). Either way: revert.
+  return { row, isLiquidium: false, error: null };
 }
 
 async function main() {
   const db = new Database(DB_PATH);
   db.pragma('journal_mode = WAL');
 
-  // Pull every loan-* event whose detector_version is < 3 or missing. v3 is
-  // the marker added to rows tagged AFTER the pubkey gate landed; older rows
-  // need reverification.
+  // Only loan-defaulted + loan-unlocked events have script-path witness
+  // data on their own txid. loan-originated (escrow funding) and
+  // loan-repaid (borrower→lender BTC) txs are not script-path spends — we
+  // pull those in a second pass via raw_json.escrow_addr after the spend
+  // events are flagged.
   const candidates = db
     .prepare(
       `SELECT id, txid, inscription_number, event_type,
+              json_extract(raw_json, '$.escrow_addr')      AS escrow_addr,
               json_extract(raw_json, '$.detector_version') AS detector_version
          FROM events
-        WHERE event_type IN ('loan-originated','loan-defaulted','loan-unlocked','loan-repaid')
+        WHERE event_type IN ('loan-defaulted','loan-unlocked')
           AND (
             json_extract(raw_json, '$.detector_version') IS NULL
             OR CAST(json_extract(raw_json, '$.detector_version') AS INTEGER) < 3
@@ -174,11 +175,13 @@ async function main() {
     .all();
 
   if (candidates.length === 0) {
-    console.log('[cleanup-loans] no candidates with detector_version < 3 — nothing to do');
+    console.log(
+      '[cleanup-loans] no loan-defaulted/loan-unlocked candidates with detector_version < 3 — nothing to do'
+    );
     return;
   }
   console.log(
-    `[cleanup-loans] ${candidates.length} candidate loan-* event(s) with detector_version < 3`
+    `[cleanup-loans] ${candidates.length} loan-defaulted/loan-unlocked candidate(s) to verify on chain`
   );
 
   // Bounded-concurrency worker.
@@ -212,11 +215,44 @@ async function main() {
   await Promise.all(workers);
 
   console.log(
-    `[cleanup-loans] ${reverts.length} non-Liquidium row(s) to revert; ${errors.length} RPC error(s)`
+    `[cleanup-loans] ${reverts.length} non-Liquidium spend row(s); ${errors.length} RPC error(s)`
   );
 
-  if (ARGS.dryRun || reverts.length === 0) {
-    if (ARGS.dryRun) console.log('[cleanup-loans] dry-run, no writes');
+  // Pull associated loan-originated + loan-repaid rows for each non-
+  // Liquidium escrow_addr. These were inserted by the same buggy detector
+  // pass and must come along for the revert.
+  const associated = [];
+  if (reverts.length > 0) {
+    const escrows = Array.from(new Set(reverts.map(r => r.escrow_addr).filter(Boolean)));
+    if (escrows.length > 0) {
+      const placeholders = escrows.map(() => '?').join(',');
+      const assoc = db
+        .prepare(
+          `SELECT id, txid, inscription_number, event_type
+             FROM events
+            WHERE event_type IN ('loan-originated','loan-repaid')
+              AND json_extract(raw_json, '$.escrow_addr') IN (${placeholders})`
+        )
+        .all(...escrows);
+      associated.push(...assoc);
+    }
+  }
+  console.log(
+    `[cleanup-loans] ${associated.length} associated loan-originated/loan-repaid row(s) tied to those escrows`
+  );
+
+  if (ARGS.verbose) {
+    for (const a of associated) {
+      console.log(
+        `[cleanup-loans] (associated) reverting event#${a.id} (txid=${a.txid}, type=${a.event_type}, inscription=${a.inscription_number})`
+      );
+    }
+  }
+
+  const allReverts = [...reverts, ...associated];
+
+  if (ARGS.dryRun || allReverts.length === 0) {
+    if (ARGS.dryRun) console.log(`[cleanup-loans] dry-run, no writes (${allReverts.length} total)`);
     return;
   }
 
@@ -238,10 +274,10 @@ async function main() {
   );
 
   // Inscriptions whose aggregates need recomputing = the ones we touched.
-  const affected = new Set(reverts.map(r => r.inscription_number));
+  const affected = new Set(allReverts.map(r => r.inscription_number));
 
   const apply = db.transaction(() => {
-    for (const row of reverts) {
+    for (const row of allReverts) {
       revertOne.run({ id: row.id, event_type: row.event_type });
     }
     // Recompute loan_count / active_loan_count / effective_owner for the
@@ -285,7 +321,7 @@ async function main() {
   apply();
 
   console.log(
-    `[cleanup-loans] reverted ${reverts.length} row(s); recomputed ${affected.size} inscription aggregate(s)`
+    `[cleanup-loans] reverted ${allReverts.length} row(s) (${reverts.length} spend + ${associated.length} associated); recomputed ${affected.size} inscription aggregate(s)`
   );
 }
 
