@@ -69,8 +69,15 @@ export async function runMagisatFingerprintTick(opts: { live: boolean }): Promis
   }
   if (stateRow.last_cursor == null) {
     // First run: skip historical events. Operators run the backfill script
-    // for those. Cursor jumps to current MAX(id) - 1 so the next tick picks
-    // up anything written after this point.
+    // for those. Cursor jumps to current MAX(id) so the next tick picks up
+    // anything written after this point.
+    //
+    // CAUTION: any unprocessed Magisat sale that landed BEFORE this bootstrap
+    // tick (i.e. event written by ord on a prior deploy without magisat-fp
+    // wired in) will silently stay tagged `transferred` until someone runs
+    // the historical sweep. We've been bitten by this — see the post-deploy
+    // checklist in DEPLOYMENT.md. The warn-level log below is the one
+    // operator-facing nudge to do it.
     const max = db.prepare(`SELECT COALESCE(MAX(id), 0) AS m FROM events`).get() as {
       m: number;
     };
@@ -80,7 +87,11 @@ export async function runMagisatFingerprintTick(opts: { live: boolean }): Promis
           SET last_cursor = @c, last_run_at = unixepoch(), last_status = 'bootstrapped'
         WHERE stream = @s AND collection_slug = @col`
     ).run({ c: String(cursor), s: STREAM, col: COLLECTION });
-    log.info('poll/magisat-fp', 'cursor bootstrapped', { cursor });
+    log.warn('poll/magisat-fp', 'cursor bootstrapped — historical sweep REQUIRED', {
+      cursor,
+      action: 'run scripts/backfill-magisat-fingerprint.js once on this DB',
+      docs: 'DEPLOYMENT.md → Post-deploy checklist',
+    });
     return {
       ...result,
       cursor_advanced: true,

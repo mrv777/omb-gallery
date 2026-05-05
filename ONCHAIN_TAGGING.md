@@ -280,7 +280,10 @@ Required steps before any code change touches the tagger:
 5. **Add fixtures to `scripts/known-transactions.json`** — both true positives and true negatives, with `expected_type` and a description.
 6. **Update §6 of this doc** with the new fixtures.
 7. **Backfill carefully:** dry-run against a prod snapshot, audit a 10-row sample, then live with `notify_pending` skipping (historical re-tagging must not alert subscribers).
-8. **Cite this doc** in the commit message.
+8. **Wire a forward-only cursor + matching backfill script.** The live tick must NOT replay history (a fresh deploy can't be allowed to re-process 36k+ rows on every restart), so its cursor bootstraps to current `MAX(events.id)` on first run. That means **events landed before deploy stay tagged whatever they were tagged as** — usually `transferred` from the ord poll. The fix is a one-shot historical sweep script (`scripts/backfill-<area>.js`). Two requirements:
+   - The bootstrap branch must emit a `log.warn` calling out the script by name. We learned this the hard way: #11299610 sat tagged `transferred` instead of `sold/magisat` for a full deploy cycle because nobody saw the bootstrap log.
+   - Add the script to `DEPLOYMENT.md → Post-deploy required steps` in the SAME PR, so the next operator (you, in two weeks) can't miss it.
+9. **Cite this doc** in the commit message.
 
 If a rule is later refuted, **document it in §4** rather than silently removing — future sessions need to know what was tried and why it didn't hold.
 
