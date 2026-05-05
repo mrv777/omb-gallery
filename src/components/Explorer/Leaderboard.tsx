@@ -8,6 +8,7 @@ import { appendColorParam } from '@/lib/colorFilter';
 import { lookupWalletLabel } from '@/lib/walletLabels';
 import SafeImg from '@/components/SafeImg';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { HoverImagePreview } from '@/components/ui/HoverImagePreview';
 
 type Props = {
   type: LeaderboardKey;
@@ -108,15 +109,21 @@ export function InscriptionRow({
   );
   return (
     <li>
-      {isExternal ? (
-        <a href={link} target="_blank" rel="noopener noreferrer" className={innerClass}>
-          {inner}
-        </a>
-      ) : (
-        <Link href={link} prefetch={false} className={innerClass}>
-          {inner}
-        </Link>
-      )}
+      <HoverImagePreview
+        src={hit?.thumbnail}
+        alt={`Inscription ${row.inscription_number}`}
+        external={isExternal}
+      >
+        {isExternal ? (
+          <a href={link} target="_blank" rel="noopener noreferrer" className={innerClass}>
+            {inner}
+          </a>
+        ) : (
+          <Link href={link} prefetch={false} className={innerClass}>
+            {inner}
+          </Link>
+        )}
+      </HoverImagePreview>
     </li>
   );
 }

@@ -17,6 +17,7 @@ import { EVENT_DISPLAY } from '@/lib/eventDisplay';
 import { loanAmountSats } from '@/lib/eventMeta';
 import SafeImg from '@/components/SafeImg';
 import { Tooltip } from '../ui/Tooltip';
+import { HoverImagePreview } from '../ui/HoverImagePreview';
 
 const COLOR_TILE_BG: Record<string, string> = {
   red: 'bg-accent-red/20',
@@ -69,7 +70,11 @@ const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev, matrica 
       } ${groupedWithPrev ? '' : 'border-t border-t-bone-dim/20'}`}
     >
       {/* Thumbnail (faded if same inscription as previous row) */}
-      <Tooltip content={`#${event.inscription_number}`}>
+      <HoverImagePreview
+        src={hit?.thumbnail}
+        alt={`#${event.inscription_number}`}
+        external={isExternal}
+      >
         <ThumbLink
           href={inscriptionLink}
           isExternal={isExternal}
@@ -107,7 +112,7 @@ const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev, matrica 
             </div>
           )}
         </ThumbLink>
-      </Tooltip>
+      </HoverImagePreview>
 
       {/* Inscription number — fixed width so columns line up */}
       <ThumbLink
