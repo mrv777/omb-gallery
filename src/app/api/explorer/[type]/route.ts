@@ -147,7 +147,9 @@ function buildInscriptionCursor(
     case 'most-loaned':
       return `${row.loan_count ?? 0}:${num}`;
     case 'currently-loaned':
-      return `${row.active_loan_count ?? 0}:${num}`;
+      return row.active_loan_started_at != null
+        ? `${row.active_loan_started_at}:${num}`
+        : null;
   }
 }
 

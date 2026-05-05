@@ -15,6 +15,7 @@
     "format:check": "prettier --check .",
     "optimize-images": "node scripts/optimize-images.js",
     "backfill-liquidium-originations": "node scripts/backfill-liquidium-originations.js",
+    "backfill-liquidium-modern-resolutions": "node scripts/backfill-liquidium-modern-resolutions.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },

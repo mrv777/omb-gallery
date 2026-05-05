@@ -2169,14 +2169,21 @@ export function getStmts(): Stmts {
 
     // Currently-loaned: open loan cycles as tracked by tagged
     // loan-originated events minus observed loan resolutions. This is an
-    // event-lifecycle leaderboard, not an escrow-address proof table.
+    // event-lifecycle leaderboard, not an escrow-address proof table. Surfaces
+    // the active loan's origination timestamp so the UI can render "loaned 3d
+    // ago" instead of a count — active_loan_count is effectively 0/1 per
+    // inscription since escrowed pieces can't be re-loaned until released.
     topByActiveLoans: db.prepare(`
-      SELECT * FROM inscriptions
-      WHERE active_loan_count > 0
-        AND collection_slug = @collection
-        AND (@color IS NULL OR color = @color)
-      ORDER BY active_loan_count DESC, last_event_at DESC
-      LIMIT @limit
+      SELECT i.*,
+             (SELECT MAX(block_timestamp) FROM events e
+                WHERE e.inscription_number = i.inscription_number
+                  AND e.event_type = 'loan-originated') AS active_loan_started_at
+        FROM inscriptions i
+       WHERE i.active_loan_count > 0
+         AND i.collection_slug = @collection
+         AND (@color IS NULL OR i.color = @color)
+       ORDER BY active_loan_started_at DESC, i.inscription_number ASC
+       LIMIT @limit
     `),
 
     // Paged variants for /explorer/[type] infinite scroll. Ordering uses
@@ -2259,17 +2266,25 @@ export function getStmts(): Stmts {
       LIMIT @limit
     `),
 
+    // Cursor on (active_loan_started_at DESC, inscription_number ASC) so the
+    // most-recently-loaned-out pieces lead and ties break deterministically.
     topByActiveLoansPaged: db.prepare(`
-      SELECT * FROM inscriptions
-      WHERE active_loan_count > 0
-        AND collection_slug = @collection
-        AND (@color IS NULL OR color = @color)
-        AND (
-          @cursor_primary IS NULL
-          OR active_loan_count < @cursor_primary
-          OR (active_loan_count = @cursor_primary AND inscription_number > @cursor_secondary)
-        )
-      ORDER BY active_loan_count DESC, inscription_number ASC
+      SELECT * FROM (
+        SELECT i.*,
+               (SELECT MAX(block_timestamp) FROM events e
+                  WHERE e.inscription_number = i.inscription_number
+                    AND e.event_type = 'loan-originated') AS active_loan_started_at
+          FROM inscriptions i
+         WHERE i.active_loan_count > 0
+           AND i.collection_slug = @collection
+           AND (@color IS NULL OR i.color = @color)
+      )
+      WHERE (
+        @cursor_primary IS NULL
+        OR active_loan_started_at < @cursor_primary
+        OR (active_loan_started_at = @cursor_primary AND inscription_number > @cursor_secondary)
+      )
+      ORDER BY active_loan_started_at DESC, inscription_number ASC
       LIMIT @limit
     `),
 
@@ -2851,6 +2866,10 @@ export type InscriptionRow = {
   loan_count: number;
   active_loan_count: number;
   effective_owner: string | null;
+  /** Only populated by topByActiveLoans / topByActiveLoansPaged — block
+   * timestamp of the most recent loan-originated event for the inscription.
+   * Drives the currently-loaned leaderboard "loaned 3d ago" UI. */
+  active_loan_started_at?: number | null;
 };
 
 export type ActiveListingRow = {

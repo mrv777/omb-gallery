@@ -51,8 +51,8 @@ export const LEADERBOARDS: Record<LeaderboardKey, LeaderboardMeta> = {
   'currently-loaned': {
     key: 'currently-loaned',
     title: 'Currently Loaned',
-    blurb: 'Inscriptions with tagged loan originations that have not resolved on-chain yet.',
-    metricLabel: 'open loans',
+    blurb: 'Inscriptions with tagged loan originations that have not resolved on-chain yet, ordered by when the active loan started.',
+    metricLabel: 'loaned',
   },
   'top-holders': {
     key: 'top-holders',

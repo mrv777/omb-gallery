@@ -85,18 +85,41 @@ Twenty-nine user-verified OMB loans from 2026 share a narrow instant-loan origin
 - **Code:** `src/lib/liquidiumOriginationFingerprint.ts` contains the production matcher. `src/lib/loanDetect.ts` runs it live against new `transferred` and `sold` events. `scripts/backfill-liquidium-originations.js` backfills historical rows and also promotes exact confirmed variant txids from `scripts/known-transactions.json`.
 - **Tag rule:** emit `loan-originated` for strict shape and promoted P2TR-principal variants. Exact confirmed P2SH/P2WPKH variant txids are backfilled from the fixture allowlist only; future broad P2SH/P2WPKH variant matches are not auto-tagged.
 
-### 2.5 Self-transfers (`old_owner == new_owner`) are not real transfers
+### 2.5 Modern Liquidium loan resolution fingerprint
+
+The §2.4 origination shape closes via one of two tap-leaves on a fixed internal pubkey. Both resolutions share:
+
+- `vin[0]` is the previous escrow's P2TR UTXO.
+- `vin[0]`'s witness has a script-path layout (≥2 elements: `[..., leaf_script, control_block]`).
+- The control block is 97 bytes (depth-2 merkle path = 3-leaf tap-tree).
+- The control block's **internal pubkey is `50929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0`** — distinct from §2.2's legacy Liquidium key `9367…d27a`.
+
+Disambiguation by leaf:
+
+- **Repaid (cooperative leaf, ~135 raw bytes):** `<pkA> OP_CHECKSIGVERIFY <pkB> OP_CHECKSIGVERIFY <push 66 ASCII bytes>`. The trailing 66-byte push is the inscription's *previous* outpoint (`<txid>:<vout>`) — Liquidium binds the leaf to one specific inscription so two loans can never collide on the same tap-tree. The corresponding tx pays the inscription back to the borrower (`vout[0]`), the lender-vault P2WSH (`vout[1]`), the Liquidium activation P2TR `bc1papmpmu0…59se9u` (`vout[2]`), and a P2SH change output back to the borrower (`vout[3]`).
+- **Defaulted (CSV-gated lender claim, ~74 raw bytes):** `<csv> OP_CSV OP_DROP <pkA> OP_CHECKSIGVERIFY <pkB> OP_CHECKSIG`. The OP_CSV+OP_DROP pair (`b275`) is the unique distinguisher. Tx is the simple inscription-seizure 2-out shape with no Liquidium activation output.
+- **Unlocked (catch-all):** internal pubkey matches but the leaf is neither a repay nor a default — surface as `loan-unlocked` and preserve the leaf hex in `raw_json` for analysis.
+
+**Confidence:** chain-fingerprint. 12 spot-checked txs across 7 repay + 5 default candidates from prod all carry the same internal pubkey and split cleanly by leaf-shape ↔ destination heuristic; the destination heuristic was 12/12 correct against the leaf classification.
+
+**Test fixtures:** `096190e7…` (repay, #11299684), `b4e99def…` (default, #60578468). See §6.1.2.
+
+**Code:** `src/lib/liquidiumModernResolutionFingerprint.ts` contains the production matcher. `src/lib/loanDetect.ts` runs it live in the `loans` poll mode after the legacy classifier — events that don't fit the legacy default/unlock paths are tried against the modern detector and upgrade in place to `loan-repaid` / `loan-defaulted` / `loan-unlocked`. `scripts/backfill-liquidium-modern-resolutions.js` is the historical sweep.
+
+**Tag rule:** upgrade `transferred` rows downstream of a §2.4 origination escrow when the modern detector matches. Decrements `inscriptions.active_loan_count`; preserves `loan_count` (lifetime is unchanged).
+
+### 2.6 Self-transfers (`old_owner == new_owner`) are not real transfers
 
 Postage moves, UTXO consolidation, and fee bumps within the same wallet appear as transfers in raw ord output but represent no change of ownership. Schema v21 deletes them retroactively and the live ord poll skips them.
 
 - **Confidence:** chain-truth (literally same address on both sides).
 - **Tag rule:** drop at insert time + already-backfilled.
 
-### 2.6 Satflow-recorded sales (legacy, kept under legacy-3rd-party tier)
+### 2.7 Satflow-recorded sales (legacy, kept under legacy-3rd-party tier)
 
 282 `sold` events have `marketplace = 'satflow'`. These came from Satflow's `/v1/activity/sales` endpoint pre-policy. Kept as legacy data; not extended (the API enrichment continues for now but new rules should target the on-chain Satflow PSBT signature directly — see §5).
 
-### 2.7 Magisat marketplace fingerprint (on-chain)
+### 2.8 Magisat marketplace fingerprint (on-chain)
 
 **Primary detection rule.** The Magisat PSBT marketplace appends a fixed P2SH fee output to every settled listing. Two on-chain signals together identify a Magisat sale unambiguously:
 
@@ -114,17 +137,17 @@ Postage moves, UTXO consolidation, and fee bumps within the same wallet appear a
 
 - **Live (`src/lib/magisatFingerprintTick.ts`):** runs in the 5-min `auto` poll, between `ord` and `satflow`. Walks new `transferred` events (cursor in `poll_state.magisat_fp`), bitcoind-RPC fetches each tx, applies `detectMarketplace`, upgrades matches **in place** to `sold` + `marketplace='magisat'` via `upgradeEventToSoldById`. Same `events.id` row preserved → activity feed shows ONE entry that flips type, never a duplicate transfer + sale pair. Per-tick budget: 200 events at concurrency 8. On first deploy after v25, cursor bootstraps to current MAX(events.id) so live ticks don't replay 36k+ historical rows.
 - **Historical (`scripts/backfill-magisat-fingerprint.js`):** one-shot bitcoind-driven sweep over all existing `transferred` and `marketplace IS NULL sold` rows. Run once after deploy. Idempotent; safe to re-run.
-- **Verification (`scripts/backfill-magisat-sales.js`):** API cross-reference per §2.8. Confirms the fingerprint isn't missing real sales.
+- **Verification (`scripts/backfill-magisat-sales.js`):** API cross-reference per §2.9. Confirms the fingerprint isn't missing real sales.
 
-### 2.8 Magisat sale verification via API (cross-reference, secondary)
+### 2.9 Magisat sale verification via API (cross-reference, secondary)
 
 Magisat's public `/activity/global` feed exposes finalized PURCHASE / OFFER_PURCHASED rows with a `buyerTxId` field — the on-chain tx id Magisat broadcast to settle the listing. Matching that against `events.txid` is a **verification path**, not the primary detector. Use it to:
 
-1. Spot-check that the §2.7 fingerprint isn't missing real sales (every API match should also fingerprint-match — if not, the fingerprint needs revisiting).
+1. Spot-check that the §2.8 fingerprint isn't missing real sales (every API match should also fingerprint-match — if not, the fingerprint needs revisiting).
 2. Bootstrap fixtures when introducing new fingerprint rules.
 3. Recover sales that pre-date a known fee-address rotation.
 
-- **Coverage as of 2026-05-04:** 14 OMB sales in their ~6,500-row public feed. All 14 ALSO match the §2.7 fingerprint — fingerprint coverage is exhaustive on the API-confirmed set.
+- **Coverage as of 2026-05-04:** 14 OMB sales in their ~6,500-row public feed. All 14 ALSO match the §2.8 fingerprint — fingerprint coverage is exhaustive on the API-confirmed set.
 - **Code:** `scripts/backfill-magisat-sales.js` (idempotent, safe to re-run). Adds `raw_json.magisat_backfill` for traceability.
 - **Confidence:** chain-truth (cross-referencing two on-chain identifiers — implausible failure modes).
 
@@ -134,11 +157,11 @@ Magisat's public `/activity/global` feed exposes finalized PURCHASE / OFFER_PURC
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------- | ----------------- | --------------- |
 | `transferred`                                      | ord poll detects UTXO change for any inscription, OR `backfill-transfers.js` walks chain history | UTXO movement                       | chain-truth       | NULL            |
 | `mint`                                             | `old_owner` matches a registered mint wallet (§2.1) AND inscription color matches                | Wallet → color map                  | chain-truth       | NULL            |
-| `sold` (Magisat)                                   | `magisat-fp` poll step finds the §2.7 fingerprint and upgrades the `transferred` row in place    | `src/lib/marketplaceFingerprint.ts` | chain-fingerprint | `'magisat'`     |
+| `sold` (Magisat)                                   | `magisat-fp` poll step finds the §2.8 fingerprint and upgrades the `transferred` row in place    | `src/lib/marketplaceFingerprint.ts` | chain-fingerprint | `'magisat'`     |
 | `sold` (other paths)                               | (see §3.1 below — currently mixed quality)                                                       | Multiple paths                      | mixed             | varies          |
 | `listed`                                           | Satflow API listings stream                                                                      | Satflow                             | legacy-3rd-party  | `'satflow'`     |
 | `loan-originated`                                  | Liquidium origination fingerprint (§2.4), or Phase 4 traces backward from a resolution spend     | `src/lib/loanDetect.ts`             | chain-fingerprint | NULL            |
-| `loan-defaulted` / `loan-unlocked` / `loan-repaid` | Phase 4 detects a Liquidium OP_CSV+OP_DROP script-path spend, then traces lifecycle txs          | `src/lib/loanDetect.ts`             | chain-fingerprint | NULL            |
+| `loan-defaulted` / `loan-unlocked` / `loan-repaid` | Phase 4 OP_CSV+OP_DROP legacy detector OR §2.5 modern resolution fingerprint                     | `src/lib/loanDetect.ts`             | chain-fingerprint | NULL            |
 
 ### 3.1 `sold` events — current state of mixed quality
 
@@ -148,8 +171,8 @@ Magisat's public `/activity/global` feed exposes finalized PURCHASE / OFFER_PURC
 | `reverted-from-coop-heuristic` (was: `onchain-coop-heuristic`)  | 5,085  | reverted to `transferred` in v26 (§7.1) | No further action.                    |
 | `onchain-heuristic` (Layer 1 ACP, confidence: high)             | 18     | chain-fingerprint candidate             | Verify and promote. See §6.2.         |
 | Satflow                                                         | 282    | legacy-3rd-party                        | Keep as-is.                           |
-| `onchain-magisat-fp` (live + historical via fingerprint)        | 14+    | chain-fingerprint                       | Primary path going forward. See §2.7. |
-| `magisat-api-backfill` (cross-reference, fallback verification) | (n/a)  | chain-truth                             | Verification only. See §2.8.          |
+| `onchain-magisat-fp` (live + historical via fingerprint)        | 14+    | chain-fingerprint                       | Primary path going forward. See §2.8. |
+| `magisat-api-backfill` (cross-reference, fallback verification) | (n/a)  | chain-truth                             | Verification only. See §2.9.          |
 
 ## 4. Refuted hypotheses (do not re-introduce)
 
@@ -194,7 +217,7 @@ A real recurring fee/activation collector address. It is not Magisat. Twenty-nin
 
 ### 5.2 Magisat on-chain fingerprint
 
-**Resolved 2026-05-04** — see §2.7. The fee address `3Ke21osfhEbEryUeqdwAuAY8VKxm5B9uB2` recurs in 14/14 confirmed Magisat sales and is absent from confirmed-not-Magisat sales. Fingerprint promoted to chain-fingerprint tier.
+**Resolved 2026-05-04** — see §2.8. The fee address `3Ke21osfhEbEryUeqdwAuAY8VKxm5B9uB2` recurs in 14/14 confirmed Magisat sales and is absent from confirmed-not-Magisat sales. Fingerprint promoted to chain-fingerprint tier.
 
 ### 5.3 Magic Eden / OKX / Ord.io / OrdSwap fingerprints
 
@@ -308,13 +331,26 @@ Unchecked / inconclusive variant-shaped candidates from the 45-day review. These
 | 60566708    | `0949c415a7da6adb335b8c9285950cef090c3d2708fb88fb586babcf0ff3f4f4` | No loan visible around tx day; may be non-start or missed associated tx.                      |
 | 83312962    | `d751130a39198be0f7aca1fbc6c3a934cab78275cae02e299233cb932385d9e5` | Loan visible around timestamp and matching color, but exact inscription missing; probable TP. |
 
+### 6.1.2 Liquidium modern resolution fixtures (chain-fingerprint, promoted)
+
+Spot-checked across the production population (171 repay-shape + 49 default-shape closed loans across the 220 modern §2.4 origins observed at promotion time). All sampled resolutions carried internal pubkey `50929b74…ac0`; leaf shape always agreed with the borrower-vs-other destination heuristic.
+
+| Inscription | Type        | Tx                                                                 | Notes                                                                                |
+| ----------- | ----------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| 11299684    | repaid      | `096190e7b23881530451e470610f7a0381f286806400c5224b916020f2f303bf` | Cooperative-leaf repay (270 hex chars), Liquidium activation P2TR present in vout[2] |
+| 11299684    | repaid      | `bd7c9534c5ec20078f129a5628b26e7a09c9234798b92b800652a505b6b4c04e` | Same shape; second loan on same OMB by same borrower                                 |
+| 11299684    | repaid      | `10999a1895920b13f3b5beefc5f7ed45e22c6bff74766b8e5b9863515008635d` | Same shape; large vin count (10 P2SH inputs paying back BTC)                         |
+| 60578468    | defaulted   | `b4e99def0cbe9e3ef481c7bfeebe4cdd336eb119a06ed03fc14228d1e5392e5d` | CSV-gated leaf (148 hex chars, contains b275); 2-out lender seizure                  |
+
+Lifecycle-driven aggregates: `inscriptions.active_loan_count` decrements on resolution; `loan_count` lifetime counter is unchanged.
+
 ### 6.2 ACP-style sale detection (Layer 1 onchain heuristic)
 
 18 events currently tagged. Need to spot-check a sample to confirm they're real sales (and identify which marketplaces use ACP). **Action item:** sample 5, verify externally, document findings here.
 
 ### 6.3 Magisat sales (true positives — N=14, fingerprint match rate 14/14)
 
-All 14 confirmed Magisat OMB sales discovered via the §2.8 API cross-reference contain `3Ke21osfhEbEryUeqdwAuAY8VKxm5B9uB2` as a vout AND at least one ACP-signed input. Position is vout[3] in the dominant 7-output shape (13 of 14) and vout[2] in the single 3-output outlier (#60583767).
+All 14 confirmed Magisat OMB sales discovered via the §2.9 API cross-reference contain `3Ke21osfhEbEryUeqdwAuAY8VKxm5B9uB2` as a vout AND at least one ACP-signed input. Position is vout[3] in the dominant 7-output shape (13 of 14) and vout[2] in the single 3-output outlier (#60583767).
 
 | Inscription | Tx                                                                 | n_in/n_out | Price (sats) |
 | ----------- | ------------------------------------------------------------------ | ---------- | ------------ |
@@ -374,6 +410,16 @@ pnpm backfill-liquidium-originations
 ```
 
 Use `pnpm backfill-liquidium-originations -- --dry-run` first when testing manually. The script requires `BITCOIN_RPC_URL` and uses `OMB_DB_PATH` (default `/data/app.db`). It reclassifies historical `transferred`/`sold` rows to `loan-originated`, unwinds stale sale/transfer aggregates, updates `loan_count` / `active_loan_count` / `effective_owner`, and drops obsolete notification queue entries for upgraded rows.
+
+### 7.5 Modern Liquidium resolution backfill — RUN AFTER DEPLOY
+
+Run once after deploying the §2.5 resolution detector. Order matters: the resolution sweep relies on the §2.4 origination backfill having already promoted modern `loan-originated` rows, since it walks each escrow forward to find the spend.
+
+```bash
+pnpm backfill-liquidium-modern-resolutions
+```
+
+Use `pnpm backfill-liquidium-modern-resolutions -- --dry-run` first when testing manually. Same env vars as §7.4. Upgrades each `transferred` row that comes out of a modern escrow to `loan-repaid`, `loan-defaulted`, or `loan-unlocked` based on the leaf shape, decrements `inscriptions.active_loan_count`, and drops the obsolete notify-queue entries. Idempotent.
 
 ## 8. How to add a new tagging rule
 

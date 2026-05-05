@@ -32,6 +32,10 @@ import {
   detectLiquidiumOriginationCandidate,
   type LiquidiumOriginationMatchKind,
 } from './liquidiumOriginationFingerprint';
+import {
+  detectLiquidiumModernResolution,
+  type LiquidiumResolutionKind,
+} from './liquidiumModernResolutionFingerprint';
 
 // Tick wallclock cap. The /api/internal/poll auto cron runs every 5min;
 // loans is one of several streams in that tick, so it should complete fast
@@ -621,6 +625,14 @@ export async function runLoanTick(
   const defaults: Array<{ verdict: DefaultVerdict; events: typeof targets }> = [];
   const unlockCandidates: Array<{ verdict: UnlockCandidate; events: typeof targets }> = [];
   const directOriginations: DirectOrigination[] = [];
+  const modernResolutions: Array<{
+    resolution: LiquidiumResolutionKind;
+    escrowAddr: string;
+    destinationAddress: string | null;
+    leafScriptHex: string;
+    txid: string;
+    events: typeof targets;
+  }> = [];
   let scanned = 0;
   let highestProcessedId = cursor.last_event_id;
 
@@ -655,6 +667,25 @@ export async function runLoanTick(
         defaults.push({ verdict, events });
       } else if (verdict.kind === 'unlock-candidate') {
         unlockCandidates.push({ verdict, events });
+      } else {
+        // Phase 4 didn't classify — try the modern resolution fingerprint.
+        // Only relevant for events that are still 'transferred' (live ord
+        // ticks insert these); already-loan-* rows past the cursor are
+        // re-scanned only to advance the cursor, not re-tagged.
+        const transferEvents = events.filter(ev => ev.event_type === 'transferred');
+        if (transferEvents.length > 0) {
+          const modern = detectLiquidiumModernResolution(tx);
+          if (modern) {
+            modernResolutions.push({
+              resolution: modern.resolution,
+              escrowAddr: modern.escrowAddress,
+              destinationAddress: modern.destinationAddress,
+              leafScriptHex: modern.leafScriptHex,
+              txid,
+              events: transferEvents,
+            });
+          }
+        }
       }
       // Advance the high-water mark only for txs we successfully classified
       // (skip + matched both count). RPC errors leave the cursor where it
@@ -790,6 +821,14 @@ export async function runLoanTick(
          AND txid           = @txid
          AND event_type     = 'transferred'
     `),
+    upgradeTransferToRepaid: db.prepare(`
+      UPDATE events
+         SET event_type = 'loan-repaid',
+             raw_json   = @raw_json
+       WHERE inscription_id = @inscription_id
+         AND txid           = @txid
+         AND event_type     = 'transferred'
+    `),
     insertRepaid: db.prepare(`
       INSERT OR IGNORE INTO events
         (inscription_id, inscription_number, event_type, block_timestamp,
@@ -837,6 +876,17 @@ export async function runLoanTick(
         effective_owner   = current_owner
       WHERE inscription_number = @inscription_number
     `),
+    // Modern resolution upgrades (repaid / defaulted / unlocked) all close
+    // out one active loan and consume the 'transferred' aggregate. Effective
+    // ownership tracks the chain — current_owner already reflects the
+    // post-resolution UTXO holder.
+    onModernResolution: db.prepare(`
+      UPDATE inscriptions SET
+        transfer_count    = MAX(transfer_count - 1, 0),
+        active_loan_count = MAX(active_loan_count - 1, 0),
+        effective_owner   = current_owner
+      WHERE inscription_number = @inscription_number
+    `),
     // The notify queue's fan-out filter only selects 'transferred','sold','listed';
     // a row whose type we just upgraded to loan-* would otherwise sit in the
     // queue forever. Drop it explicitly so the queue stays bounded. When
@@ -845,7 +895,15 @@ export async function runLoanTick(
     dequeueNotify: db.prepare(`DELETE FROM notify_pending WHERE event_id = @id`),
   };
 
-  const writeStats = { defaults: 0, originations: 0, unlocks: 0, repayments: 0 };
+  const writeStats = {
+    defaults: 0,
+    originations: 0,
+    unlocks: 0,
+    repayments: 0,
+    modernRepaid: 0,
+    modernDefaulted: 0,
+    modernUnlocked: 0,
+  };
   const writeAll = db.transaction(() => {
     // Originations FIRST so active_loan_count is bumped before any
     // default/unlock decrements it. Otherwise the MAX(x-1, 0) clamp would
@@ -996,6 +1054,38 @@ export async function runLoanTick(
       }
     }
 
+    for (const m of modernResolutions) {
+      const raw = JSON.stringify({
+        source: 'liquidium-modern-resolution-fingerprint',
+        confidence: 'high',
+        loan_type: m.resolution,
+        escrow_addr: m.escrowAddr,
+        destination_addr: m.destinationAddress,
+        leaf_script_hex: m.leafScriptHex,
+        detector_version: DETECTOR_VERSION,
+      });
+      const upgrade =
+        m.resolution === 'defaulted'
+          ? stmts.upgradeToDefault
+          : m.resolution === 'unlocked'
+            ? stmts.upgradeToUnlock
+            : stmts.upgradeTransferToRepaid;
+      for (const ev of m.events) {
+        const r = upgrade.run({
+          inscription_id: ev.inscription_id,
+          txid: ev.txid,
+          raw_json: raw,
+        });
+        if (r.changes > 0) {
+          stmts.onModernResolution.run({ inscription_number: ev.inscription_number });
+          stmts.dequeueNotify.run({ id: ev.id });
+          if (m.resolution === 'repaid') writeStats.modernRepaid++;
+          else if (m.resolution === 'defaulted') writeStats.modernDefaulted++;
+          else writeStats.modernUnlocked++;
+        }
+      }
+    }
+
     for (const r of repayments) {
       const info = r.unlockEntry.escrowInfo;
       const raw = JSON.stringify({
@@ -1029,16 +1119,24 @@ export async function runLoanTick(
 
   const dur = Date.now() - startedAt;
   const budgetExhausted = dur > budgetMs;
-  if (
-    writeStats.defaults + writeStats.originations + writeStats.unlocks + writeStats.repayments >
-    0
-  ) {
+  const totalWrites =
+    writeStats.defaults +
+    writeStats.originations +
+    writeStats.unlocks +
+    writeStats.repayments +
+    writeStats.modernRepaid +
+    writeStats.modernDefaulted +
+    writeStats.modernUnlocked;
+  if (totalWrites > 0) {
     log.info('poll/loans', 'tick complete', {
       scanned,
       defaults: writeStats.defaults,
       originations: writeStats.originations,
       unlocks: writeStats.unlocks,
       repayments: writeStats.repayments,
+      modern_repaid: writeStats.modernRepaid,
+      modern_defaulted: writeStats.modernDefaulted,
+      modern_unlocked: writeStats.modernUnlocked,
       cursor: highestProcessedId,
       dur_ms: dur,
     });
@@ -1047,10 +1145,10 @@ export async function runLoanTick(
   return {
     mode: 'loans',
     scanned,
-    defaults: writeStats.defaults,
+    defaults: writeStats.defaults + writeStats.modernDefaulted,
     originations: writeStats.originations,
-    unlocks: writeStats.unlocks,
-    repayments: writeStats.repayments,
+    unlocks: writeStats.unlocks + writeStats.modernUnlocked,
+    repayments: writeStats.repayments + writeStats.modernRepaid,
     cursor_advanced_to: highestProcessedId,
     ...(budgetExhausted ? { budget_exhausted: true } : {}),
   };

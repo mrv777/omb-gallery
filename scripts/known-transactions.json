@@ -4,6 +4,22 @@
   "version": 1,
   "transactions": [
     {
+      "txid": "096190e7b23881530451e470610f7a0381f286806400c5224b916020f2f303bf",
+      "inscription_number": 11299684,
+      "expected_type": "loan-repaid",
+      "description": "Modern Liquidium instant-loan repayment — borrower bc1pkpjy8m5q9uhjt9p89ykphla8m8wgjcwp0rraxwzxvr2lv7cw90fs9a6j22 repays the loan against #11299684 and reclaims the inscription. Tap-tree script-path spend of escrow bc1p7525hmk8rjvlsft5kjpeyxhze3yqjra654pupmc3wyh2c6xejm0qss4g9y using the cooperative leaf (270 hex chars, no OP_CSV). Internal pubkey 50929b74…ac0; vout[1]=lender vault P2WSH; vout[2]=Liquidium activation P2TR (bc1papmpmu0…59se9u). ONCHAIN_TAGGING.md §2.5.",
+      "borrower": "bc1pkpjy8m5q9uhjt9p89ykphla8m8wgjcwp0rraxwzxvr2lv7cw90fs9a6j22",
+      "tags": ["loan", "repayment", "liquidium", "modern", "taproot-script-path"]
+    },
+    {
+      "txid": "b4e99def0cbe9e3ef481c7bfeebe4cdd336eb119a06ed03fc14228d1e5392e5d",
+      "inscription_number": 60578468,
+      "expected_type": "loan-defaulted",
+      "description": "Modern Liquidium instant-loan default — lender claims #60578468 from escrow bc1ph2zz5wc7gc7uk082ptp8jq8fte84qptmuv2jajmlvf9hy6a5gx8svzrku5 via the CSV-gated leaf (148 hex chars, contains b275 = OP_CSV+OP_DROP). Internal pubkey 50929b74…ac0; vout shape is the simple inscription-seizure 2-out form (no Liquidium activation output). ONCHAIN_TAGGING.md §2.5.",
+      "borrower": "bc1prkfeat3lkftdv0a7rml97lruv83eg6j26ac7sencrgctzwcl62dqmwhek6",
+      "tags": ["loan", "default", "liquidium", "modern", "csv-timelock", "taproot-script-path"]
+    },
+    {
       "txid": "fb8259cd3d3c18d2ed037f3d91323766a783635dff42fa8871174876475d85fb",
       "inscription_number": 10444091,
       "expected_type": "loan-defaulted",

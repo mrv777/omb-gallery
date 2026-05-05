@@ -204,7 +204,7 @@ function renderInscriptionMetric(row: ApiInscription, type: LeaderboardKey): str
     case 'most-loaned':
       return `${(row.loan_count ?? 0).toLocaleString()}`;
     case 'currently-loaned':
-      return `${(row.active_loan_count ?? 0).toLocaleString()}`;
+      return row.active_loan_started_at ? formatRelTime(row.active_loan_started_at) : '—';
     case 'top-holders':
       return '';
   }

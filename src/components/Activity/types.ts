@@ -52,6 +52,10 @@ export type ApiInscription = {
   highest_sale_sats: number;
   loan_count?: number;
   active_loan_count?: number;
+  /** block_timestamp of the most recent un-resolved `loan-originated` event
+   * for this inscription. Only populated by the currently-loaned leaderboard
+   * queries — null elsewhere. */
+  active_loan_started_at?: number | null;
 };
 
 /** One identity in the top-holders leaderboard. When `is_user`, multiple
