@@ -240,8 +240,50 @@ async function main() {
     if (!DRY_RUN && apply.immediate({ row, match })) stats.changed++;
   }
 
+  // Recompute effective_owner for any inscription whose latest-by-timestamp
+  // loan event is an open origination. Each resolution UPDATE during the
+  // loop above sets effective_owner = current_owner, but if the resolution
+  // gets a higher event_id than a chronologically-earlier origination
+  // (typical when this backfill runs after the origination backfill), the
+  // resolution's UPDATE would clobber the origination's effective_owner =
+  // borrower. Repair pass restores the borrower for active loans.
+  let effectiveOwnerFixes = 0;
+  if (!DRY_RUN) {
+    const r = db.prepare(`
+      WITH latest_loan_event AS (
+        SELECT inscription_number,
+               json_extract(raw_json,'$.borrower_addr') AS borrower,
+               event_type,
+               ROW_NUMBER() OVER (PARTITION BY inscription_number
+                                  ORDER BY block_timestamp DESC, id DESC) AS rn
+          FROM events
+         WHERE event_type LIKE 'loan-%'
+      )
+      UPDATE inscriptions
+         SET effective_owner = (
+           SELECT borrower FROM latest_loan_event
+            WHERE latest_loan_event.inscription_number = inscriptions.inscription_number
+              AND rn = 1
+              AND event_type = 'loan-originated'
+              AND borrower IS NOT NULL
+         )
+       WHERE active_loan_count > 0
+         AND inscription_number IN (
+           SELECT inscription_number FROM latest_loan_event
+            WHERE rn = 1
+              AND event_type = 'loan-originated'
+              AND borrower IS NOT NULL
+         )
+    `).run();
+    effectiveOwnerFixes = r.changes;
+  }
+
   console.log(
-    JSON.stringify({ dry_run: DRY_RUN, ...stats, failures: failures.slice(0, 10) }, null, 2)
+    JSON.stringify(
+      { dry_run: DRY_RUN, ...stats, effective_owner_fixes: effectiveOwnerFixes, failures: failures.slice(0, 10) },
+      null,
+      2
+    )
   );
 }
 
