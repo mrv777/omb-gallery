@@ -16,8 +16,9 @@ import { usePathname, useSearchParams } from 'next/navigation';
 // in the App Router. Without this, a click on a `<Link>` to a server-rendered
 // route (e.g. /holder/[address], /inscription/[number], /explorer/[type])
 // silently waits for the RSC payload — the previous page just sits there with
-// zero feedback. The 150ms show-delay means fast routes never flash a loader;
-// the 200ms tail lets the bar visibly finish instead of vanishing mid-stride.
+// zero feedback. The 500ms show-delay means routes that complete quickly
+// never flash a loader; the 200ms tail lets the bar visibly finish instead
+// of vanishing mid-stride.
 
 type Ctx = { startNavigation: () => void };
 const NavigationContext = createContext<Ctx | null>(null);
@@ -30,8 +31,12 @@ export function useNavigationStart(): () => void {
 
 function noop() {}
 
-const SHOW_DELAY_MS = 150;
+const SHOW_DELAY_MS = 500;
 const HIDE_TAIL_MS = 200;
+// Hard ceiling on how long the bar can stay up. Defends against any edge
+// case where `navigating` gets stuck (e.g. a click handler fires after the
+// route has already updated, leaving no future pathname change to clear it).
+const SAFETY_TIMEOUT_MS = 20_000;
 
 export default function NavigationProgress({ children }: { children: ReactNode }) {
   return (
@@ -51,22 +56,36 @@ function NavigationProgressInner({ children }: { children: ReactNode }) {
     setNavigating(true);
   }, []);
 
-  // Detect navigation completion: pathname or query string actually changed.
-  // We compare against the last-seen pair so we don't clear on the initial
-  // mount or on unrelated re-renders.
-  const lastUrlRef = useRef<{ pathname: string; qs: string } | null>(null);
+  // Clear `navigating` whenever the route actually changes. We deliberately
+  // do NOT compare to a previous-pathname ref — under cache-hit back/forward
+  // navs, Next.js's internal handlers can update pathname state in a tick
+  // where the comparison loses to a racing setNavigating(true), pinning the
+  // bar on. Always clearing on any post-mount route change is race-free; the
+  // initial-mount guard prevents a spurious clear on first load.
+  const mountedRef = useRef(false);
   useEffect(() => {
-    const qs = searchParams.toString();
-    const last = lastUrlRef.current;
-    lastUrlRef.current = { pathname, qs };
-    if (last && (last.pathname !== pathname || last.qs !== qs)) {
-      setNavigating(false);
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      return;
     }
+    setNavigating(false);
   }, [pathname, searchParams]);
+
+  // Safety timeout: hard-clear `navigating` after SAFETY_TIMEOUT_MS so the
+  // bar can never get stuck indefinitely.
+  useEffect(() => {
+    if (!navigating) return;
+    const t = setTimeout(() => setNavigating(false), SAFETY_TIMEOUT_MS);
+    return () => clearTimeout(t);
+  }, [navigating]);
 
   // Document-level click interceptor for `<Link>` and `<a>` clicks. We deliberately
   // use a capture-phase listener so we still see the click even if a child component
   // calls e.preventDefault — but we only act on plain left-clicks to internal routes.
+  // We do NOT listen to popstate: Next's internal popstate handling can update
+  // pathname synchronously on cache hits, racing setNavigating(true) and
+  // leaving the bar stuck. Cache-hit back/forward is fast enough that the
+  // 500ms show-delay would suppress feedback there anyway.
   useEffect(() => {
     function onClick(e: MouseEvent) {
       if (e.button !== 0) return;
@@ -95,17 +114,9 @@ function NavigationProgressInner({ children }: { children: ReactNode }) {
       startNavigation();
     }
 
-    // Browser back/forward — App Router serves from cache when warm but can
-    // round-trip the server when cold (TTL expired, or never visited).
-    function onPopState() {
-      startNavigation();
-    }
-
     document.addEventListener('click', onClick, true);
-    window.addEventListener('popstate', onPopState);
     return () => {
       document.removeEventListener('click', onClick, true);
-      window.removeEventListener('popstate', onPopState);
     };
   }, [startNavigation]);
 
