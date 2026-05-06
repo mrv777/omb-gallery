@@ -242,25 +242,41 @@ export async function runMagisatFingerprintTick(opts: { live: boolean }): Promis
     apply();
   }
 
-  // Advance cursor to the highest candidate id we examined, even if some were
-  // skipped (rpc fails) — they'll be retried via the backfill script if they
-  // matter. Per-row retry inside the live tick would unbound budget.
-  const newCursor = candidates[candidates.length - 1].id;
-  db.prepare(
-    `UPDATE poll_state
-        SET last_cursor       = @c,
-            last_run_at       = unixepoch(),
-            last_status       = @status,
-            last_event_count  = @upgraded
-      WHERE stream = @s AND collection_slug = @col`
-  ).run({
-    c: String(newCursor),
-    status: result.upgraded > 0 ? 'upgrades' : 'idle',
-    upgraded: result.upgraded,
-    s: STREAM,
-    col: COLLECTION,
-  });
-  result.cursor_advanced = true;
+  // Advance cursor only past the contiguous prefix of successfully probed
+  // rows. RPC failures (rare on a co-located bitcoind) hold the cursor so the
+  // next tick re-probes them — without this, a transient failure on a real
+  // sale would silently leave it tagged `transferred` forever. Worst case all
+  // PER_TICK_LIMIT rows fail and we re-scan the same batch; bounded.
+  const firstFailIdx = probes.findIndex(p => p && p.rpcFail);
+  const advanceToIdx = firstFailIdx === -1 ? candidates.length - 1 : firstFailIdx - 1;
+  if (advanceToIdx >= 0) {
+    const newCursor = candidates[advanceToIdx].id;
+    db.prepare(
+      `UPDATE poll_state
+          SET last_cursor       = @c,
+              last_run_at       = unixepoch(),
+              last_status       = @status,
+              last_event_count  = @upgraded
+        WHERE stream = @s AND collection_slug = @col`
+    ).run({
+      c: String(newCursor),
+      status: result.upgraded > 0 ? 'upgrades' : 'idle',
+      upgraded: result.upgraded,
+      s: STREAM,
+      col: COLLECTION,
+    });
+    result.cursor_advanced = true;
+  } else {
+    // First candidate failed RPC — touch last_run_at + status only so health
+    // checks see the tick ran, but leave last_cursor where it was for retry.
+    db.prepare(
+      `UPDATE poll_state
+          SET last_run_at      = unixepoch(),
+              last_status      = 'rpc-fail-hold'
+        WHERE stream = @s AND collection_slug = @col`
+    ).run({ s: STREAM, col: COLLECTION });
+  }
+  const newCursor = advanceToIdx >= 0 ? candidates[advanceToIdx].id : cursor;
   result.duration_ms = Date.now() - startedAt;
 
   if (result.upgraded > 0 || result.rpc_failures > 0) {

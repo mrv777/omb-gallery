@@ -248,22 +248,36 @@ export async function runMagicEdenFingerprintTick(opts: { live: boolean }): Prom
     apply();
   }
 
-  const newCursor = candidates[candidates.length - 1].id;
-  db.prepare(
-    `UPDATE poll_state
-        SET last_cursor       = @c,
-            last_run_at       = unixepoch(),
-            last_status       = @status,
-            last_event_count  = @upgraded
-      WHERE stream = @s AND collection_slug = @col`
-  ).run({
-    c: String(newCursor),
-    status: result.upgraded > 0 ? 'upgrades' : 'idle',
-    upgraded: result.upgraded,
-    s: STREAM,
-    col: COLLECTION,
-  });
-  result.cursor_advanced = true;
+  // Advance cursor only past the contiguous prefix of successfully probed
+  // rows. See magisatFingerprintTick.ts for the rationale.
+  const firstFailIdx = probes.findIndex(p => p && p.rpcFail);
+  const advanceToIdx = firstFailIdx === -1 ? candidates.length - 1 : firstFailIdx - 1;
+  if (advanceToIdx >= 0) {
+    const c = candidates[advanceToIdx].id;
+    db.prepare(
+      `UPDATE poll_state
+          SET last_cursor       = @c,
+              last_run_at       = unixepoch(),
+              last_status       = @status,
+              last_event_count  = @upgraded
+        WHERE stream = @s AND collection_slug = @col`
+    ).run({
+      c: String(c),
+      status: result.upgraded > 0 ? 'upgrades' : 'idle',
+      upgraded: result.upgraded,
+      s: STREAM,
+      col: COLLECTION,
+    });
+    result.cursor_advanced = true;
+  } else {
+    db.prepare(
+      `UPDATE poll_state
+          SET last_run_at      = unixepoch(),
+              last_status      = 'rpc-fail-hold'
+        WHERE stream = @s AND collection_slug = @col`
+    ).run({ s: STREAM, col: COLLECTION });
+  }
+  const newCursor = advanceToIdx >= 0 ? candidates[advanceToIdx].id : cursor;
   result.duration_ms = Date.now() - startedAt;
 
   if (result.upgraded > 0 || result.rpc_failures > 0) {
