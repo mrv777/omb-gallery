@@ -1,9 +1,14 @@
 // Liquidium instant-loan origination fingerprint.
 //
-// Production only promotes the strict shape plus the P2TR-principal variant
-// subset documented in ONCHAIN_TAGGING.md. P2SH/P2WPKH variants remain review
-// candidates because they collide with assumed non-loan starts in the fixture
-// corpus.
+// All match kinds anchor on the same strong gates (Liquidium activation-fee
+// address at vout[1], P2WSH lender vault at vout[3] with 1-of-2 multisig
+// witness on every non-collateral input, P2TR collateral=escrow value
+// preservation). The matchKind labels the borrower-payout variant so the
+// caller can reason about confidence: strict-p2sh / variant-p2tr are the
+// historical promoted shapes; relaxed-p2sh / relaxed-p2wpkh /
+// relaxed-p2tr-bigvin are loosened cases that the call site can elevate to
+// high confidence when the lender vault is in the known-vault set, or hold
+// at medium otherwise. ONCHAIN_TAGGING.md §2.4.
 
 export type LoanOriginationFingerprintTx = {
   vin: Array<{
@@ -24,7 +29,12 @@ export type LoanOriginationFingerprintTx = {
   }>;
 };
 
-export type LiquidiumOriginationMatchKind = 'strict-p2sh' | 'variant-p2tr';
+export type LiquidiumOriginationMatchKind =
+  | 'strict-p2sh'
+  | 'variant-p2tr'
+  | 'relaxed-p2sh'
+  | 'relaxed-p2wpkh'
+  | 'relaxed-p2tr-bigvin';
 
 export type LiquidiumOriginationCandidate = {
   kind: 'liquidium-origination-candidate';
@@ -99,9 +109,8 @@ function isP2shType(t: string | null): boolean {
   return t === 'p2sh' || t === 'scripthash';
 }
 
-function isProductionP2trPrincipalVariant(tx: LoanOriginationFingerprintTx): boolean {
-  if (tx.vin.length > 4) return false;
-  return isP2trType(typeOf(tx.vout[2]));
+function isP2wpkhType(t: string | null): boolean {
+  return t === 'v0_p2wpkh' || t === 'witness_v0_keyhash';
 }
 
 function witnessOf(vin: LoanOriginationFingerprintTx['vin'][number]): string[] {
@@ -141,11 +150,19 @@ export function detectLiquidiumOriginationCandidate(
   if (feeAddress !== LIQUIDIUM_ACTIVATION_FEE_ADDR) return null;
   if (!isP2wshType(typeOf(changeOut))) return null;
 
+  const payoutType = typeOf(payoutOut);
+  const vinCount = tx.vin.length;
   let matchKind: LiquidiumOriginationMatchKind;
-  if (tx.vin.length >= 3 && isP2shType(typeOf(payoutOut))) {
+  if (vinCount >= 3 && isP2shType(payoutType)) {
     matchKind = 'strict-p2sh';
-  } else if (isProductionP2trPrincipalVariant(tx)) {
+  } else if (vinCount <= 4 && isP2trType(payoutType)) {
     matchKind = 'variant-p2tr';
+  } else if (vinCount === 2 && isP2shType(payoutType)) {
+    matchKind = 'relaxed-p2sh';
+  } else if (isP2wpkhType(payoutType)) {
+    matchKind = 'relaxed-p2wpkh';
+  } else if (vinCount > 4 && isP2trType(payoutType)) {
+    matchKind = 'relaxed-p2tr-bigvin';
   } else {
     return null;
   }

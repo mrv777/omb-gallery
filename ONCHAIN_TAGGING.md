@@ -81,9 +81,11 @@ Twenty-nine user-verified OMB loans from 2026 share a narrow instant-loan origin
 
 **Confirmed loan fixtures:** #11523618 (`7b4855e7…`, 16d green), #11287305 (`5c2e3ba9…`, 30d green), #60578598 (`6fecd1ba…`, 30d orange), plus twenty-six more operator-verified loans. See §6.1.1.
 
-- **Confidence:** promoted chain-fingerprint for the strict P2SH-principal shape and the narrow P2TR-principal variant subset (`vout[2]=P2TR`, `vin.length <= 4`). We have 29 externally confirmed true positives for the strict shape and 15 confirmed close variants. Assuming the 2026-05-05 "no loan visible" review items are non-originations, P2SH/P2WPKH loose variants collide with non-starts and remain review-only.
-- **Code:** `src/lib/liquidiumOriginationFingerprint.ts` contains the production matcher. `src/lib/loanDetect.ts` runs it live against new `transferred` and `sold` events. `scripts/backfill-liquidium-originations.js` backfills historical rows and also promotes exact confirmed variant txids from `scripts/known-transactions.json`.
-- **Tag rule:** emit `loan-originated` for strict shape and promoted P2TR-principal variants. Exact confirmed P2SH/P2WPKH variant txids are backfilled from the fixture allowlist only; future broad P2SH/P2WPKH variant matches are not auto-tagged.
+- **Confidence:** promoted chain-fingerprint for every borrower-payout class, with confidence split by lender-vault provenance. The structural gates (activation-fee address at `vout[1]`, P2WSH lender vault at `vout[3]`, 1-of-2 multisig witness on every non-collateral input, P2TR collateral=escrow value preservation) are strong enough on their own that the `vout[2]` type is not a credibility filter — it just labels the variant. The 2026-05-05 detector relaxation (commit landed once we cross-checked the previously review-only candidates and found 92% reuse lender vaults already in confirmed loans, with the remaining 8% structurally indistinguishable). Earlier "no loan visible" review verdicts were reviewer-window error rather than evidence of non-loan collisions.
+- **Match kinds:** `strict-p2sh` (`vin >= 3`, `vout[2]=P2SH`); `variant-p2tr` (`vin <= 4`, `vout[2]=P2TR`); `relaxed-p2sh` (`vin == 2`, `vout[2]=P2SH`); `relaxed-p2wpkh` (`vout[2]=P2WPKH`, any vin count); `relaxed-p2tr-bigvin` (`vin > 4`, `vout[2]=P2TR`).
+- **Confidence rule:** `strict-p2sh` always `high`. `variant-p2tr` always `medium`. `relaxed-*` is `high` when the lender vault already appears in a confirmed `loan-originated` event at write time, `medium` otherwise. The known-vault snapshot is taken at tick start (live) or script start (backfill); newer vaults can promote on subsequent runs as the corpus grows.
+- **Code:** `src/lib/liquidiumOriginationFingerprint.ts` contains the production matcher. `src/lib/loanDetect.ts` runs it live against new `transferred` and `sold` events and computes the known-vault set per tick. `scripts/backfill-liquidium-originations.js` mirrors the same gate + confidence rule and also promotes exact confirmed variant txids from `scripts/known-transactions.json` as a fallback for txs that fail every gate but were externally confirmed.
+- **Tag rule:** emit `loan-originated` for every match kind, with confidence per the rule above. The historical close-variants previously held in `known-transactions.json` are now caught directly by the relaxed gate; the allowlist remains as belt-and-braces for future external confirmations that don't fit the structural rule.
 
 ### 2.5 Modern Liquidium loan resolution fingerprint
 
@@ -96,7 +98,7 @@ The §2.4 origination shape closes via one of two tap-leaves on a fixed internal
 
 Disambiguation by leaf:
 
-- **Repaid (cooperative leaf, ~135 raw bytes):** `<pkA> OP_CHECKSIGVERIFY <pkB> OP_CHECKSIGVERIFY <push 66 ASCII bytes>`. The trailing 66-byte push is the inscription's *previous* outpoint (`<txid>:<vout>`) — Liquidium binds the leaf to one specific inscription so two loans can never collide on the same tap-tree. The corresponding tx pays the inscription back to the borrower (`vout[0]`), the lender-vault P2WSH (`vout[1]`), the Liquidium activation P2TR `bc1papmpmu0…59se9u` (`vout[2]`), and a P2SH change output back to the borrower (`vout[3]`).
+- **Repaid (cooperative leaf, ~135 raw bytes):** `<pkA> OP_CHECKSIGVERIFY <pkB> OP_CHECKSIGVERIFY <push 66 ASCII bytes>`. The trailing 66-byte push is the inscription's _previous_ outpoint (`<txid>:<vout>`) — Liquidium binds the leaf to one specific inscription so two loans can never collide on the same tap-tree. The corresponding tx pays the inscription back to the borrower (`vout[0]`), the lender-vault P2WSH (`vout[1]`), the Liquidium activation P2TR `bc1papmpmu0…59se9u` (`vout[2]`), and a P2SH change output back to the borrower (`vout[3]`).
 - **Defaulted (CSV-gated lender claim, ~74 raw bytes):** `<csv> OP_CSV OP_DROP <pkA> OP_CHECKSIGVERIFY <pkB> OP_CHECKSIG`. The OP_CSV+OP_DROP pair (`b275`) is the unique distinguisher. Tx is the simple inscription-seizure 2-out shape with no Liquidium activation output.
 - **Unlocked (catch-all):** internal pubkey matches but the leaf is neither a repay nor a default — surface as `loan-unlocked` and preserve the leaf hex in `raw_json` for analysis.
 
@@ -218,30 +220,30 @@ On-chain shape: cooperative SIGHASH_ALL / SIGHASH_DEFAULT — `vin[2]` (the insc
 
 ## 3. Tagging rules currently active
 
-| `event_type`                                       | When emitted                                                                                     | Source rule                         | Confidence tier   | Marketplace tag |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------- | ----------------- | --------------- |
-| `transferred`                                      | ord poll detects UTXO change for any inscription, OR `backfill-transfers.js` walks chain history | UTXO movement                       | chain-truth       | NULL            |
-| `mint`                                             | `old_owner` matches a registered mint wallet (§2.1) AND inscription color matches                | Wallet → color map                  | chain-truth       | NULL            |
-| `sold` (Magisat)                                   | `magisat-fp` poll step finds the §2.8 fingerprint and upgrades the `transferred` row in place    | `src/lib/marketplaceFingerprint.ts` | chain-fingerprint | `'magisat'`     |
-| `sold` (Magic Eden)                                | `magic-eden-fp` poll step finds the §2.10 fingerprint and upgrades the `transferred` row in place| `src/lib/marketplaceFingerprint.ts` | chain-fingerprint | `'magic-eden'`  |
-| `sold` (ord.net)                                   | `ord-net-fp` poll step finds the §2.11 fingerprint and upgrades the `transferred` row in place   | `src/lib/marketplaceFingerprint.ts` | chain-fingerprint | `'ord-net'`     |
-| `sold` (other paths)                               | (see §3.1 below — currently mixed quality)                                                       | Multiple paths                      | mixed             | varies          |
-| `listed`                                           | Satflow API listings stream                                                                      | Satflow                             | legacy-3rd-party  | `'satflow'`     |
-| `loan-originated`                                  | Liquidium origination fingerprint (§2.4), or Phase 4 traces backward from a resolution spend     | `src/lib/loanDetect.ts`             | chain-fingerprint | NULL            |
-| `loan-defaulted` / `loan-unlocked` / `loan-repaid` | Phase 4 OP_CSV+OP_DROP legacy detector OR §2.5 modern resolution fingerprint                     | `src/lib/loanDetect.ts`             | chain-fingerprint | NULL            |
+| `event_type`                                       | When emitted                                                                                      | Source rule                         | Confidence tier   | Marketplace tag |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------- | ----------------- | --------------- |
+| `transferred`                                      | ord poll detects UTXO change for any inscription, OR `backfill-transfers.js` walks chain history  | UTXO movement                       | chain-truth       | NULL            |
+| `mint`                                             | `old_owner` matches a registered mint wallet (§2.1) AND inscription color matches                 | Wallet → color map                  | chain-truth       | NULL            |
+| `sold` (Magisat)                                   | `magisat-fp` poll step finds the §2.8 fingerprint and upgrades the `transferred` row in place     | `src/lib/marketplaceFingerprint.ts` | chain-fingerprint | `'magisat'`     |
+| `sold` (Magic Eden)                                | `magic-eden-fp` poll step finds the §2.10 fingerprint and upgrades the `transferred` row in place | `src/lib/marketplaceFingerprint.ts` | chain-fingerprint | `'magic-eden'`  |
+| `sold` (ord.net)                                   | `ord-net-fp` poll step finds the §2.11 fingerprint and upgrades the `transferred` row in place    | `src/lib/marketplaceFingerprint.ts` | chain-fingerprint | `'ord-net'`     |
+| `sold` (other paths)                               | (see §3.1 below — currently mixed quality)                                                        | Multiple paths                      | mixed             | varies          |
+| `listed`                                           | Satflow API listings stream                                                                       | Satflow                             | legacy-3rd-party  | `'satflow'`     |
+| `loan-originated`                                  | Liquidium origination fingerprint (§2.4), or Phase 4 traces backward from a resolution spend      | `src/lib/loanDetect.ts`             | chain-fingerprint | NULL            |
+| `loan-defaulted` / `loan-unlocked` / `loan-repaid` | Phase 4 OP_CSV+OP_DROP legacy detector OR §2.5 modern resolution fingerprint                      | `src/lib/loanDetect.ts`             | chain-fingerprint | NULL            |
 
 ### 3.1 `sold` events — current state of mixed quality
 
-| Source key in `raw_json`                                        | Count  | Tier                                    | Action                                |
-| --------------------------------------------------------------- | ------ | --------------------------------------- | ------------------------------------- |
-| `ord-net-history-backfill`                                      | 15,706 | legacy-3rd-party                        | Keep as-is. Marketplace already NULL. |
-| `reverted-from-coop-heuristic` (was: `onchain-coop-heuristic`)  | 5,085  | reverted to `transferred` in v26 (§7.1) | No further action.                    |
-| `onchain-heuristic` (Layer 1 ACP, confidence: high)             | 18     | chain-fingerprint candidate             | Verify and promote. See §6.2.         |
-| Satflow                                                         | 282    | legacy-3rd-party                        | Keep as-is.                           |
-| `onchain-magisat-fp` (live + historical via fingerprint)        | 14+    | chain-fingerprint                       | Primary path going forward. See §2.8. |
-| `onchain-magic-eden-fp` (live + historical via fingerprint)     | 10+    | chain-fingerprint                       | Primary path going forward. See §2.10.|
-| `onchain-ord-net-fp` (live + historical via fingerprint)        | 2+     | chain-fingerprint                       | Primary path going forward. See §2.11.|
-| `magisat-api-backfill` (cross-reference, fallback verification) | (n/a)  | chain-truth                             | Verification only. See §2.9.          |
+| Source key in `raw_json`                                        | Count  | Tier                                    | Action                                 |
+| --------------------------------------------------------------- | ------ | --------------------------------------- | -------------------------------------- |
+| `ord-net-history-backfill`                                      | 15,706 | legacy-3rd-party                        | Keep as-is. Marketplace already NULL.  |
+| `reverted-from-coop-heuristic` (was: `onchain-coop-heuristic`)  | 5,085  | reverted to `transferred` in v26 (§7.1) | No further action.                     |
+| `onchain-heuristic` (Layer 1 ACP, confidence: high)             | 18     | chain-fingerprint candidate             | Verify and promote. See §6.2.          |
+| Satflow                                                         | 282    | legacy-3rd-party                        | Keep as-is.                            |
+| `onchain-magisat-fp` (live + historical via fingerprint)        | 14+    | chain-fingerprint                       | Primary path going forward. See §2.8.  |
+| `onchain-magic-eden-fp` (live + historical via fingerprint)     | 10+    | chain-fingerprint                       | Primary path going forward. See §2.10. |
+| `onchain-ord-net-fp` (live + historical via fingerprint)        | 2+     | chain-fingerprint                       | Primary path going forward. See §2.11. |
+| `magisat-api-backfill` (cross-reference, fallback verification) | (n/a)  | chain-truth                             | Verification only. See §2.9.           |
 
 ## 4. Refuted hypotheses (do not re-introduce)
 
@@ -298,11 +300,11 @@ A real recurring fee/activation collector address. It is not Magisat. Twenty-nin
 
 **To resolve (per remaining marketplace):** gather ≥3 confirmed-true sale fixtures and ≥1 confirmed-true non-sale (or sale-from-different-marketplace) fixture. Then derive the on-chain pattern (fee output address, sighash flags, n_in/n_out shape, etc.).
 
-### 5.4 Broader Liquidium loan-origination variants
+### 5.4 Broader Liquidium loan-origination variants — resolved 2026-05-05
 
-Partially resolved in §2.4. Strict P2SH-principal originations and narrow P2TR-principal variants are promoted. Broad P2SH/P2WPKH loose variants are not promoted for future auto-tagging because assumed non-loan starts share the same shape.
+**Resolved.** §2.4 now promotes every borrower-payout class (P2SH, P2WPKH, P2TR) under the same strong gates, with confidence split by lender-vault provenance. The 77 candidates earlier flagged "no loan visible around tx day" turned out to be reviewer-window error: 92% of the relaxed matches reuse lender vaults already in confirmed loans, and the structurally identical remainder were spot-checked against same-day return-to-prior-holder patterns consistent with loan repayment.
 
-**To resolve:** use Liquidium API access if available, or find additional discriminators for the broad P2SH/P2WPKH variants. Until then, only exact externally confirmed P2SH/P2WPKH txids from `known-transactions.json` are backfilled.
+**Side benefit:** the relaxed origination rule fixes a downstream gap in `scripts/backfill-liquidium-modern-resolutions.js`. That backfill anchors on existing modern `loan-originated` events to find resolution candidates, so escrows whose origination was previously rejected couldn't have their resolutions detected either. After re-running the origination backfill (which adds the new escrows) and then the resolution backfill, `loan-repaid` / `loan-defaulted` / `loan-unlocked` events also catch up.
 
 ### 5.5 Other-color mint wallets
 
@@ -329,9 +331,9 @@ Authoritative known-good fixtures. Updated when new examples are confirmed. Mirr
 
 All three resolution-type fixtures verify against internal pubkey `9367…d27a`.
 
-### 6.1.1 Liquidium modern origination candidates (true positives, not promoted)
+### 6.1.1 Liquidium modern origination fixtures (true positives, promoted)
 
-Externally confirmed active loans supplied by the operator. These match the §2.4 instant-loan candidate shape, but they are not enough to live-tag without a confirmed true negative for the exact same shape.
+Externally confirmed loans supplied by the operator. These were the seed corpus for the §2.4 instant-loan fingerprint and are auto-tagged live. The relaxed gate added 2026-05-05 also catches the previously close-variant entries below.
 
 | Inscription | Type        | Tx                                                                 | Notes                |
 | ----------- | ----------- | ------------------------------------------------------------------ | -------------------- |
@@ -372,48 +374,48 @@ Unconfirmed strict-shape candidates that should not be added to `known-transacti
 | 10827843    | `53403b0dfbbb60e8774393563676d85df0dcaca9636af5110bda26fca4599486` | Strict shape; not visible/confirmed in Liquidium UI yet. |
 | 83315113    | `fbe15fbff9b6d91a7b55f31c3a6931f77eea652012e2962da13c8782db27b0cd` | Strict shape; not visible/confirmed in Liquidium UI yet. |
 
-Known close variants that do not match the strict P2SH-principal rule yet:
+Confirmed close-variant fixtures (now caught by the relaxed gate, no longer require an allowlist entry):
 
-| Inscription | Tx                                                                 | Variant                        |
-| ----------- | ------------------------------------------------------------------ | ------------------------------ |
-| 11209953    | `271f9ed476bcc7794e2cbd15b511bddb2983b32b725de3c868939985c7f0fac5` | 2-input, P2WPKH principal      |
-| 11299682    | `3bdb0927d54909e5556648aa6fcfe4652253fc0f227f1cecc1da675ec431a14e` | 2-input, P2TR principal/output |
-| 60571179    | `a63030cdebfdd9c2b70e5f3a6c30a5dfc6412ce356e776d454b3e7cdfaf710e2` | 2-input, P2SH principal        |
-| 60580809    | `85897139589e8fd781c9cf28f6779a780e5e04f48a3c79076b5d29edbf5f2201` | 2-input, P2SH principal        |
-| 83296297    | `8fe3ee399ac1ac7eeee3709f983952ea0c59a9671dcbba7353181118f7dde8d9` | 2-input, P2WPKH principal      |
-| 60576225    | `ac36feb9f178a10ce02510031f8e2541af4569ce795e8bb8a24abb95393fac60` | 2-input, P2SH principal        |
-| 83316387    | `55f6031370baf5f49e3080a83afc24d87452195d936187505a79f4c5d786b00c` | 2-input, P2SH principal        |
-| 60578966    | `3e226ec40701acc1381d5eccc1912b6d258f7182e2f9fcea419fb2984f479dac` | 2-input, P2WPKH principal      |
-| 83295902    | `872fb86eb415c2db041fbc701419826dc06abce1f824703e009401887665ad2e` | multi-input, P2WPKH principal  |
-| 83307339    | `3f8022c740a23dac9dce59a6b6707522af21801c8eaafd36bfd8cc415b9e3c80` | 2-input, P2TR principal/output |
-| 60578991    | `a9cc5fabbcebd5511699590f6ce33c6572d05d897d0a9e1de3f9dc498811bcf8` | 2-input, P2SH principal        |
-| 11209362    | `7380b922ea8aeaf8e4c79f7eca821791f3893fd29f7d05a0f6cfbe89a204e71f` | multi-input, P2TR principal    |
-| 83313543    | `b08020802dd431a21c7f1b58a47fd3010b1cd51e7bd4207759992df28ae5d5fd` | 2-input, P2WPKH principal      |
-| 60563151    | `81488471b6dd9adbf9a013ee278af36ee47cd771c6a752fd4ca7d836e1594df4` | 2-input, P2SH principal        |
-| 60580576    | `7d62f433d3ce3af27f065ab57c7cb580125af2b4beee9339d589cecab56e5ed4` | 2-input, P2WPKH principal      |
+| Inscription | Tx                                                                 | Match kind     |
+| ----------- | ------------------------------------------------------------------ | -------------- |
+| 11209953    | `271f9ed476bcc7794e2cbd15b511bddb2983b32b725de3c868939985c7f0fac5` | relaxed-p2wpkh |
+| 11299682    | `3bdb0927d54909e5556648aa6fcfe4652253fc0f227f1cecc1da675ec431a14e` | variant-p2tr   |
+| 60571179    | `a63030cdebfdd9c2b70e5f3a6c30a5dfc6412ce356e776d454b3e7cdfaf710e2` | relaxed-p2sh   |
+| 60580809    | `85897139589e8fd781c9cf28f6779a780e5e04f48a3c79076b5d29edbf5f2201` | relaxed-p2sh   |
+| 83296297    | `8fe3ee399ac1ac7eeee3709f983952ea0c59a9671dcbba7353181118f7dde8d9` | relaxed-p2wpkh |
+| 60576225    | `ac36feb9f178a10ce02510031f8e2541af4569ce795e8bb8a24abb95393fac60` | relaxed-p2sh   |
+| 83316387    | `55f6031370baf5f49e3080a83afc24d87452195d936187505a79f4c5d786b00c` | relaxed-p2sh   |
+| 60578966    | `3e226ec40701acc1381d5eccc1912b6d258f7182e2f9fcea419fb2984f479dac` | relaxed-p2wpkh |
+| 83295902    | `872fb86eb415c2db041fbc701419826dc06abce1f824703e009401887665ad2e` | relaxed-p2wpkh |
+| 83307339    | `3f8022c740a23dac9dce59a6b6707522af21801c8eaafd36bfd8cc415b9e3c80` | variant-p2tr   |
+| 60578991    | `a9cc5fabbcebd5511699590f6ce33c6572d05d897d0a9e1de3f9dc498811bcf8` | relaxed-p2sh   |
+| 11209362    | `7380b922ea8aeaf8e4c79f7eca821791f3893fd29f7d05a0f6cfbe89a204e71f` | variant-p2tr   |
+| 83313543    | `b08020802dd431a21c7f1b58a47fd3010b1cd51e7bd4207759992df28ae5d5fd` | relaxed-p2wpkh |
+| 60563151    | `81488471b6dd9adbf9a013ee278af36ee47cd771c6a752fd4ca7d836e1594df4` | relaxed-p2sh   |
+| 60580576    | `7d62f433d3ce3af27f065ab57c7cb580125af2b4beee9339d589cecab56e5ed4` | relaxed-p2wpkh |
 
-Unchecked / inconclusive variant-shaped candidates from the 45-day review. These are not fixtures and should not be used as true negatives without stronger external confirmation:
+Previously "no loan visible" review candidates (45-day review, 2026-05-05) — now promoted to `loan-originated` by the relaxed gate. Original review verdict was reviewer-window error: 4 of 7 inscriptions have other confirmed Liquidium loans in our DB, and the structural Liquidium signature (activation-fee address + P2WSH lender vault + 1-of-2 multisig witness) is identical to confirmed loans.
 
-| Inscription | Tx                                                                 | Review note                                                                                   |
-| ----------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| 11523683    | `528baccbe5abfb296232bbe6b61e8a85398fa8eab932e76a9b27956be55b4568` | No loan visible around tx day; may be non-start or missed associated tx.                      |
-| 60578644    | `04a6e51abc60c88175e4f9096c71f576317a6705aac7b0bd998a711eaee1bc6e` | No loan visible around tx day; may be non-start or missed associated tx.                      |
-| 83309473    | `c06c737b2ae808a7e0f52beca8b4ea03387f98f2d5264f4b196b9992c2502b99` | No loan visible around tx day; may be non-start or missed associated tx.                      |
-| 60583606    | `7db5169ac6ba64cb1d3a3c16f1d7d9e0d077b85d8021c15d0bb9602516485cfb` | No loan visible around tx day; may be non-start or missed associated tx.                      |
-| 83315138    | `8a646e2eb8aa89f02a3202ad4726843c7ba989c3a5d7191028e729597647186f` | No loan visible around tx day; may be non-start or missed associated tx.                      |
-| 60566708    | `0949c415a7da6adb335b8c9285950cef090c3d2708fb88fb586babcf0ff3f4f4` | No loan visible around tx day; may be non-start or missed associated tx.                      |
-| 83312962    | `d751130a39198be0f7aca1fbc6c3a934cab78275cae02e299233cb932385d9e5` | Loan visible around timestamp and matching color, but exact inscription missing; probable TP. |
+| Inscription | Tx                                                                 | Match kind          |
+| ----------- | ------------------------------------------------------------------ | ------------------- |
+| 11523683    | `528baccbe5abfb296232bbe6b61e8a85398fa8eab932e76a9b27956be55b4568` | relaxed-p2sh        |
+| 60578644    | `04a6e51abc60c88175e4f9096c71f576317a6705aac7b0bd998a711eaee1bc6e` | relaxed-p2wpkh      |
+| 83309473    | `c06c737b2ae808a7e0f52beca8b4ea03387f98f2d5264f4b196b9992c2502b99` | relaxed-p2wpkh      |
+| 60583606    | `7db5169ac6ba64cb1d3a3c16f1d7d9e0d077b85d8021c15d0bb9602516485cfb` | relaxed-p2wpkh      |
+| 83315138    | `8a646e2eb8aa89f02a3202ad4726843c7ba989c3a5d7191028e729597647186f` | relaxed-p2tr-bigvin |
+| 60566708    | `0949c415a7da6adb335b8c9285950cef090c3d2708fb88fb586babcf0ff3f4f4` | relaxed-p2sh        |
+| 83312962    | `d751130a39198be0f7aca1fbc6c3a934cab78275cae02e299233cb932385d9e5` | relaxed-p2wpkh      |
 
 ### 6.1.2 Liquidium modern resolution fixtures (chain-fingerprint, promoted)
 
 Spot-checked across the production population (171 repay-shape + 49 default-shape closed loans across the 220 modern §2.4 origins observed at promotion time). All sampled resolutions carried internal pubkey `50929b74…ac0`; leaf shape always agreed with the borrower-vs-other destination heuristic.
 
-| Inscription | Type        | Tx                                                                 | Notes                                                                                |
-| ----------- | ----------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| 11299684    | repaid      | `096190e7b23881530451e470610f7a0381f286806400c5224b916020f2f303bf` | Cooperative-leaf repay (270 hex chars), Liquidium activation P2TR present in vout[2] |
-| 11299684    | repaid      | `bd7c9534c5ec20078f129a5628b26e7a09c9234798b92b800652a505b6b4c04e` | Same shape; second loan on same OMB by same borrower                                 |
-| 11299684    | repaid      | `10999a1895920b13f3b5beefc5f7ed45e22c6bff74766b8e5b9863515008635d` | Same shape; large vin count (10 P2SH inputs paying back BTC)                         |
-| 60578468    | defaulted   | `b4e99def0cbe9e3ef481c7bfeebe4cdd336eb119a06ed03fc14228d1e5392e5d` | CSV-gated leaf (148 hex chars, contains b275); 2-out lender seizure                  |
+| Inscription | Type      | Tx                                                                 | Notes                                                                                |
+| ----------- | --------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| 11299684    | repaid    | `096190e7b23881530451e470610f7a0381f286806400c5224b916020f2f303bf` | Cooperative-leaf repay (270 hex chars), Liquidium activation P2TR present in vout[2] |
+| 11299684    | repaid    | `bd7c9534c5ec20078f129a5628b26e7a09c9234798b92b800652a505b6b4c04e` | Same shape; second loan on same OMB by same borrower                                 |
+| 11299684    | repaid    | `10999a1895920b13f3b5beefc5f7ed45e22c6bff74766b8e5b9863515008635d` | Same shape; large vin count (10 P2SH inputs paying back BTC)                         |
+| 60578468    | defaulted | `b4e99def0cbe9e3ef481c7bfeebe4cdd336eb119a06ed03fc14228d1e5392e5d` | CSV-gated leaf (148 hex chars, contains b275); 2-out lender seizure                  |
 
 Lifecycle-driven aggregates: `inscriptions.active_loan_count` decrements on resolution; `loan_count` lifetime counter is unchanged.
 
@@ -448,11 +450,11 @@ See §2.1 for the full table. All five colors covered.
 
 ### 6.5 Counter-examples (true negatives — important for keeping fingerprints honest)
 
-| Tx                                                                             | Why this is NOT what it might appear to be                                                                                 |
-| ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `b9a77cffc3914af60564d49bb34a5d421075780e91cebaa20cad639530671d57` (#83309450) | Has `bc1papmpmu0…59se9u` as vout[1] — NOT a Magisat sale. Refutes §4.2.                                                    |
-| `3bd09bfc7d229428cb99cfb44170e939b80a297b2f35f2e2ea2af7df0da22711` (#11299747) | OP_CSV-less, single-leaf tap-tree, internal pubkey `428a…` — Phase 4 misclassified as `loan-unlocked`. Refutes §4.5.       |
-| `d5196bd8b3ae4a1a23975e40d88edc7c30cc42ba5df47b7c2b41fa8a6d5aeba5` (#83296407) | 4-out borrower-self-funded shape, but routes 46k sats to `bc1qt40u…` which is a known non-Liquidium service. Refutes §4.4. |
+| Tx                                                                             | Why this is NOT what it might appear to be                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `b9a77cffc3914af60564d49bb34a5d421075780e91cebaa20cad639530671d57` (#83309450) | Has `bc1papmpmu0…59se9u` as vout[1] — NOT a Magisat sale. Refutes §4.2.                                                                                                                                                                 |
+| `3bd09bfc7d229428cb99cfb44170e939b80a297b2f35f2e2ea2af7df0da22711` (#11299747) | OP_CSV-less, single-leaf tap-tree, internal pubkey `428a…` — Phase 4 misclassified as `loan-unlocked`. Refutes §4.5.                                                                                                                    |
+| `d5196bd8b3ae4a1a23975e40d88edc7c30cc42ba5df47b7c2b41fa8a6d5aeba5` (#83296407) | 4-out borrower-self-funded shape, but routes 46k sats to `bc1qt40u…` which is a known non-Liquidium service. Refutes §4.4.                                                                                                              |
 | `ee5e21593176efc432d88d5a0ec74afab5265670c036861b54dada4a22b87235` (#11273300) | User-flagged as a Magic Eden buy but has no fee output and no seller payment — almost certainly the inscription-delivery leg of an offer accept whose BTC moved in a sibling tx. Candidate ME rule (§2.10) correctly does NOT match it. |
 
 ### 6.6 Magic Eden sales (true positives — N=10, candidate fingerprint not yet promoted)

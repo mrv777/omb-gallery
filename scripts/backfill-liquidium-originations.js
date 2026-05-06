@@ -2,13 +2,19 @@
 /*
  * Backfill modern Liquidium loan originations.
  *
- * Production policy:
- *   - auto-promote the strict P2SH-principal origination shape;
- *   - auto-promote the narrow P2TR-principal variant subset;
- *   - promote exact externally-confirmed variant txids from
- *     scripts/known-transactions.json;
- *   - do NOT broadly promote P2SH/P2WPKH variants, because the fixture corpus
- *     contains assumed non-loan starts with the same loose shapes.
+ * Production policy (ONCHAIN_TAGGING.md §2.4):
+ *   - all match kinds anchor on the same strong gates (Liquidium activation-
+ *     fee address, P2WSH lender vault as both vin source and vout[3] change,
+ *     1-of-2 multisig witness on every non-collateral input, P2TR collateral
+ *     value preservation);
+ *   - confidence splits by lender-vault provenance: vaults already seen in
+ *     confirmed loan-originated events get 'high', new vaults get 'medium';
+ *   - strict-p2sh always 'high' (oldest promoted shape, externally verified);
+ *   - variant-p2tr always 'medium' (narrower fixture corpus);
+ *   - relaxed-p2sh / relaxed-p2wpkh / relaxed-p2tr-bigvin use the known-vault
+ *     split. The known-fixture allowlist in scripts/known-transactions.json
+ *     remains as a fallback for txids that fail every gate but were
+ *     externally confirmed.
  *
  * Requires BITCOIN_RPC_URL and OMB_DB_PATH (default /data/app.db).
  */
@@ -90,6 +96,9 @@ function isP2wsh(t) {
 function isP2sh(t) {
   return t === 'p2sh' || t === 'scripthash';
 }
+function isP2wpkh(t) {
+  return t === 'v0_p2wpkh' || t === 'witness_v0_keyhash';
+}
 function witness(vin) {
   return vin?.txinwitness ?? vin?.witness ?? [];
 }
@@ -115,11 +124,19 @@ function detectProduction(tx) {
   if (feeAddress !== FEE_ADDR) return null;
   if (!isP2wsh(typ(changeOut))) return null;
 
+  const payoutType = typ(payoutOut);
+  const vinCount = tx.vin.length;
   let matchKind = null;
-  if (tx.vin.length >= 3 && isP2sh(typ(payoutOut))) {
+  if (vinCount >= 3 && isP2sh(payoutType)) {
     matchKind = 'strict-p2sh';
-  } else if (tx.vin.length <= 4 && isP2tr(typ(payoutOut))) {
+  } else if (vinCount <= 4 && isP2tr(payoutType)) {
     matchKind = 'variant-p2tr';
+  } else if (vinCount === 2 && isP2sh(payoutType)) {
+    matchKind = 'relaxed-p2sh';
+  } else if (isP2wpkh(payoutType)) {
+    matchKind = 'relaxed-p2wpkh';
+  } else if (vinCount > 4 && isP2tr(payoutType)) {
+    matchKind = 'relaxed-p2tr-bigvin';
   } else {
     return null;
   }
@@ -132,7 +149,6 @@ function detectProduction(tx) {
 
   return {
     source: 'liquidium-modern-origination-fingerprint',
-    confidence: matchKind === 'strict-p2sh' ? 'high' : 'medium',
     matchKind,
     escrowAddr: addr(escrowOut),
     lender: vault,
@@ -140,6 +156,19 @@ function detectProduction(tx) {
     loanAmountSats: sats(payoutOut),
     activationFeeSats: sats(feeOut),
   };
+}
+
+// Confidence rule shared with src/lib/loanDetect.ts: strict-p2sh always
+// 'high'; variant-p2tr always 'medium'; relaxed-* takes 'high' when the
+// lender vault has already appeared in a confirmed origination event,
+// 'medium' otherwise. The known-fixture fallback below sets
+// match.confidence explicitly (always 'high', externally verified) — that
+// wins over the structural rule.
+function confidenceFor(match, knownVaults) {
+  if (match.confidence) return match.confidence;
+  if (match.matchKind === 'strict-p2sh') return 'high';
+  if (match.matchKind === 'variant-p2tr') return 'medium';
+  return knownVaults.has(match.lender) ? 'high' : 'medium';
 }
 
 function readKnownLiquidiumTxids() {
@@ -161,6 +190,22 @@ function readKnownLiquidiumTxids() {
 const knownLiquidiumTxids = readKnownLiquidiumTxids();
 const db = new Database(DB_PATH);
 db.pragma('busy_timeout = 5000');
+
+// Snapshot the lender-vault set at script start. Used to elevate relaxed-*
+// match_kinds from 'medium' to 'high' when the vault already shows up in a
+// confirmed origination event (strong corroboration that it's a real
+// Liquidium vault).
+const knownVaults = new Set(
+  db
+    .prepare(
+      `SELECT DISTINCT json_extract(raw_json,'$.lender_addr') AS vault
+         FROM events
+        WHERE event_type = 'loan-originated'
+          AND json_extract(raw_json,'$.lender_addr') IS NOT NULL`
+    )
+    .all()
+    .map(r => r.vault)
+);
 
 const rows = db
   .prepare(
@@ -219,7 +264,7 @@ const stmts = {
 const apply = db.transaction(item => {
   const raw_json = JSON.stringify({
     source: item.match.source,
-    confidence: item.match.confidence,
+    confidence: confidenceFor(item.match, knownVaults),
     loan_type: 'origination',
     match_kind: item.match.matchKind,
     escrow_addr: item.match.escrowAddr,

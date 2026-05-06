@@ -94,9 +94,13 @@ describe('detectLiquidiumOriginationCandidate', () => {
     expect(detectLiquidiumOriginationCandidate(tx)?.matchKind).toBe('variant-p2tr');
   });
 
-  it('rejects P2SH/P2WPKH two-input variants left in review mode', () => {
-    const p2sh = candidateTx({ vin: candidateTx().vin.slice(0, 2) });
-    const p2wpkh = candidateTx({
+  it('matches the relaxed P2SH two-input variant', () => {
+    const tx = candidateTx({ vin: candidateTx().vin.slice(0, 2) });
+    expect(detectLiquidiumOriginationCandidate(tx)?.matchKind).toBe('relaxed-p2sh');
+  });
+
+  it('matches the relaxed P2WPKH-principal variant at any vin count', () => {
+    const twoIn = candidateTx({
       vin: candidateTx().vin.slice(0, 2),
       vout: candidateTx().vout.map((vout, i) =>
         i === 2
@@ -108,9 +112,40 @@ describe('detectLiquidiumOriginationCandidate', () => {
           : vout
       ),
     });
+    const threeIn = candidateTx({
+      vout: candidateTx().vout.map((vout, i) =>
+        i === 2
+          ? {
+              scriptpubkey_type: 'v0_p2wpkh',
+              scriptpubkey_address: 'bc1qgcs4jtt5l64yngu5rljhdny2z4fc7wc5g675mm',
+              value: 0.03061159,
+            }
+          : vout
+      ),
+    });
 
-    expect(detectLiquidiumOriginationCandidate(p2sh)).toBeNull();
-    expect(detectLiquidiumOriginationCandidate(p2wpkh)).toBeNull();
+    expect(detectLiquidiumOriginationCandidate(twoIn)?.matchKind).toBe('relaxed-p2wpkh');
+    expect(detectLiquidiumOriginationCandidate(threeIn)?.matchKind).toBe('relaxed-p2wpkh');
+  });
+
+  it('matches the relaxed P2TR-principal variant when vin > 4', () => {
+    const baseVin = candidateTx().vin;
+    const extraVins = Array.from({ length: 8 }, () => baseVin[1]);
+    const tx = candidateTx({
+      vin: [baseVin[0], ...extraVins],
+      vout: candidateTx().vout.map((vout, i) =>
+        i === 2
+          ? {
+              scriptpubkey_type: 'v1_p2tr',
+              scriptpubkey_address:
+                'bc1ps0h8u8jfercahggmv3u3sm7eh742l3w9mv6809fqcyk88jlr7a8sx8z744',
+              value: 0.03061159,
+            }
+          : vout
+      ),
+    });
+
+    expect(detectLiquidiumOriginationCandidate(tx)?.matchKind).toBe('relaxed-p2tr-bigvin');
   });
 
   it('rejects the old loose four-output shape without the lender vault witness', () => {

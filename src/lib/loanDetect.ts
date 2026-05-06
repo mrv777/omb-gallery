@@ -567,6 +567,21 @@ export async function runLoanTick(
   const cursor = readCursor();
   const db = getDb();
 
+  // Snapshot the set of lender vaults that already appear in confirmed
+  // origination events. Drives the relaxed-* match_kind confidence split:
+  // matches on a known vault are tagged 'high', new vaults stay 'medium'.
+  const knownVaults = new Set(
+    db
+      .prepare(
+        `SELECT DISTINCT json_extract(raw_json,'$.lender_addr') AS vault
+           FROM events
+          WHERE event_type = 'loan-originated'
+            AND json_extract(raw_json,'$.lender_addr') IS NOT NULL`
+      )
+      .all()
+      .map(r => (r as { vault: string }).vault)
+  );
+
   // Pull new movement events (id > cursor) up to the cap. Also include
   // already-classified loan-* rows whose id is past the cursor — they
   // shouldn't exist in normal operation (live writers only insert
@@ -923,9 +938,16 @@ export async function runLoanTick(
         | undefined;
       if (!existing) continue;
 
+      const isRelaxed = orig.matchKind.startsWith('relaxed-');
+      const confidence =
+        orig.matchKind === 'strict-p2sh'
+          ? 'high'
+          : isRelaxed && knownVaults.has(orig.lender)
+            ? 'high'
+            : 'medium';
       const raw = JSON.stringify({
         source: 'liquidium-modern-origination-fingerprint',
-        confidence: orig.matchKind === 'strict-p2sh' ? 'high' : 'medium',
+        confidence,
         loan_type: 'origination',
         match_kind: orig.matchKind,
         escrow_addr: orig.escrowAddr,
