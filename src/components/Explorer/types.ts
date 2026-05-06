@@ -51,8 +51,8 @@ export const LEADERBOARDS: Record<LeaderboardKey, LeaderboardMeta> = {
   'currently-loaned': {
     key: 'currently-loaned',
     title: 'Currently Loaned',
-    blurb: 'Inscriptions with tagged loan originations that have not resolved on-chain yet. Expiration is estimated from the lender vault’s prior loan terms — actual term is not visible on chain until the loan resolves.',
-    metricLabel: 'expires',
+    blurb: 'Active loans, newest first. Hover for an estimated expiration.',
+    metricLabel: 'loaned',
   },
   'top-holders': {
     key: 'top-holders',

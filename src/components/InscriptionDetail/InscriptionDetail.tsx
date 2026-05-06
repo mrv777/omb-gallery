@@ -5,6 +5,7 @@ import { lookupInscription } from '@/lib/inscriptionLookup';
 import {
   formatBtc,
   formatRelTime,
+  formatTimeUntil,
   ordinalsLink,
   satflowInscriptionLink,
   truncateAddr,
@@ -340,7 +341,7 @@ function ActiveLoanCallout({ estimate }: { estimate: ActiveLoanEstimate }) {
         ) : (
           <Tooltip content={tooltip}>
             <span>
-              estimated expiration {formatRelTime(estimate.estimated_expiration_ts)}
+              estimated expiration {formatTimeUntil(estimate.estimated_expiration_ts) || 'soon'}
               <span className="text-bone-dim"> · {dateLabel.replace('GMT', 'UTC')}</span>
             </span>
           </Tooltip>

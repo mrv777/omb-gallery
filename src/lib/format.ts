@@ -24,6 +24,30 @@ export function formatRelTime(
   return `${Math.round(diff / (86_400 * 365))}y ago`;
 }
 
+/** Future-pointing relative formatter ("in 30d", "in 4h"). Returns an empty
+ * string if the timestamp is in the past — the caller should branch to
+ * `formatRelTime` or a "past due" string for that case. The "days" rung
+ * extends to 45d (vs. 30d in `formatRelTime`) so canonical Liquidium loan
+ * terms like 30d display as "in 30d" instead of jumping straight to "1mo". */
+export function formatTimeUntil(
+  unixSeconds: number | null | undefined,
+  nowMs: number = Date.now()
+): string {
+  if (!unixSeconds) return '';
+  const diff = Math.floor(unixSeconds - nowMs / 1000);
+  if (diff <= 0) return '';
+  if (diff < 60) return `in ${diff}s`;
+  const minutes = Math.round(diff / 60);
+  if (minutes < 60) return `in ${minutes}m`;
+  const hours = Math.round(diff / 3600);
+  if (hours < 24) return `in ${hours}h`;
+  const days = Math.round(diff / 86_400);
+  if (days < 45) return `in ${days}d`;
+  const months = Math.round(diff / (86_400 * 30));
+  if (months < 12) return `in ${months}mo`;
+  return `in ${Math.round(diff / (86_400 * 365))}y`;
+}
+
 export function truncateAddr(addr: string | null | undefined, head = 6, tail = 4): string {
   if (!addr) return '—';
   if (addr.length <= head + tail + 1) return addr;

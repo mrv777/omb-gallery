@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 // re-implementing the decoder in the test, so any drift between the prod
 // parser and this fixture is caught.
 import { _internal } from '@/lib/loanExpiration';
+import { formatTimeUntil } from '@/lib/format';
 
 describe('loanExpiration BIP-112 decoder', () => {
   it('decodes the modern Liquidium 30d default leaf', () => {
@@ -50,5 +51,30 @@ describe('loanExpiration BIP-112 decoder', () => {
     expect(_internal.snapToMenu(31)).toBe(30);
     expect(_internal.snapToMenu(13.7)).toBe(14);
     expect(_internal.snapToMenu(50)).toBe(50); // outside any rung; pass through
+  });
+});
+
+describe('formatTimeUntil', () => {
+  // Pin "now" so the test isn't time-dependent. 2026-05-06 00:00:00 UTC.
+  const NOW_MS = 1778976000_000;
+
+  it('returns "in Nd" for future dates', () => {
+    expect(formatTimeUntil(NOW_MS / 1000 + 30 * 86400, NOW_MS)).toBe('in 30d');
+    expect(formatTimeUntil(NOW_MS / 1000 + 7 * 86400, NOW_MS)).toBe('in 7d');
+  });
+
+  it('returns "in Nh" / "in Nm" for nearer futures', () => {
+    expect(formatTimeUntil(NOW_MS / 1000 + 5 * 3600, NOW_MS)).toBe('in 5h');
+    expect(formatTimeUntil(NOW_MS / 1000 + 30 * 60, NOW_MS)).toBe('in 30m');
+  });
+
+  it('returns empty string for past or now timestamps (caller branches)', () => {
+    expect(formatTimeUntil(NOW_MS / 1000 - 1, NOW_MS)).toBe('');
+    expect(formatTimeUntil(NOW_MS / 1000, NOW_MS)).toBe('');
+  });
+
+  it('returns empty string for null / undefined', () => {
+    expect(formatTimeUntil(null, NOW_MS)).toBe('');
+    expect(formatTimeUntil(undefined, NOW_MS)).toBe('');
   });
 });

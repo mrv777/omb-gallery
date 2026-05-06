@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { LEADERBOARDS, type LeaderboardKey } from './types';
 import { lookupInscription } from '@/lib/inscriptionLookup';
-import { formatBtc, formatRelTime, truncateAddr } from '@/lib/format';
+import { formatBtc, formatRelTime, formatTimeUntil, truncateAddr } from '@/lib/format';
 import type { ApiHolder, ApiInscription } from '@/components/Activity/types';
 import type { ColorFilter } from '@/lib/types';
 import { appendColorParam } from '@/lib/colorFilter';
@@ -78,10 +78,11 @@ export function InscriptionRow({
       : `/inscription/${row.inscription_number}`;
   const metric = renderInscriptionMetric(row, type);
   const metricTooltip = renderInscriptionMetricTooltip(row, type);
-  const metricClass =
-    type === 'currently-loaned' && row.is_overdue
-      ? 'font-mono text-xs text-accent-red tabular-nums whitespace-nowrap'
-      : 'font-mono text-xs text-bone tabular-nums whitespace-nowrap';
+  // Currently-loaned: dim the metric when we're past the estimated expiry.
+  // Don't paint it accent-red — the metric here is the loan-start time
+  // (chain-truth), not the guess. The "past due" cue belongs in the tooltip,
+  // not in a color that misrepresents an estimate as fact.
+  const metricClass = 'font-mono text-xs text-bone tabular-nums whitespace-nowrap';
   const innerClass =
     'grid grid-cols-[1.5rem_2.5rem_1fr_auto] items-center gap-3 px-4 py-2 hover:bg-ink-2 transition-colors';
   const metricCell = metricTooltip ? (
@@ -216,26 +217,23 @@ function renderInscriptionMetricTooltip(
 ): string | null {
   if (type !== 'currently-loaned') return null;
   if (row.estimated_expiration_ts == null) return null;
-  const startedLine = row.active_loan_started_at
-    ? `Started ${formatRelTime(row.active_loan_started_at)}`
-    : 'Started date unknown';
+  const expLine = row.is_overdue
+    ? 'Past estimated expiry — awaiting lender claim or repayment'
+    : `Estimated expiration ${formatTimeUntil(row.estimated_expiration_ts) || 'soon'}`;
   const termLine = `Likely ${row.estimated_term_days}d term`;
   const basisLine =
     row.estimated_basis === 'vault'
       ? `${row.estimated_sample_count} prior loan${row.estimated_sample_count === 1 ? '' : 's'} from this lender`
       : row.estimated_basis === 'global'
-        ? 'Lender has no prior loans — using corpus modal term'
+        ? 'No prior loans from this lender — using corpus modal term'
         : 'No prior loan data — defaulting to 30d cap';
   const rangeLine =
     row.estimated_term_min_days != null &&
     row.estimated_term_max_days != null &&
     row.estimated_term_min_days !== row.estimated_term_max_days
-      ? `Range observed: ${row.estimated_term_min_days}–${row.estimated_term_max_days}d`
+      ? `Vault range observed: ${row.estimated_term_min_days}–${row.estimated_term_max_days}d`
       : null;
-  const overdueLine = row.is_overdue
-    ? 'Past expected expiry — awaiting lender claim or repayment'
-    : null;
-  return [overdueLine, startedLine, termLine, basisLine, rangeLine, 'Estimate only — actual term not visible on chain.']
+  return [expLine, termLine, basisLine, rangeLine, 'Estimate only — actual term not visible on chain.']
     .filter(Boolean)
     .join('\n');
 }
@@ -252,16 +250,12 @@ function renderInscriptionMetric(row: ApiInscription, type: LeaderboardKey): str
       return formatBtc(row.highest_sale_sats) || '—';
     case 'most-loaned':
       return `${(row.loan_count ?? 0).toLocaleString()}`;
-    case 'currently-loaned': {
-      // Prefer the estimated expiration when available — that's the metric
-      // users actually want here ("when does this loan expire?"). Fall back
-      // to the origination time if we couldn't estimate (no orig data).
-      if (row.estimated_expiration_ts != null) {
-        if (row.is_overdue) return 'past due';
-        return `~${formatRelTime(row.estimated_expiration_ts)}`;
-      }
+    case 'currently-loaned':
+      // Show the chain-truth origination time as the metric, not the
+      // estimated expiration. The estimate is a best-effort guess; surfacing
+      // it as the headline metric overstates its certainty. The estimate
+      // lives in the tooltip + the inscription detail page instead.
       return row.active_loan_started_at ? formatRelTime(row.active_loan_started_at) : '—';
-    }
     case 'top-holders':
       return '';
   }
