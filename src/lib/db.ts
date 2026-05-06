@@ -2561,19 +2561,23 @@ export function getStmts(): Stmts {
     // (checked-no-profile), keep their wallet address as the group key.
     // GROUP_CONCAT gives the route layer the full wallet set; the route
     // splits it for `wallets[]` and uses the first entry for deep-linking.
+    //
+    // Keys on effective_owner (not current_owner) so loan-escrowed pieces
+    // count for the borrower instead of surfacing the escrow taproot as a
+    // 1-OMB "holder". Mirrors countHolders / topHolders / per-holder pages.
     topHoldersGrouped: db.prepare(`
       SELECT
-        COALESCE(wl.matrica_user_id, i.current_owner)            AS group_key,
+        COALESCE(wl.matrica_user_id, i.effective_owner)          AS group_key,
         CASE WHEN wl.matrica_user_id IS NOT NULL THEN 1 ELSE 0 END AS is_user,
         mu.username                                               AS username,
         mu.avatar_url                                             AS avatar_url,
-        GROUP_CONCAT(DISTINCT i.current_owner)                    AS wallets_csv,
+        GROUP_CONCAT(DISTINCT i.effective_owner)                  AS wallets_csv,
         COUNT(*)                                                  AS inscription_count,
         unixepoch()                                               AS updated_at
       FROM inscriptions i
-      LEFT JOIN wallet_links  wl ON wl.wallet_addr = i.current_owner
+      LEFT JOIN wallet_links  wl ON wl.wallet_addr = i.effective_owner
       LEFT JOIN matrica_users mu ON mu.user_id     = wl.matrica_user_id
-      WHERE i.current_owner IS NOT NULL
+      WHERE i.effective_owner IS NOT NULL
         AND i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
       GROUP BY group_key
@@ -2589,17 +2593,17 @@ export function getStmts(): Stmts {
     // wrapping subquery.
     topHoldersGroupedPaged: db.prepare(`
       SELECT
-        COALESCE(wl.matrica_user_id, i.current_owner)            AS group_key,
+        COALESCE(wl.matrica_user_id, i.effective_owner)          AS group_key,
         CASE WHEN wl.matrica_user_id IS NOT NULL THEN 1 ELSE 0 END AS is_user,
         mu.username                                               AS username,
         mu.avatar_url                                             AS avatar_url,
-        GROUP_CONCAT(DISTINCT i.current_owner)                    AS wallets_csv,
+        GROUP_CONCAT(DISTINCT i.effective_owner)                  AS wallets_csv,
         COUNT(*)                                                  AS inscription_count,
         unixepoch()                                               AS updated_at
       FROM inscriptions i
-      LEFT JOIN wallet_links  wl ON wl.wallet_addr = i.current_owner
+      LEFT JOIN wallet_links  wl ON wl.wallet_addr = i.effective_owner
       LEFT JOIN matrica_users mu ON mu.user_id     = wl.matrica_user_id
-      WHERE i.current_owner IS NOT NULL
+      WHERE i.effective_owner IS NOT NULL
         AND i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
       GROUP BY group_key
@@ -2615,10 +2619,10 @@ export function getStmts(): Stmts {
     // raw-wallet countHolders for the explorer's "N holders" stat once we
     // wire it up.
     countHolderIdentities: db.prepare(`
-      SELECT COUNT(DISTINCT COALESCE(wl.matrica_user_id, i.current_owner)) AS n
+      SELECT COUNT(DISTINCT COALESCE(wl.matrica_user_id, i.effective_owner)) AS n
       FROM inscriptions i
-      LEFT JOIN wallet_links wl ON wl.wallet_addr = i.current_owner
-      WHERE i.current_owner IS NOT NULL
+      LEFT JOIN wallet_links wl ON wl.wallet_addr = i.effective_owner
+      WHERE i.effective_owner IS NOT NULL
         AND i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
     `),
@@ -2644,12 +2648,12 @@ export function getStmts(): Stmts {
         FROM (
           SELECT COUNT(*) AS cnt
           FROM inscriptions i
-          LEFT JOIN wallet_links wl ON wl.wallet_addr = i.current_owner
-          WHERE i.current_owner IS NOT NULL
+          LEFT JOIN wallet_links wl ON wl.wallet_addr = i.effective_owner
+          WHERE i.effective_owner IS NOT NULL
             AND i.collection_slug = @collection
             AND (@color IS NULL OR i.color = @color)
-            AND i.current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST})
-          GROUP BY COALESCE(wl.matrica_user_id, i.current_owner)
+            AND i.effective_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST})
+          GROUP BY COALESCE(wl.matrica_user_id, i.effective_owner)
         )
       )
       GROUP BY bucket

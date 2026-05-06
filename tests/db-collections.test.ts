@@ -80,14 +80,12 @@ describe('schema — collections + backfill_state + poll_state composite PK + ty
       )
       .get() as { inscription_number: number };
     const owner = 'bc1qtestholderxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
-    db.prepare(`UPDATE inscriptions SET current_owner=? WHERE inscription_number=?`).run(
-      owner,
-      omb.inscription_number
-    );
-    db.prepare(`UPDATE inscriptions SET current_owner=? WHERE inscription_number=?`).run(
-      owner,
-      bra.inscription_number
-    );
+    db.prepare(
+      `UPDATE inscriptions SET current_owner=?, effective_owner=? WHERE inscription_number=?`
+    ).run(owner, owner, omb.inscription_number);
+    db.prepare(
+      `UPDATE inscriptions SET current_owner=?, effective_owner=? WHERE inscription_number=?`
+    ).run(owner, owner, bra.inscription_number);
 
     const ombRows = stmts.getInscriptionsByOwner.all({ owner, collection: 'omb' }) as Array<{
       inscription_number: number;

@@ -60,11 +60,13 @@ function seedFixtureRows(db: ReturnType<typeof dbModule.getDb>) {
   insertEvent.run({ id: 'omb-id-1', num: omb.inscription_number, txid: 'a'.repeat(64) });
   insertEvent.run({ id: 'bra-id-1', num: bra.inscription_number, txid: 'b'.repeat(64) });
 
-  // Set current_owner + transfer_count so leaderboards and holders queries
-  // include them.
+  // Set current_owner + effective_owner + transfer_count so leaderboards
+  // and holders queries include them. Holder/leaderboard reads key on
+  // effective_owner since the loan-escrow detector landed.
   const update = db.prepare(`
     UPDATE inscriptions
-    SET current_owner = @owner, transfer_count = 5, last_movement_at = 1700000000
+    SET current_owner = @owner, effective_owner = @owner,
+        transfer_count = 5, last_movement_at = 1700000000
     WHERE inscription_number = @num
   `);
   update.run({ owner: 'owner-omb', num: omb.inscription_number });
