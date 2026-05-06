@@ -174,7 +174,11 @@ export default function HolderProfile({
         ) : (
           <div className="flex flex-wrap gap-2">
             {ombShown.map(row => (
-              <OmbTile key={row.inscription_number} number={row.inscription_number} />
+              <OmbTile
+                key={row.inscription_number}
+                number={row.inscription_number}
+                loaned={row.active_loan_count > 0}
+              />
             ))}
             {ombHidden > 0 && (
               <span className="font-mono text-[10px] tracking-[0.08em] uppercase text-bone-dim self-center px-2">

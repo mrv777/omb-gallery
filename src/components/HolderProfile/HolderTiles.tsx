@@ -21,13 +21,19 @@ const COLOR_TILE_BG: Record<string, string> = {
 // dropping exactly one tile (always the first in the sorted list) from
 // the SSR HTML. Forcing the boundary at the tile means each tile streams
 // uniformly and the Slot always gets a real element.
-export function OmbTile({ number }: { number: number }) {
+export function OmbTile({ number, loaned = false }: { number: number; loaned?: boolean }) {
   const hit = lookupInscription(number);
   const tileBg = hit?.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
+  // Accent-orange ring matches the ActiveLoanCallout treatment on the
+  // inscription detail page so the same wallet's loaned pieces read as
+  // related across surfaces.
+  const borderClass = loaned
+    ? 'border border-accent-orange/60 hover:border-accent-orange'
+    : 'border border-ink-2 hover:border-bone-dim';
   return (
-    <Tooltip content={`#${number}`}>
+    <Tooltip content={loaned ? `#${number} · loaned via Liquidium` : `#${number}`}>
       <span
-        className={`block w-20 h-20 sm:w-24 sm:h-24 ${tileBg} overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors`}
+        className={`relative block w-20 h-20 sm:w-24 sm:h-24 ${tileBg} overflow-hidden ${borderClass} transition-colors`}
         style={{
           contentVisibility: 'auto',
           containIntrinsicSize: '96px 96px',
@@ -53,6 +59,14 @@ export function OmbTile({ number }: { number: number }) {
             </div>
           )}
         </Link>
+        {loaned && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute top-0 right-0 px-1 py-px font-mono text-[8px] sm:text-[9px] tracking-[0.12em] uppercase bg-accent-orange text-ink-1 leading-none"
+          >
+            loan
+          </span>
+        )}
       </span>
     </Tooltip>
   );
