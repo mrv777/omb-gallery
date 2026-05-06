@@ -56,14 +56,15 @@ const ORD_ENRICHMENT_CONCURRENCY = 8;
 // Matrica wallet-linking. Per tick, probe N distinct OMB+bravocados owners
 // we haven't checked in MATRICA_STALENESS_SEC. With ~3.8k unique owners and
 // an hourly cron at 2 req/s + 800/tick, the initial backlog drains in
-// ~5 ticks (~5 hours); steady-state only re-probes rows aged past 7 days
-// (~550 calls/day). Newly-seen owners are picked up next tick regardless of
-// the staleness window — the picker's NOT EXISTS clause covers them — so the
-// 7d window only governs re-probes of already-known wallets.
-// Pacing inside src/lib/matrica.ts is 2 req/s, so 800 calls ≈ 7 min wallclock
-// (observed ~1.83 actual rps including HTTP latency).
+// ~5 ticks (~5 hours); steady-state re-probes rows aged past 48 hours
+// (~1.9k calls/day, ~80/hour, ~40s/tick wallclock). Newly-seen owners are
+// picked up next tick regardless of the staleness window — the picker's
+// NOT EXISTS clause covers them — so the window only governs re-probes of
+// already-known wallets. Pacing inside src/lib/matrica.ts is 2 req/s, so
+// 800 calls ≈ 7 min wallclock (observed ~1.83 actual rps including HTTP
+// latency).
 const MATRICA_PER_TICK_LIMIT = 800;
-const MATRICA_STALENESS_SEC = 7 * 24 * 60 * 60; // 7 days
+const MATRICA_STALENESS_SEC = 48 * 60 * 60; // 48 hours
 // 800 wallets at ~1.83 actual rps ≈ 7min. 8min budget leaves headroom for
 // transient slow responses; cron's curl -m 600 still has 2min of slack.
 const MATRICA_TICK_WALLCLOCK_BUDGET_MS = 8 * 60 * 1000;

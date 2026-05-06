@@ -2501,15 +2501,20 @@ export function getStmts(): Stmts {
 
     // Upsert a link. matrica_user_id is NULL when Matrica returned 400
     // "Wallet not found" — we still write the row so we don't re-probe.
-    // Sticky on re-probe: if we already have a non-null user_id and a later
-    // probe returns NULL (user removed the wallet from their Matrica
-    // profile), we keep the prior link. A different non-null user_id IS
-    // allowed to override (re-link to a new user is a fresh signature).
+    // Strictly additive: once a wallet has a non-null matrica_user_id, the
+    // poller never overwrites it — not on a NULL response (user unlinked from
+    // their profile) and not on a different non-null user_id (Matrica returns
+    // an auto-shell user when an unlinked wallet is queried, with username =
+    // wallet_addr + suffix). Re-linking a wallet to a different real user
+    // requires manual SQL intervention; see "manual unlink" note below.
     upsertWalletLink: db.prepare(`
       INSERT INTO wallet_links (wallet_addr, matrica_user_id, checked_at)
       VALUES (@wallet_addr, @matrica_user_id, @checked_at)
       ON CONFLICT(wallet_addr) DO UPDATE SET
-        matrica_user_id = COALESCE(excluded.matrica_user_id, wallet_links.matrica_user_id),
+        matrica_user_id = CASE
+          WHEN wallet_links.matrica_user_id IS NULL THEN excluded.matrica_user_id
+          ELSE wallet_links.matrica_user_id
+        END,
         checked_at      = excluded.checked_at
     `),
 
