@@ -3,6 +3,7 @@ import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import { FavoritesProvider } from '@/lib/FavoritesContext';
 import { TooltipProvider } from '@/components/ui/Tooltip';
+import NavigationProgress from '@/components/NavigationProgress';
 import { DEFAULT_OG_IMAGE, SITE_DESCRIPTION, SITE_NAME } from '@/lib/metadata';
 
 const sans = Inter({
@@ -64,7 +65,7 @@ export default function RootLayout({
       <body className="font-sans bg-ink-0 text-bone">
         <FavoritesProvider>
           <TooltipProvider delayDuration={150} skipDelayDuration={300}>
-            {children}
+            <NavigationProgress>{children}</NavigationProgress>
           </TooltipProvider>
         </FavoritesProvider>
       </body>

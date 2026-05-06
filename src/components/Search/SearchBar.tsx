@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import SearchDropdown, { type FlatRow } from './SearchDropdown';
 import { eventLink, type SearchResults } from '@/lib/searchTypes';
+import { useNavigationStart } from '@/components/NavigationProgress';
 
 const MIN_CHARS = 2;
 const DEBOUNCE_MS = 250;
@@ -13,6 +14,7 @@ type Status = 'idle' | 'loading' | 'ready' | 'error';
 export default function SearchBar() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const startNavigation = useNavigationStart();
   // Pre-fill from ?q= when we're on /search so the bar reflects current state.
   const initialQ = searchParams.get('q') ?? '';
   const [q, setQ] = useState(initialQ);
@@ -162,6 +164,7 @@ export default function SearchBar() {
         if (row.external) {
           window.open(row.href, '_blank', 'noopener,noreferrer');
         } else {
+          startNavigation();
           router.push(row.href);
         }
       }
