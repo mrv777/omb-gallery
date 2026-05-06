@@ -21,8 +21,13 @@ export type ApiEvent = {
 
 /** Matrica profile overlay: wallet_addr → display data. Only populated for
  * wallets that have a non-default Matrica profile. The map is restricted to
- * addresses appearing in the events on this page so payload stays small. */
-export type ApiMatricaMap = Record<string, { username: string | null; avatar_url: string | null }>;
+ * addresses appearing in the events on this page so payload stays small.
+ * `user_id` lets the UI detect transfers between two wallets owned by the
+ * same Matrica user (rendered as "internal"). */
+export type ApiMatricaMap = Record<
+  string,
+  { user_id: string; username: string | null; avatar_url: string | null }
+>;
 
 export type ApiActivityResponse = {
   events: ApiEvent[];

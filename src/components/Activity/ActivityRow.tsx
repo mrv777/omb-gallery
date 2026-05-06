@@ -63,6 +63,14 @@ const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev, matrica 
   const market = isSold ? marketplaceLabel(event.marketplace) : '';
   const txLink = memepoolTxLink(event.txid);
 
+  // Same Matrica user on both sides = internal (sibling wallets). The
+  // !!oldUser/!!newUser guards prevent two unlinked wallets (both user_id
+  // undefined) from comparing equal as `undefined === undefined`.
+  const oldUser = event.old_owner ? matrica[event.old_owner]?.user_id : null;
+  const newUser = event.new_owner ? matrica[event.new_owner]?.user_id : null;
+  const isInternal =
+    !!oldUser && !!newUser && oldUser === newUser && event.old_owner !== event.new_owner;
+
   return (
     <div
       className={`flex items-center gap-x-3 sm:gap-x-4 px-2 sm:px-4 py-2 border-b border-ink-2 hover:bg-ink-1/60 transition-colors ${
@@ -142,11 +150,22 @@ const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev, matrica 
         )}
       </div>
 
-      {/* Owners */}
+      {/* Owners — collapsed to a single label + "internal" tag when both
+          addresses resolve to the same Matrica user (sibling wallets of the
+          same identity). Mirrors the holder page's direction labelling. */}
       <div className="hidden sm:flex items-center gap-1.5 font-mono text-[11px] text-bone-dim min-w-0">
-        <OwnerLink addr={event.old_owner} matrica={matrica} />
-        <span className="text-bone-dim/60 shrink-0">→</span>
-        <OwnerLink addr={event.new_owner} matrica={matrica} />
+        {isInternal ? (
+          <>
+            <OwnerLink addr={event.old_owner} matrica={matrica} />
+            <span className="shrink-0 normal-case tracking-normal text-bone-dim">internal</span>
+          </>
+        ) : (
+          <>
+            <OwnerLink addr={event.old_owner} matrica={matrica} />
+            <span className="text-bone-dim/60 shrink-0">→</span>
+            <OwnerLink addr={event.new_owner} matrica={matrica} />
+          </>
+        )}
       </div>
 
       {/* Right rail: time + tx link */}
