@@ -2,11 +2,25 @@ import 'server-only';
 
 // Estimated expiration date/time for currently-active Liquidium loans.
 //
-// Why: BIP-341 hides the escrow's tap-tree until script-path spend, so we can
-// never derive an active loan's exact CSV from chain. But Liquidium offers a
-// discrete menu of term lengths (empirically 7/10/12/14/16/30d) and individual
-// lender vaults specialize heavily — most run >75% of one term across all
-// historical defaults. So per-vault modal term is a high-coverage predictor.
+// **This is explicitly a heuristic, not a chain-fingerprint.** BIP-341 hides
+// the escrow's tap-tree until script-path spend, so we can never derive an
+// active loan's exact CSV from chain (ONCHAIN_TAGGING.md §2.3). What we *can*
+// observe historically: every `loan-defaulted` event reveals the default
+// leaf, and the leaf encodes the term length. Across ~482 prod defaults, two
+// stable patterns hold:
+//
+//   1. Term lengths cluster on a tight discrete menu (empirically 7/10/12/
+//      14/16/30d, with 30d being the max product term and ≥96% of all
+//      observations on those rungs).
+//   2. Lender vaults specialize: most run 75–92% of one term across their
+//      history. So `lender_vault → modal_term_days` is a high-coverage
+//      predictor: ~92% of currently-active loans share a vault we've already
+//      seen default.
+//
+// Estimator output carries a `estimated_basis` tag and `estimated_sample_count`
+// so callers can communicate uncertainty in the UI. NEVER persist the
+// estimate to events.raw_json or any DB column that might later be confused
+// for ground truth — it stays a derived value, recomputed lazily.
 //
 // Source data: every `loan-defaulted` event whose raw_json carries either:
 //   - leaf_script_hex (modern Liquidium) → parse + decode BIP-112 OP_CSV
@@ -16,6 +30,10 @@ import 'server-only';
 //
 // Cached in-process for 5 min; corpus grows slowly (~1 default per day on
 // prod), so a stale cache costs nothing meaningful.
+//
+// Re-validation tool: `scripts/research-loan-terms.js` (read-only, idempotent).
+// Run when you want to sanity-check that vaults still specialize on one term
+// and the menu hasn't shifted.
 
 import { getDb } from './db';
 
