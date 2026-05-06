@@ -822,7 +822,7 @@ export async function runLoanTick(
          AND event_type     IN ('transferred','sold')
     `),
     getOriginationEvent: db.prepare(`
-      SELECT id, event_type, sale_price_sats, inscription_number
+      SELECT id, event_type, sale_price_sats, inscription_number, old_owner
         FROM events
        WHERE inscription_id = @inscription_id
          AND txid           = @txid
@@ -934,9 +934,18 @@ export async function runLoanTick(
             event_type: 'transferred' | 'sold';
             sale_price_sats: number | null;
             inscription_number: number;
+            old_owner: string | null;
           }
         | undefined;
       if (!existing) continue;
+
+      // The OMB-sender (old_owner of the underlying chain transfer) is the
+      // wallet that physically held the OMB before it went to escrow — that's
+      // the "human-visible" owner we want effective_owner anchored to.
+      // Liquidium's borrowerPayoutAddress is where the BTC goes, often a
+      // different (legacy P2SH) address for the same user; using it strands
+      // the OMB on a holder page nobody navigates to.
+      const ombSender = existing.old_owner ?? orig.borrower;
 
       const isRelaxed = orig.matchKind.startsWith('relaxed-');
       const confidence =
@@ -952,7 +961,8 @@ export async function runLoanTick(
         match_kind: orig.matchKind,
         escrow_addr: orig.escrowAddr,
         lender_addr: orig.lender,
-        borrower_addr: orig.borrower,
+        borrower_addr: ombSender,
+        borrower_payout_addr: orig.borrower,
         loan_amount_sats: orig.loanAmountSats,
         activation_fee_sats: orig.activationFeeSats,
         detector_version: DETECTOR_VERSION,
@@ -967,13 +977,13 @@ export async function runLoanTick(
           stmts.onSoldOrigination.run({
             inscription_number: orig.inscriptionNumber,
             sale_price_sats: existing.sale_price_sats ?? 0,
-            borrower: orig.borrower,
+            borrower: ombSender,
           });
           stmts.recomputeHighestSale.run({ inscription_number: orig.inscriptionNumber });
         } else {
           stmts.onOrigination.run({
             inscription_number: orig.inscriptionNumber,
-            borrower: orig.borrower,
+            borrower: ombSender,
           });
         }
         stmts.dequeueNotify.run({ id: existing.id });
@@ -983,13 +993,30 @@ export async function runLoanTick(
 
     for (const o of originations) {
       const orig = o.origination;
+      // Same OMB-sender vs cash-payout split as the modern path. The heuristic
+      // tracer's `borrower` is the largest non-lender output (cash recipient),
+      // which can differ from the OMB-holding address.
+      const existing = stmts.getOriginationEvent.get({
+        inscription_id: orig.inscriptionId,
+        txid: orig.txid,
+      }) as
+        | {
+            id: number;
+            event_type: 'transferred' | 'sold';
+            sale_price_sats: number | null;
+            inscription_number: number;
+            old_owner: string | null;
+          }
+        | undefined;
+      const ombSender = existing?.old_owner ?? orig.borrower;
       const raw = JSON.stringify({
         source: 'onchain-loan-heuristic',
         confidence: 'high',
         loan_type: 'origination',
         escrow_addr: orig.escrowAddr,
         lender_addr: orig.lender,
-        borrower_addr: orig.borrower,
+        borrower_addr: ombSender,
+        borrower_payout_addr: orig.borrower,
         loan_amount_sats: orig.loanAmountSats,
         detector_version: DETECTOR_VERSION,
       });
@@ -1001,15 +1028,9 @@ export async function runLoanTick(
       if (u.changes > 0) {
         stmts.onOrigination.run({
           inscription_number: orig.inscriptionNumber,
-          borrower: orig.borrower,
+          borrower: ombSender,
         });
-        // Look up the upgraded event's id so we can dequeue from notify_pending.
-        const evRow = db
-          .prepare(`SELECT id FROM events WHERE inscription_id=@inscription_id AND txid=@txid`)
-          .get({ inscription_id: orig.inscriptionId, txid: orig.txid }) as
-          | { id: number }
-          | undefined;
-        if (evRow) stmts.dequeueNotify.run({ id: evRow.id });
+        if (existing) stmts.dequeueNotify.run({ id: existing.id });
         writeStats.originations++;
       }
     }

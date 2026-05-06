@@ -2717,21 +2717,43 @@ export function getStmts(): Stmts {
     // 'omb' so the chart matches the OMB count shown elsewhere on the page;
     // bravocados movements would otherwise inflate the running total against
     // a denominator the chart never names. No cap — full history is small
-    // and we want the chart to span first-event→now. Excludes 'listed'
-    // (no real ownership change). `event_id` is exposed so the chart can
-    // correlate highlight markers (see `holderColorHighlights`) to the
-    // running-total at that exact event.
+    // and we want the chart to span first-event→now. `event_id` is exposed so
+    // the chart can correlate highlight markers (see `holderColorHighlights`)
+    // to the running-total at that exact event.
+    //
+    // Loan semantics: while a loan is open the OMB is collateralized but
+    // still "belongs to" the borrower (effective_owner = borrower elsewhere),
+    // so loan-originated/loan-repaid/loan-unlocked must NOT decrement-then-
+    // increment the borrower's bag — they're filtered out of the chain-delta
+    // arms. loan-defaulted is when the OMB actually leaves the borrower for
+    // the lender; the lender naturally gets +1 from `new_owner = lender`,
+    // and the borrower's -1 is reconstructed via the third arm by joining to
+    // the matching origination event (escrow uniquely keys the pairing).
+    // 'listed' is also excluded — listings are off-chain notification triggers.
     ownershipChangesByAddress: db.prepare(`
       SELECT e.id AS event_id, e.block_timestamp, +1 AS delta
       FROM events e
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
-      WHERE e.new_owner = @owner AND e.event_type != 'listed'
+      WHERE e.new_owner = @owner
+        AND e.event_type IN ('transferred','sold','loan-defaulted')
         AND i.collection_slug = 'omb'
       UNION ALL
       SELECT e.id AS event_id, e.block_timestamp, -1 AS delta
       FROM events e
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
-      WHERE e.old_owner = @owner AND e.event_type != 'listed'
+      WHERE e.old_owner = @owner
+        AND e.event_type IN ('transferred','sold')
+        AND i.collection_slug = 'omb'
+      UNION ALL
+      SELECT d.id AS event_id, d.block_timestamp, -1 AS delta
+      FROM events d
+      JOIN events o
+        ON o.event_type = 'loan-originated'
+       AND o.inscription_number = d.inscription_number
+       AND o.new_owner = d.old_owner
+      JOIN inscriptions i ON i.inscription_number = d.inscription_number
+      WHERE d.event_type = 'loan-defaulted'
+        AND o.old_owner = @owner
         AND i.collection_slug = 'omb'
       ORDER BY block_timestamp ASC, event_id ASC
     `),
@@ -2747,7 +2769,7 @@ export function getStmts(): Stmts {
       FROM events e
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
       WHERE e.new_owner = @owner
-        AND e.event_type != 'listed'
+        AND e.event_type IN ('transferred','sold','loan-defaulted')
         AND i.collection_slug = 'omb'
         AND i.color IN ('red', 'blue')
       UNION ALL
@@ -2755,10 +2777,22 @@ export function getStmts(): Stmts {
       FROM events e
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
       WHERE e.old_owner = @owner
-        AND e.event_type != 'listed'
+        AND e.event_type IN ('transferred','sold')
         AND i.collection_slug = 'omb'
         AND i.color IN ('red', 'blue')
-      ORDER BY e.block_timestamp ASC, e.id ASC
+      UNION ALL
+      SELECT d.id AS event_id, d.block_timestamp, d.inscription_number, i.color, -1 AS delta
+      FROM events d
+      JOIN events o
+        ON o.event_type = 'loan-originated'
+       AND o.inscription_number = d.inscription_number
+       AND o.new_owner = d.old_owner
+      JOIN inscriptions i ON i.inscription_number = d.inscription_number
+      WHERE d.event_type = 'loan-defaulted'
+        AND o.old_owner = @owner
+        AND i.collection_slug = 'omb'
+        AND i.color IN ('red', 'blue')
+      ORDER BY block_timestamp ASC, event_id ASC
     `),
 
     // ---------------- global search ----------------
