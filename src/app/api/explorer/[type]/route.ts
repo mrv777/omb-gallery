@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getStmts, type GroupedHolderRow, type InscriptionRow } from '@/lib/db';
 import type { ApiHolder } from '@/components/Activity/types';
 import { colorParamForSql, parseColorParam } from '@/lib/colorFilter';
+import { estimateLoanExpiration } from '@/lib/loanExpiration';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -98,6 +99,17 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ type: strin
     cursor_secondary: cursor ? (cursor.secondary as number) : null,
   }) as InscriptionRow[];
 
+  const items: Array<InscriptionRow & Partial<ReturnType<typeof estimateLoanExpiration>>> =
+    type === 'currently-loaned'
+      ? rows.map(r => {
+          const est = estimateLoanExpiration({
+            originationTs: r.active_loan_started_at ?? null,
+            lenderVault: r.active_loan_lender_vault ?? null,
+          });
+          return est ? { ...r, ...est } : r;
+        })
+      : rows;
+
   const next_cursor =
     rows.length === limit
       ? buildInscriptionCursor(
@@ -107,7 +119,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ type: strin
       : null;
 
   return NextResponse.json(
-    { type, items: rows, next_cursor },
+    { type, items, next_cursor },
     { headers: { 'Cache-Control': 'public, max-age=30, stale-while-revalidate=300' } }
   );
 }

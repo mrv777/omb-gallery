@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { EventRow, InscriptionRow } from '@/lib/db';
+import type { LoanExpirationEstimate } from '@/lib/loanExpiration';
 import { lookupInscription } from '@/lib/inscriptionLookup';
 import {
   formatBtc,
@@ -21,6 +22,11 @@ const COLOR_TILE_BG: Record<string, string> = {
   black: 'bg-accent-black/10',
 };
 
+type ActiveLoanEstimate = LoanExpirationEstimate & {
+  started_at: number;
+  lender_vault: string | null;
+};
+
 type Props = {
   inscription: InscriptionRow;
   events: EventRow[];
@@ -30,6 +36,9 @@ type Props = {
   ownerOthers: number[];
   /** True when there are more holdings than ownerOthers includes. */
   ownerOthersHasMore: boolean;
+  /** Estimated expiration of the open loan (if any). Null if no active loan
+   * or no origination data to base an estimate on. */
+  activeLoanEstimate?: ActiveLoanEstimate | null;
 };
 
 export default function InscriptionDetail({
@@ -38,6 +47,7 @@ export default function InscriptionDetail({
   heldSince,
   ownerOthers,
   ownerOthersHasMore,
+  activeLoanEstimate,
 }: Props) {
   const hit = lookupInscription(inscription.inscription_number);
   const tileBg = hit?.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
@@ -203,6 +213,8 @@ export default function InscriptionDetail({
         </div>
       </div>
 
+      {activeLoanEstimate && <ActiveLoanCallout estimate={activeLoanEstimate} />}
+
       {events.length > 1 && <MovementTimeline events={events} />}
 
       {/* Activity timeline */}
@@ -287,6 +299,57 @@ function Stat({ label, value }: { label: string; value: string }) {
     <div>
       <dt className="text-bone-dim">{label}</dt>
       <dd className="text-bone normal-case tracking-normal tabular-nums mt-0.5">{value}</dd>
+    </div>
+  );
+}
+
+function ActiveLoanCallout({ estimate }: { estimate: ActiveLoanEstimate }) {
+  const overdue = estimate.is_overdue;
+  const dateLabel = new Date(estimate.estimated_expiration_ts * 1000).toUTCString();
+  const basisLabel =
+    estimate.estimated_basis === 'vault'
+      ? `${estimate.estimated_sample_count} prior loan${estimate.estimated_sample_count === 1 ? '' : 's'} from this lender`
+      : estimate.estimated_basis === 'global'
+        ? `corpus-wide modal term (${estimate.estimated_sample_count} samples)`
+        : 'no prior data — assuming 30d max';
+  const rangeLabel =
+    estimate.estimated_term_min_days != null &&
+    estimate.estimated_term_max_days != null &&
+    estimate.estimated_term_min_days !== estimate.estimated_term_max_days
+      ? ` · range ${estimate.estimated_term_min_days}–${estimate.estimated_term_max_days}d`
+      : '';
+  const tooltip = `Started ${formatRelTime(estimate.started_at)} · likely ${estimate.estimated_term_days}d term · ${basisLabel}${rangeLabel}\nEstimate only — actual term not visible on chain until the loan resolves.`;
+  return (
+    <div className="mb-8 border border-accent-orange/40 bg-accent-orange/5 px-4 py-3 font-mono">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="text-[10px] tracking-[0.12em] uppercase text-accent-orange">
+          loan in progress
+        </span>
+        <span className="text-[11px] uppercase tracking-[0.08em] text-bone-dim">
+          via Liquidium
+        </span>
+      </div>
+      <div className="mt-2 text-xs text-bone normal-case tracking-normal">
+        {overdue ? (
+          <Tooltip content={tooltip}>
+            <span>
+              <span className="text-accent-red">past expected expiry</span> · awaiting lender claim
+              or repayment
+            </span>
+          </Tooltip>
+        ) : (
+          <Tooltip content={tooltip}>
+            <span>
+              estimated expiration {formatRelTime(estimate.estimated_expiration_ts)}
+              <span className="text-bone-dim"> · {dateLabel.replace('GMT', 'UTC')}</span>
+            </span>
+          </Tooltip>
+        )}
+      </div>
+      <div className="mt-1 text-[10px] tracking-[0.04em] text-bone-dim normal-case">
+        {basisLabel}
+        {rangeLabel}
+      </div>
     </div>
   );
 }

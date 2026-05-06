@@ -2236,7 +2236,11 @@ export function getStmts(): Stmts {
       SELECT i.*,
              (SELECT MAX(block_timestamp) FROM events e
                 WHERE e.inscription_number = i.inscription_number
-                  AND e.event_type = 'loan-originated') AS active_loan_started_at
+                  AND e.event_type = 'loan-originated') AS active_loan_started_at,
+             (SELECT json_extract(raw_json,'$.lender_addr') FROM events e
+                WHERE e.inscription_number = i.inscription_number
+                  AND e.event_type = 'loan-originated'
+                ORDER BY e.id DESC LIMIT 1) AS active_loan_lender_vault
         FROM inscriptions i
        WHERE i.active_loan_count > 0
          AND i.collection_slug = @collection
@@ -2332,7 +2336,11 @@ export function getStmts(): Stmts {
         SELECT i.*,
                (SELECT MAX(block_timestamp) FROM events e
                   WHERE e.inscription_number = i.inscription_number
-                    AND e.event_type = 'loan-originated') AS active_loan_started_at
+                    AND e.event_type = 'loan-originated') AS active_loan_started_at,
+               (SELECT json_extract(raw_json,'$.lender_addr') FROM events e
+                  WHERE e.inscription_number = i.inscription_number
+                    AND e.event_type = 'loan-originated'
+                  ORDER BY e.id DESC LIMIT 1) AS active_loan_lender_vault
           FROM inscriptions i
          WHERE i.active_loan_count > 0
            AND i.collection_slug = @collection
@@ -2929,6 +2937,10 @@ export type InscriptionRow = {
    * timestamp of the most recent loan-originated event for the inscription.
    * Drives the currently-loaned leaderboard "loaned 3d ago" UI. */
   active_loan_started_at?: number | null;
+  /** Only populated by topByActiveLoans / topByActiveLoansPaged — the
+   * `lender_addr` from the most recent loan-originated event's raw_json.
+   * Drives per-vault expiration estimation (see lib/loanExpiration.ts). */
+  active_loan_lender_vault?: string | null;
 };
 
 export type ActiveListingRow = {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStmts, type EventRow, type InscriptionRow, type ActiveListingRow } from '@/lib/db';
+import { estimateLoanExpiration, type LoanExpirationEstimate } from '@/lib/loanExpiration';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -25,9 +26,39 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ number: str
   }
   const events = stmts.getInscriptionEvents.all(num) as EventRow[];
   const listing = stmts.getActiveListing.get(num) as ActiveListingRow | undefined;
+
+  // For an inscription with an open loan, look up the most recent
+  // origination's lender_addr + block_timestamp from the events list and
+  // attach an estimated expiration. The events array is already loaded so we
+  // don't need an extra DB hit.
+  let active_loan_estimate: (LoanExpirationEstimate & { started_at: number; lender_vault: string | null }) | null = null;
+  if ((inscription.active_loan_count ?? 0) > 0) {
+    const lastOrig = [...events]
+      .filter(e => e.event_type === 'loan-originated')
+      .sort((a, b) => b.id - a.id)[0];
+    if (lastOrig && typeof lastOrig.block_timestamp === 'number') {
+      let lender: string | null = null;
+      try {
+        const rj = JSON.parse(lastOrig.raw_json ?? 'null') as { lender_addr?: unknown };
+        if (typeof rj?.lender_addr === 'string') lender = rj.lender_addr;
+      } catch {
+        // raw_json shouldn't be malformed here, but we never want to 500 the
+        // detail page over a parse fluke — fall back to the global estimate.
+      }
+      const est = estimateLoanExpiration({
+        originationTs: lastOrig.block_timestamp,
+        lenderVault: lender,
+      });
+      if (est) {
+        active_loan_estimate = { ...est, started_at: lastOrig.block_timestamp, lender_vault: lender };
+      }
+    }
+  }
+
   return NextResponse.json({
     inscription,
     events,
     current_listing: listing ?? null,
+    active_loan_estimate,
   });
 }

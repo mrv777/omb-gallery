@@ -14,6 +14,7 @@ import { colorParamForSql, parseColorParam } from '@/lib/colorFilter';
 import HolderDistributionHistogram from '@/components/Charts/HolderDistributionHistogram';
 import HoldingDurationHistogram from '@/components/Charts/HoldingDurationHistogram';
 import { SITE_NAME, buildSocial } from '@/lib/metadata';
+import { estimateLoanExpiration } from '@/lib/loanExpiration';
 
 export async function generateMetadata({
   searchParams,
@@ -74,11 +75,18 @@ export default async function ExplorerPage({
     collection,
     color: colorParam,
   }) as InscriptionRow[];
-  const currentlyLoaned = stmts.topByActiveLoans.all({
+  const currentlyLoanedRaw = stmts.topByActiveLoans.all({
     limit: 10,
     collection,
     color: colorParam,
   }) as InscriptionRow[];
+  const currentlyLoaned = currentlyLoanedRaw.map(r => {
+    const est = estimateLoanExpiration({
+      originationTs: r.active_loan_started_at ?? null,
+      lenderVault: r.active_loan_lender_vault ?? null,
+    });
+    return est ? { ...r, ...est } : r;
+  });
   const holderRows = stmts.topHoldersGrouped.all({
     limit: 25,
     collection,

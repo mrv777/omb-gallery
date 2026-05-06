@@ -61,6 +61,20 @@ export type ApiInscription = {
    * for this inscription. Only populated by the currently-loaned leaderboard
    * queries — null elsewhere. */
   active_loan_started_at?: number | null;
+  /** Lender vault address from the most recent loan-originated event.
+   * Populated alongside active_loan_started_at. Used for tooltip context. */
+  active_loan_lender_vault?: string | null;
+  /** Per-vault modal-term-based expiration estimate. Populated by the
+   * currently-loaned leaderboard and the inscription detail API when the
+   * inscription has an active loan. See lib/loanExpiration.ts. */
+  estimated_expiration_ts?: number | null;
+  estimated_term_days?: number | null;
+  estimated_basis?: 'vault' | 'global' | 'unknown' | null;
+  estimated_sample_count?: number | null;
+  estimated_term_min_days?: number | null;
+  estimated_term_max_days?: number | null;
+  /** True if `estimated_expiration_ts` is already past at server time. */
+  is_overdue?: boolean | null;
 };
 
 /** One identity in the top-holders leaderboard. When `is_user`, multiple
