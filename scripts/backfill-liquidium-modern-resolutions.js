@@ -240,47 +240,102 @@ async function main() {
     if (!DRY_RUN && apply.immediate({ row, match })) stats.changed++;
   }
 
-  // Recompute effective_owner for any inscription whose latest-by-timestamp
-  // loan event is an open origination. Each resolution UPDATE during the
-  // loop above sets effective_owner = current_owner, but if the resolution
-  // gets a higher event_id than a chronologically-earlier origination
-  // (typical when this backfill runs after the origination backfill), the
-  // resolution's UPDATE would clobber the origination's effective_owner =
-  // borrower. Repair pass restores the borrower for active loans.
+  // Two repair passes against drift between aggregate counters and the
+  // events table. Both are idempotent and recompute from events as the
+  // ground truth.
+  //
+  // (1) active_loan_count: the live `runLoanTick` clamps decrements at 0
+  //     (`MAX(active_loan_count - 1, 0)`). If a resolution event arrives
+  //     before its corresponding origination has been tagged, the decrement
+  //     no-ops, and a later origination backfill will bump active_loan_count
+  //     past the true value. The collision is rare but real (observed once
+  //     on the 2026-05-05 relaxed-rule rollout: a default tx confirmed
+  //     between deploy and origination backfill). Recompute from events:
+  //     active = (origs) - (defaulted + unlocked + modern_repaid). Legacy
+  //     onchain-loan-heuristic emits both unlock + repaid per loan; only
+  //     unlock decrements active_loan_count, so legacy repaid is excluded.
+  //
+  // (2) effective_owner: each resolution UPDATE during the loop above
+  //     sets effective_owner = current_owner. If a resolution gets a
+  //     higher event_id than a chronologically-earlier open origination
+  //     (typical when this backfill runs after the origination backfill),
+  //     the resolution's UPDATE clobbers the origination's
+  //     effective_owner = borrower. Repair restores borrower for active
+  //     loans, then current_owner for closed loans.
+  let activeLoanCountFixes = 0;
   let effectiveOwnerFixes = 0;
   if (!DRY_RUN) {
-    const r = db.prepare(`
-      WITH latest_loan_event AS (
+    const repairCount = db.prepare(`
+      WITH counts AS (
+        SELECT inscription_number,
+               SUM(CASE WHEN event_type = 'loan-originated' THEN 1 ELSE 0 END) AS o,
+               SUM(CASE WHEN event_type IN ('loan-defaulted','loan-unlocked') THEN 1 ELSE 0 END)
+             + SUM(CASE WHEN event_type = 'loan-repaid'
+                         AND json_extract(raw_json,'$.source')='liquidium-modern-resolution-fingerprint'
+                        THEN 1 ELSE 0 END) AS r
+          FROM events WHERE event_type LIKE 'loan-%' GROUP BY inscription_number
+      )
+      UPDATE inscriptions
+         SET active_loan_count = MAX(
+           (SELECT o - r FROM counts WHERE counts.inscription_number = inscriptions.inscription_number),
+           0
+         )
+       WHERE inscription_number IN (SELECT inscription_number FROM counts)
+         AND active_loan_count != MAX(
+           (SELECT o - r FROM counts WHERE counts.inscription_number = inscriptions.inscription_number),
+           0
+         )
+    `).run();
+    activeLoanCountFixes = repairCount.changes;
+
+    // After active_loan_count is correct, repair effective_owner. For
+    // active loans → borrower of latest origination. For closed → current_owner.
+    const repairBorrower = db.prepare(`
+      WITH latest_open_orig AS (
         SELECT inscription_number,
                json_extract(raw_json,'$.borrower_addr') AS borrower,
-               event_type,
                ROW_NUMBER() OVER (PARTITION BY inscription_number
-                                  ORDER BY block_timestamp DESC, id DESC) AS rn
+                                  ORDER BY block_timestamp DESC, id DESC) AS rn,
+               event_type
           FROM events
          WHERE event_type LIKE 'loan-%'
       )
       UPDATE inscriptions
          SET effective_owner = (
-           SELECT borrower FROM latest_loan_event
-            WHERE latest_loan_event.inscription_number = inscriptions.inscription_number
-              AND rn = 1
-              AND event_type = 'loan-originated'
-              AND borrower IS NOT NULL
+           SELECT borrower FROM latest_open_orig
+            WHERE latest_open_orig.inscription_number = inscriptions.inscription_number
+              AND rn = 1 AND event_type = 'loan-originated' AND borrower IS NOT NULL
          )
        WHERE active_loan_count > 0
          AND inscription_number IN (
-           SELECT inscription_number FROM latest_loan_event
-            WHERE rn = 1
-              AND event_type = 'loan-originated'
-              AND borrower IS NOT NULL
+           SELECT inscription_number FROM latest_open_orig
+            WHERE rn = 1 AND event_type = 'loan-originated' AND borrower IS NOT NULL
+         )
+         AND effective_owner != (
+           SELECT borrower FROM latest_open_orig
+            WHERE latest_open_orig.inscription_number = inscriptions.inscription_number
+              AND rn = 1 AND event_type = 'loan-originated' AND borrower IS NOT NULL
          )
     `).run();
-    effectiveOwnerFixes = r.changes;
+    const repairClosed = db.prepare(`
+      UPDATE inscriptions
+         SET effective_owner = current_owner
+       WHERE active_loan_count = 0
+         AND effective_owner != current_owner
+         AND loan_count > 0
+    `).run();
+    effectiveOwnerFixes = repairBorrower.changes + repairClosed.changes;
   }
 
   console.log(
     JSON.stringify(
-      { dry_run: DRY_RUN, ...stats, effective_owner_fixes: effectiveOwnerFixes, failures: failures.slice(0, 10) },
+      {
+        dry_run: DRY_RUN,
+        ...stats,
+        active_loan_count_fixes: activeLoanCountFixes,
+        effective_owner_fixes: effectiveOwnerFixes,
+        failures: failures.slice(0, 10),
+      },
       null,
       2
     )
