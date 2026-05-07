@@ -104,6 +104,10 @@ export default function HolderProfile({
   const bravoShown = bravoHoldings.slice(0, BRAVO_TILE_CAP);
   const bravoHidden = bravoHoldings.length - bravoShown.length;
   const linked = !!manual || !!username;
+  // Per-tile lookup: which OMBs sit in an inferred-only wallet, so the tile
+  // can render the bone-dim dot. Skipped when no wallets were folded —
+  // membership check is otherwise per-tile.
+  const inferredOwners = new Set(inferredWallets);
 
   return (
     <section className="px-4 sm:px-6 pb-16 max-w-6xl mx-auto">
@@ -250,6 +254,11 @@ export default function HolderProfile({
                 key={row.inscription_number}
                 number={row.inscription_number}
                 loaned={row.active_loan_count > 0}
+                inferred={
+                  inferredOwners.size > 0 &&
+                  !!row.effective_owner &&
+                  inferredOwners.has(row.effective_owner)
+                }
               />
             ))}
             {ombHidden > 0 && (

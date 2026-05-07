@@ -21,7 +21,19 @@ const COLOR_TILE_BG: Record<string, string> = {
 // dropping exactly one tile (always the first in the sorted list) from
 // the SSR HTML. Forcing the boundary at the tile means each tile streams
 // uniformly and the Slot always gets a real element.
-export function OmbTile({ number, loaned = false }: { number: number; loaned?: boolean }) {
+export function OmbTile({
+  number,
+  loaned = false,
+  inferred = false,
+}: {
+  number: number;
+  loaned?: boolean;
+  /** True when this OMB sits in a wallet folded onto the identity by
+   * on-chain inference (≥99% confidence) rather than confirmed via Matrica.
+   * Renders a subtle bone-dim dot in the bottom-right corner so users can
+   * tell which tiles depend on the heuristic. */
+  inferred?: boolean;
+}) {
   const hit = lookupInscription(number);
   const tileBg = hit?.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
   // Accent-orange ring matches the ActiveLoanCallout treatment on the
@@ -30,8 +42,15 @@ export function OmbTile({ number, loaned = false }: { number: number; loaned?: b
   const borderClass = loaned
     ? 'border border-accent-orange/60 hover:border-accent-orange'
     : 'border border-ink-2 hover:border-bone-dim';
+  const tooltip = [
+    `#${number}`,
+    loaned ? 'loaned via Liquidium' : null,
+    inferred ? 'in an on-chain-inferred wallet (≥99%, not Matrica-confirmed)' : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
   return (
-    <Tooltip content={loaned ? `#${number} · loaned via Liquidium` : `#${number}`}>
+    <Tooltip content={tooltip}>
       <span
         className={`relative block w-20 h-20 sm:w-24 sm:h-24 ${tileBg} overflow-hidden ${borderClass} transition-colors`}
         style={{
@@ -66,6 +85,12 @@ export function OmbTile({ number, loaned = false }: { number: number; loaned?: b
           >
             loan
           </span>
+        )}
+        {inferred && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute bottom-1 right-1 w-1.5 h-1.5 rounded-full bg-bone-dim ring-1 ring-ink-1"
+          />
         )}
       </span>
     </Tooltip>
