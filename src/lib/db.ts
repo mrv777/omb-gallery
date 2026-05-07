@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 31;
+const SCHEMA_VERSION = 32;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -163,6 +163,7 @@ function migrate(db: DB): void {
         upgradeV28ToV29(db);
         upgradeV29ToV30(db);
         upgradeV30ToV31(db);
+        upgradeV31ToV32(db);
       } else {
         initSchemaLatest(db);
       }
@@ -197,6 +198,7 @@ function migrate(db: DB): void {
       if (current < 29) upgradeV28ToV29(db);
       if (current < 30) upgradeV29ToV30(db);
       if (current < 31) upgradeV30ToV31(db);
+      if (current < 32) upgradeV31ToV32(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -468,27 +470,38 @@ function initSchemaLatest(db: DB): void {
 
     -- Phase 8: on-chain wallet clustering. Pairs stored in canonical order
     -- (addr_a < addr_b) so each unordered pair has exactly one row. Raw
-    -- counts (cih_count, self_xfer_count) are preserved separately from
-    -- the derived confidence so post-hoc threshold tweaks don't require
-    -- a full recompute. evidence_json is capped at the most recent N items
-    -- (see src/lib/cluster.ts EVIDENCE_CAP).
+    -- per-signal counts are preserved separately from the derived
+    -- confidence so post-hoc threshold tweaks don't require a full
+    -- recompute. evidence_json is capped at the most recent N items
+    -- (see src/lib/cluster.ts EVIDENCE_CAP). See CLUSTERING.md for the
+    -- signal definitions, calibration history, and tunables.
     CREATE TABLE IF NOT EXISTS wallet_cluster_edges (
       addr_a          TEXT    NOT NULL,
       addr_b          TEXT    NOT NULL,
       confidence      INTEGER NOT NULL,
+      -- v1 signals (incremental in the live tick).
       cih_count       INTEGER NOT NULL DEFAULT 0,
-      -- Total self-xfer count = self_xfer_ab + self_xfer_ba. Kept as a
-      -- denormalized column so simple readers don't need to compute it.
       self_xfer_count INTEGER NOT NULL DEFAULT 0,
-      -- Directional self-transfer counts. self_xfer_ab is the count of
-      -- transferred events where old_owner = addr_a → new_owner = addr_b
-      -- (and addr_a < addr_b by canonical-pair invariant). Bidirectional
-      -- flow (both columns nonzero) is a much stronger same-person signal
-      -- than one-way flow — exchanges and custodial endpoints typically
-      -- only receive, never reciprocate. The confidence formula in
-      -- src/lib/cluster.ts gates the strongest tier on min(ab, ba) ≥ 1.
       self_xfer_ab    INTEGER NOT NULL DEFAULT 0,
       self_xfer_ba    INTEGER NOT NULL DEFAULT 0,
+      -- v2 signals (recomputed globally by runClusterRecompute — they
+      -- depend on whole-corpus fan-out maps, not per-event deltas).
+      -- co_cons_count: # of distinct destinations that bridge two
+      -- monogamous senders. co_parent_count: # of distinct non-MSR
+      -- parents that distribute to two monogamous receivers. pmx*:
+      -- direct A↔B transfers where one endpoint is a personal-MSR
+      -- (consolidator that wasn't suppressed by the MSR gate). pmx_rt*:
+      -- the subset of pmx events where the receiver previously owned
+      -- the inscription — the strong "this was a round-trip" signal
+      -- that distinguishes consolidation from cross-trader activity.
+      co_cons_count   INTEGER NOT NULL DEFAULT 0,
+      co_parent_count INTEGER NOT NULL DEFAULT 0,
+      pmx_count       INTEGER NOT NULL DEFAULT 0,
+      pmx_ab          INTEGER NOT NULL DEFAULT 0,
+      pmx_ba          INTEGER NOT NULL DEFAULT 0,
+      pmx_rt_count    INTEGER NOT NULL DEFAULT 0,
+      pmx_rt_ab       INTEGER NOT NULL DEFAULT 0,
+      pmx_rt_ba       INTEGER NOT NULL DEFAULT 0,
       evidence_json   TEXT    NOT NULL DEFAULT '[]',
       first_seen_at   INTEGER NOT NULL,
       last_seen_at    INTEGER NOT NULL,
@@ -1520,6 +1533,31 @@ function upgradeV29ToV30(db: DB): void {
     ALTER TABLE poll_state_v30 RENAME TO poll_state;
     INSERT OR IGNORE INTO poll_state (stream, collection_slug) VALUES ('cluster', 'omb');
   `);
+}
+
+function upgradeV31ToV32(db: DB): void {
+  // Phase 8.1: extend wallet_cluster_edges with v2 signals — co-consolidator
+  // (cc), co-parent (cp), personal-MSR self-xfer (pmx), and round-trip
+  // subset of pmx (pmx_rt). All purely additive — no row rewrite.
+  // See CLUSTERING.md for the signal definitions and the calibration
+  // background.
+  const cols = db.pragma('table_info(wallet_cluster_edges)') as Array<{ name: string }>;
+  const have = new Set(cols.map(c => c.name));
+  const adds: Array<[string, string]> = [
+    ['co_cons_count',   `INTEGER NOT NULL DEFAULT 0`],
+    ['co_parent_count', `INTEGER NOT NULL DEFAULT 0`],
+    ['pmx_count',       `INTEGER NOT NULL DEFAULT 0`],
+    ['pmx_ab',          `INTEGER NOT NULL DEFAULT 0`],
+    ['pmx_ba',          `INTEGER NOT NULL DEFAULT 0`],
+    ['pmx_rt_count',    `INTEGER NOT NULL DEFAULT 0`],
+    ['pmx_rt_ab',       `INTEGER NOT NULL DEFAULT 0`],
+    ['pmx_rt_ba',       `INTEGER NOT NULL DEFAULT 0`],
+  ];
+  for (const [name, def] of adds) {
+    if (!have.has(name)) {
+      db.exec(`ALTER TABLE wallet_cluster_edges ADD COLUMN ${name} ${def}`);
+    }
+  }
 }
 
 function upgradeV30ToV31(db: DB): void {

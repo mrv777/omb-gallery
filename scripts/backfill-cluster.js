@@ -124,18 +124,13 @@ function canonicalPair(a, b) {
   return a < b ? [a, b] : [b, a];
 }
 
-// Confidence ladder. Self-xfer is weaker per signal than CIH (gifts and
-// out-of-band-paid OTC trades look identical to consolidation), so it
-// needs more occurrences to clear the public-display threshold (9500).
-// CIH is stronger per signal but can fire on cooperative-shape PSBT
-// settlements that we don't fingerprint; tighter cap keeps single-CIH
-// out of the public band. Mixing signal types (cih + self_xfer between
-// the same pair, on DIFFERENT txs — the same-tx case is suppressed at
-// the gate) is the strongest combination.
-// Direction-aware confidence formula. Mirror of src/lib/cluster.ts.
-// `bidir = min(ab, ba)` is the bidirectional self-xfer count. One-way
-// flow caps at 0.80 alone (could be a deposit channel; needs CIH or
-// bidirectional reciprocity to clear).
+// Confidence ladder — mirror of src/lib/cluster.ts confidenceFromCounts.
+// Keep these two implementations in sync. Five signal types (cih, sx,
+// cc, cp, pmx with round-trip subset) plus a cross-mechanism bonus
+// when two or more distinct mechanisms fire on the same pair. B1 rule:
+// pmx_bidir≥2 alone (no anchoring signal from another mechanism) caps
+// at 0.95 — keeps the cross-trader pattern (active P2P traders) out of
+// the identity-fold band. Tuning history in CLUSTERING.md §4.
 function confidenceFromCounts(c) {
   let p = 0;
   if (c.cih_count >= 1) p = Math.max(p, 0.8);
@@ -143,20 +138,52 @@ function confidenceFromCounts(c) {
   if (c.cih_count >= 3) p = Math.max(p, 0.98);
   if (c.cih_count >= 5) p = Math.max(p, 0.99);
 
-  const ab = c.self_xfer_ab || 0;
-  const ba = c.self_xfer_ba || 0;
-  const bidir = Math.min(ab, ba);
-  const total = c.self_xfer_count || ab + ba;
+  const sxAb = c.self_xfer_ab || 0;
+  const sxBa = c.self_xfer_ba || 0;
+  const sxBidir = Math.min(sxAb, sxBa);
+  const sxTotal = c.self_xfer_count || sxAb + sxBa;
+  if (sxBidir >= 1) p = Math.max(p, 0.92);
+  if (sxBidir >= 2) p = Math.max(p, 0.99);
+  if (sxTotal >= 1) p = Math.max(p, 0.5);
+  if (sxTotal >= 3) p = Math.max(p, 0.8);
+  if (c.cih_count >= 1 && sxBidir >= 1) p = Math.max(p, 0.99);
+  if (c.cih_count >= 1 && sxTotal >= 1) p = Math.max(p, 0.95);
+  if (c.cih_count >= 2 && sxTotal >= 2) p = Math.max(p, 0.99);
 
-  if (bidir >= 1) p = Math.max(p, 0.92);
-  if (bidir >= 2) p = Math.max(p, 0.99);
+  const cc = c.co_cons_count || 0;
+  if (cc >= 1) p = Math.max(p, 0.80);
+  if (cc >= 2) p = Math.max(p, 0.95);
+  if (cc >= 3) p = Math.max(p, 0.98);
+  if (cc >= 5) p = Math.max(p, 0.99);
 
-  if (total >= 1) p = Math.max(p, 0.5);
-  if (total >= 3) p = Math.max(p, 0.8);
+  const cp = c.co_parent_count || 0;
+  if (cp >= 1) p = Math.max(p, 0.80);
+  if (cp >= 2) p = Math.max(p, 0.95);
+  if (cp >= 3) p = Math.max(p, 0.98);
 
-  if (c.cih_count >= 1 && bidir >= 1) p = Math.max(p, 0.99);
-  if (c.cih_count >= 1 && total >= 1) p = Math.max(p, 0.95);
-  if (c.cih_count >= 2 && total >= 2) p = Math.max(p, 0.99);
+  const pmxAb = c.pmx_ab || 0;
+  const pmxBa = c.pmx_ba || 0;
+  const pmxBidir = Math.min(pmxAb, pmxBa);
+  const pmxTotal = c.pmx_count || pmxAb + pmxBa;
+  const pmxRt = c.pmx_rt_count || 0;
+  if (pmxTotal >= 1) p = Math.max(p, 0.75);
+  if (pmxTotal >= 3) p = Math.max(p, 0.90);
+  if (pmxBidir >= 1) p = Math.max(p, 0.95);
+  if (pmxBidir >= 2 && pmxRt >= 2) p = Math.max(p, 0.99);
+
+  let indep = 0;
+  if (c.cih_count >= 1) indep++;
+  if (sxAb + sxBa >= 1) indep++;
+  if (cc >= 1) indep++;
+  if (cp >= 1) indep++;
+  if (pmxTotal >= 1) indep++;
+  if (indep >= 2) p = Math.max(p, 0.97);
+  if (indep >= 3) p = Math.max(p, 0.99);
+
+  // B1: pmx_bidir≥2 alone reaches 0.99 only when round-trip confirms
+  // consolidation. Otherwise cap at 0.95.
+  const onlyPmx = c.cih_count === 0 && (sxAb + sxBa) === 0 && cc === 0 && cp === 0;
+  if (onlyPmx && pmxBidir >= 2 && pmxRt < 2 && p >= 0.99) p = 0.95;
 
   return Math.round(p * 10000);
 }
@@ -264,11 +291,12 @@ async function main() {
   // instead of throwing SQLITE_BUSY when run against a live prod DB.
   db.pragma('busy_timeout = 10000');
 
-  // Probe schema — refuse to run against a pre-v30 DB.
+  // Probe schema — refuse to run against a pre-v32 DB (v32 added the
+  // co_cons_count / co_parent_count / pmx_* columns).
   const userVersion = db.pragma('user_version', { simple: true });
-  if (userVersion < 30) {
+  if (userVersion < 32) {
     console.error(
-      `[cluster-backfill] db user_version=${userVersion}, need ≥30. Run the app once to migrate.`
+      `[cluster-backfill] db user_version=${userVersion}, need ≥32. Run the app once to migrate.`
     );
     process.exit(1);
   }
@@ -502,6 +530,9 @@ async function main() {
 
   // Stage 5: write edges.
   if (!ARGS.dryRun) {
+    // CIH+sx-only upsert. cc/cp/pmx columns are populated by the v2
+    // recompute pass at the end of this script; we leave them at their
+    // defaults / preserved values here.
     const upsert = db.prepare(
       `INSERT INTO wallet_cluster_edges
          (addr_a, addr_b, confidence, cih_count, self_xfer_count, self_xfer_ab, self_xfer_ba, evidence_json, first_seen_at, last_seen_at)
@@ -593,9 +624,247 @@ async function main() {
       `(cih_only=${cihOnly}, self_only=${selfOnly}, both=${both})`
   );
 
+  if (!ARGS.dryRun) {
+    runV2Recompute(db);
+  }
+
   if (ARGS.validate) runValidation(db, acc);
 
   db.close();
+}
+
+// Mirror of clusterStore.ts runClusterRecompute. Computes cc/cp/pmx/
+// pmx_rt against the events table and writes to wallet_cluster_edges.
+// Same algorithm, same tunables; keep in sync if you change one.
+function runV2Recompute(db) {
+  const t0 = Date.now();
+  console.log(`[cluster-backfill] v2 recompute starting…`);
+  const MONOG_FANOUT = 2;
+  const MONOG_FANIN = 2;
+  const MSR_TH = 5;
+  const COCONS_MIN = 2;
+  const PARENT_MIN = 2;
+  const PERSONAL_BIDIR = 3;
+  const PERSONAL_RETENTION = 0.4;
+
+  // HARD blacklist only — exclude auto-high-degree (those ARE the MSRs
+  // we want to evaluate this run). Mirror of loadHardBlacklist in
+  // src/lib/clusterStore.ts.
+  const blacklist = new Set(MINT_WALLET_ADDRS);
+  for (const r of db.prepare(
+    `SELECT address FROM cluster_blacklist WHERE reason != 'auto-high-degree'`
+  ).all()) {
+    blacklist.add(r.address);
+  }
+
+  const xfer = db.prepare(
+    `SELECT id, inscription_number, old_owner, new_owner FROM events
+      WHERE event_type='transferred' AND marketplace IS NULL
+        AND old_owner IS NOT NULL AND new_owner IS NOT NULL AND old_owner != new_owner
+      ORDER BY id ASC`
+  ).all();
+
+  // Per-inscription timeline for round-trip detection.
+  const inscTimeline = new Map();
+  for (const r of db.prepare(
+    `SELECT id, inscription_number, new_owner FROM events
+      WHERE new_owner IS NOT NULL ORDER BY id ASC`
+  ).all()) {
+    let arr = inscTimeline.get(r.inscription_number);
+    if (!arr) { arr = []; inscTimeline.set(r.inscription_number, arr); }
+    arr.push({ id: r.id, new_owner: r.new_owner });
+  }
+  function isRoundTrip(insc, beforeId, who) {
+    const arr = inscTimeline.get(insc);
+    if (!arr) return false;
+    for (const ev of arr) {
+      if (ev.id >= beforeId) return false;
+      if (ev.new_owner === who) return true;
+    }
+    return false;
+  }
+
+  const senderRecv = new Map();
+  const recvSender = new Map();
+  for (const r of xfer) {
+    if (blacklist.has(r.old_owner) || blacklist.has(r.new_owner)) continue;
+    let s = senderRecv.get(r.old_owner);
+    if (!s) { s = new Set(); senderRecv.set(r.old_owner, s); } s.add(r.new_owner);
+    let t = recvSender.get(r.new_owner);
+    if (!t) { t = new Set(); recvSender.set(r.new_owner, t); } t.add(r.old_owner);
+  }
+  const msrSet = new Set();
+  for (const [a, set] of recvSender) if (set.size >= MSR_TH) msrSet.add(a);
+
+  const personalMsr = new Set();
+  const retStmt = db.prepare(
+    `WITH recv AS (
+       SELECT DISTINCT inscription_number FROM events
+        WHERE event_type='transferred' AND marketplace IS NULL
+          AND old_owner != new_owner AND new_owner = ?
+     )
+     SELECT COUNT(*) AS recv_n,
+       SUM(CASE WHEN i.effective_owner=? THEN 1 ELSE 0 END) AS held_n
+       FROM recv r JOIN inscriptions i USING(inscription_number)`
+  );
+  for (const c of msrSet) {
+    const senders = recvSender.get(c) || new Set();
+    let bidir = 0;
+    const out = senderRecv.get(c) || new Set();
+    for (const s of senders) if (out.has(s)) bidir++;
+    if (bidir >= PERSONAL_BIDIR) { personalMsr.add(c); continue; }
+    const ret = retStmt.get(c, c);
+    if (ret.recv_n >= 5 && ret.held_n / ret.recv_n >= PERSONAL_RETENTION) {
+      personalMsr.add(c);
+    }
+  }
+  console.log(`[cluster-backfill] v2 recompute: msrs=${msrSet.size} personal_msrs=${personalMsr.size}`);
+
+  function canon(a, b) { return a < b ? [a, b] : [b, a]; }
+  const v2 = new Map();
+  function getRow(a, b) {
+    if (a === b) return null;
+    const [x, y] = canon(a, b);
+    const key = `${x}|${y}`;
+    let r = v2.get(key);
+    if (!r) {
+      r = { addr_a: x, addr_b: y, cc: new Set(), cp: new Set(),
+            pmx: 0, pmx_ab: 0, pmx_ba: 0, pmx_rt: 0, pmx_rt_ab: 0, pmx_rt_ba: 0 };
+      v2.set(key, r);
+    }
+    return r;
+  }
+
+  let ccBumps = 0, cpBumps = 0;
+  for (const [c, senders] of recvSender) {
+    if (senders.size < COCONS_MIN || blacklist.has(c)) continue;
+    const monog = [];
+    for (const s of senders) {
+      if (s === c || blacklist.has(s)) continue;
+      const fan = (senderRecv.get(s) || new Set()).size;
+      if (fan >= 1 && fan <= MONOG_FANOUT) monog.push(s);
+    }
+    if (monog.length < COCONS_MIN) continue;
+    for (let i = 0; i < monog.length; i++) {
+      for (let j = i + 1; j < monog.length; j++) {
+        const r = getRow(monog[i], monog[j]); if (!r) continue;
+        r.cc.add(c); ccBumps++;
+      }
+      const r2 = getRow(monog[i], c); if (r2) r2.cc.add(c);
+    }
+  }
+  for (const [p, recips] of senderRecv) {
+    if (recips.size < PARENT_MIN || blacklist.has(p)) continue;
+    if (msrSet.has(p) && !personalMsr.has(p)) continue;
+    const monog = [];
+    for (const r of recips) {
+      if (r === p || blacklist.has(r)) continue;
+      const fan = (recvSender.get(r) || new Set()).size;
+      if (fan >= 1 && fan <= MONOG_FANIN) monog.push(r);
+    }
+    if (monog.length < PARENT_MIN) continue;
+    for (let i = 0; i < monog.length; i++) {
+      for (let j = i + 1; j < monog.length; j++) {
+        const r = getRow(monog[i], monog[j]); if (!r) continue;
+        r.cp.add(p); cpBumps++;
+      }
+    }
+  }
+
+  let pmxN = 0, pmxRtN = 0;
+  for (const e of xfer) {
+    if (blacklist.has(e.old_owner) || blacklist.has(e.new_owner)) continue;
+    if (!personalMsr.has(e.old_owner) && !personalMsr.has(e.new_owner)) continue;
+    const r = getRow(e.old_owner, e.new_owner); if (!r) continue;
+    r.pmx += 1; pmxN++;
+    const isAb = e.old_owner === r.addr_a;
+    if (isAb) r.pmx_ab += 1; else r.pmx_ba += 1;
+    if (isRoundTrip(e.inscription_number, e.id, e.new_owner)) {
+      r.pmx_rt += 1; pmxRtN++;
+      if (isAb) r.pmx_rt_ab += 1; else r.pmx_rt_ba += 1;
+    }
+  }
+  console.log(`[cluster-backfill] v2 recompute: cc=${ccBumps} cp=${cpBumps} pmx=${pmxN} pmx_rt=${pmxRtN}`);
+
+  // Reset v2 columns + recompute confidence for ALL existing rows
+  // (zeroes any stale v2 evidence so this is fully idempotent).
+  db.exec(
+    `UPDATE wallet_cluster_edges
+        SET co_cons_count=0, co_parent_count=0,
+            pmx_count=0, pmx_ab=0, pmx_ba=0,
+            pmx_rt_count=0, pmx_rt_ab=0, pmx_rt_ba=0`
+  );
+  const recompConf = db.prepare(
+    `UPDATE wallet_cluster_edges SET confidence=? WHERE addr_a=? AND addr_b=?`
+  );
+  db.transaction(() => {
+    for (const row of db.prepare(
+      `SELECT addr_a, addr_b, cih_count, self_xfer_count, self_xfer_ab, self_xfer_ba
+         FROM wallet_cluster_edges`
+    ).all()) {
+      recompConf.run(confidenceFromCounts(row), row.addr_a, row.addr_b);
+    }
+  })();
+
+  // Apply v2 — UPSERT cc/cp/pmx, recompute confidence.
+  const upsertV2 = db.prepare(
+    `INSERT INTO wallet_cluster_edges
+       (addr_a, addr_b, confidence, cih_count, self_xfer_count,
+        self_xfer_ab, self_xfer_ba, evidence_json, first_seen_at, last_seen_at,
+        co_cons_count, co_parent_count,
+        pmx_count, pmx_ab, pmx_ba,
+        pmx_rt_count, pmx_rt_ab, pmx_rt_ba)
+     VALUES (@addr_a, @addr_b, @confidence, 0, 0, 0, 0, '[]', unixepoch(), unixepoch(),
+             @cc, @cp, @pmx, @pmx_ab, @pmx_ba, @pmx_rt, @pmx_rt_ab, @pmx_rt_ba)
+     ON CONFLICT(addr_a, addr_b) DO UPDATE SET
+       confidence      = excluded.confidence,
+       co_cons_count   = excluded.co_cons_count,
+       co_parent_count = excluded.co_parent_count,
+       pmx_count       = excluded.pmx_count,
+       pmx_ab          = excluded.pmx_ab,
+       pmx_ba          = excluded.pmx_ba,
+       pmx_rt_count    = excluded.pmx_rt_count,
+       pmx_rt_ab       = excluded.pmx_rt_ab,
+       pmx_rt_ba       = excluded.pmx_rt_ba`
+  );
+  const v1Stmt = db.prepare(
+    `SELECT cih_count, self_xfer_count, self_xfer_ab, self_xfer_ba
+       FROM wallet_cluster_edges WHERE addr_a=? AND addr_b=?`
+  );
+  let written = 0;
+  db.transaction(() => {
+    for (const r of v2.values()) {
+      const v1 = v1Stmt.get(r.addr_a, r.addr_b) || {};
+      const conf = confidenceFromCounts({
+        cih_count: v1.cih_count || 0,
+        self_xfer_count: v1.self_xfer_count || 0,
+        self_xfer_ab: v1.self_xfer_ab || 0,
+        self_xfer_ba: v1.self_xfer_ba || 0,
+        co_cons_count: r.cc.size,
+        co_parent_count: r.cp.size,
+        pmx_count: r.pmx,
+        pmx_ab: r.pmx_ab,
+        pmx_ba: r.pmx_ba,
+        pmx_rt_count: r.pmx_rt,
+        pmx_rt_ab: r.pmx_rt_ab,
+        pmx_rt_ba: r.pmx_rt_ba,
+      });
+      upsertV2.run({
+        addr_a: r.addr_a, addr_b: r.addr_b, confidence: conf,
+        cc: r.cc.size, cp: r.cp.size,
+        pmx: r.pmx, pmx_ab: r.pmx_ab, pmx_ba: r.pmx_ba,
+        pmx_rt: r.pmx_rt, pmx_rt_ab: r.pmx_rt_ab, pmx_rt_ba: r.pmx_rt_ba,
+      });
+      written++;
+    }
+  })();
+  console.log(`[cluster-backfill] v2 recompute: edges_written=${written} ms=${Date.now() - t0}`);
+
+  // Re-run cluster_anchors so the fold reflects the new confidence.
+  if (db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='cluster_anchors'`).get()) {
+    const stats = recomputeAnchorsForBackfill(db);
+    console.log(`[cluster-backfill] cluster_anchors after v2: ${stats.components} components, ${stats.members} members, ${stats.skipped_split_clusters} split skipped`);
+  }
 }
 
 function confOf(row) {

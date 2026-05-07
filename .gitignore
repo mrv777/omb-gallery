@@ -65,3 +65,10 @@ INDEXER-PLAN.md
 
 # Claude Code local state (scheduled task locks, agent worktrees, etc.)
 /.claude/
+
+# Cluster-research generated artifacts. The scripts (*.js) and REPORT.md
+# are tracked; per-run outputs (calibration JSON dumps, captured stdout)
+# are regenerable from the scripts against a fresh snapshot and would
+# only churn the diff.
+cluster-research/*.json
+cluster-research/*.txt

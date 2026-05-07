@@ -4,24 +4,44 @@
 // host-side backfill scripts. Keep this file free of `server-only` and DB
 // imports so node CLI scripts can use it directly.
 //
-// v1 covers two heuristics:
+// v2 covers five signal types. The first two are computed incrementally
+// in the live tick; the last three depend on global fan-out maps and are
+// recomputed by runClusterRecompute (poll mode `cluster-recompute`).
+//
+// Incremental (live tick):
 //
 //   1. Common-input ownership (CIH). Multiple non-blacklisted addresses
-//      co-spent in one tx are presumed same-owner. Excluded:
+//      co-spent in one tx are presumed same-owner. Excluded: blacklisted
+//      inputs (mint wallets, auto-detected high-degree multiplexers,
+//      manual operator entries), marketplace-settlement txs, ACP-PSBT
+//      shapes, and high-fanin (>20 inputs).
 //
-//        - Inputs whose address is on the blacklist (mint wallets, auto-
-//          detected high-degree multiplexers, manual operator entries).
-//        - Whole txs that are marketplace settlements (event_type='sold')
-//          or Liquidium loan moves (event_type='loan-*'), because those
-//          PSBTs splice unrelated buyer/seller (or borrower/Liquidium)
-//          inputs into one tx. Caller filters by event_type before
-//          handing txids in here — see clusterStore.ts.
+//   2. Self-transfer chain (sx). A `transferred` event with no marketplace
+//      tag, neither endpoint blacklisted, is the OMB-postage consolidation
+//      pattern. Direction-aware: bidirectional flow (min(ab, ba) ≥ 1) is
+//      a much stronger signal than one-way.
 //
-//   2. Self-transfer chain. A `transferred` event with old_owner !=
-//      new_owner, no marketplace tag, no loan classification, is the
-//      classic OMB-postage move ("I'm consolidating my collection from
-//      cold to hot"). The new_owner doesn't have to co-sign on chain so
-//      this catches pairs that CIH wouldn't.
+// Global recompute (cluster-recompute mode):
+//
+//   3. Co-consolidator (cc). Two "monogamous senders" (each with ≤2
+//      lifetime distinct OMB recipients) sharing a destination C with
+//      ≥2 such senders. Counts distinct C's connecting the pair.
+//      Catches the personal-consolidator pattern that the multi-source-
+//      receiver suppression in v1 silently destroyed.
+//
+//   4. Co-parent (cp). The inverse — two "monogamous receivers"
+//      (≤2 distinct lifetime senders each) sharing a non-MSR parent.
+//      Catches "primary → sub-wallet distribution" patterns.
+//
+//   5. Personal-MSR self-xfer (pmx). Direct A↔B transfers where at
+//      least one endpoint is a multi-source receiver classified
+//      "personal" (either ≥3 of its senders also receive back from it,
+//      OR ≥40% of inscriptions it received marketplace=NULL are still
+//      held by it now). Re-enables sx-style signal for these MSRs which
+//      v1 fully suppressed. pmx_rt is the subset of pmx events where
+//      the *receiver* previously owned the inscription — empirically
+//      ~47% of legitimate same-human pmx round-trip versus ~10% for
+//      cross-trader pairs (see CLUSTERING.md §3 for the calibration).
 //
 // Confidence is derived from raw counts so the threshold can be tuned
 // post-hoc without a recompute.
@@ -38,25 +58,43 @@ export type RawTxLike = {
 };
 
 export type EvidenceItem = {
-  type: 'cih' | 'self_xfer';
+  type: 'cih' | 'self_xfer' | 'pmx';
   txid: string;
   /** Block timestamp (seconds), if known — only used for display ordering. */
   ts?: number;
   /**
-   * For self_xfer evidence: which direction the OMB moved (in canonical
-   * pair order, where addr_a < addr_b). 'ab' = old_owner=addr_a, new_owner=addr_b.
-   * Omitted for cih evidence (CIH is symmetric).
+   * For self_xfer / pmx evidence: which direction the OMB moved (in
+   * canonical pair order, where addr_a < addr_b). 'ab' = old_owner=addr_a,
+   * new_owner=addr_b. Omitted for cih (which is symmetric).
    */
   direction?: 'ab' | 'ba';
+  /**
+   * For pmx (and sx, when known): true if the receiver previously owned
+   * this inscription before the event — strong consolidation signal.
+   * See CLUSTERING.md §3.
+   */
+  round_trip?: boolean;
 };
 
 export type EdgeCounts = {
+  /** v1: common-input heuristic. */
   cih_count: number;
-  /** Total self-xfer count = self_xfer_ab + self_xfer_ba. Kept for back-compat. */
+  /** v1: total self-xfer count = self_xfer_ab + self_xfer_ba. */
   self_xfer_count: number;
-  /** Direction-split self-xfers (canonical-pair order, addr_a < addr_b). */
   self_xfer_ab?: number;
   self_xfer_ba?: number;
+  /** v2: # of distinct destinations bridging two monogamous senders. */
+  co_cons_count?: number;
+  /** v2: # of distinct non-MSR parents distributing to two monog receivers. */
+  co_parent_count?: number;
+  /** v2: direct transfer events where one endpoint is a personal-MSR. */
+  pmx_count?: number;
+  pmx_ab?: number;
+  pmx_ba?: number;
+  /** v2: pmx subset where the receiver previously owned the inscription. */
+  pmx_rt_count?: number;
+  pmx_rt_ab?: number;
+  pmx_rt_ba?: number;
 };
 
 /**
@@ -134,50 +172,103 @@ export function cihPairsFromTx(
 /**
  * Map raw evidence counts to a confidence score in [0, 10000].
  *
- * Direction-aware: a `self_xfer` count of 22, all one-way (A keeps
- * sending to B, B never reciprocates), is far weaker than 11+11
- * bidirectional. The former matches custodial / exchange / aggregator
- * deposit patterns where two distinct humans are involved; the latter
- * matches a hot/cold rebalance pattern between one human's wallets.
- * Heuristic: gate the highest self-xfer tier on `min(ab, ba) >= 1`
- * (i.e. at least one event in EACH direction). One-way flow alone
- * tops out at 0.80 — meaningful but never publicly surfaced without
- * additional CIH evidence.
+ * Combines five signal types: cih, sx (with directional bidir gate),
+ * cc (co-consolidator), cp (co-parent), and pmx (personal-MSR self-xfer
+ * with a round-trip subset). Each ladder is tuned so a SINGLE strong
+ * tier in any one signal can clear the public-display band (0.95+),
+ * and any TWO independent mechanisms firing together push to 0.97+.
  *
- * CIH ladder is unchanged from the prior calibration: 1 CIH = 0.80,
- * 5 CIH = 0.99. Mixed signals (CIH + bidirectional self-xfer) hit
- * 0.99 immediately — different mechanisms agreeing.
+ * The B1 "anchor required" rule at 9900: bidirectional pmx alone (no
+ * cih, sx, cc, or cp evidence) caps at 0.95 — the cross-trader pattern
+ * (two big collectors with active P2P trading) shows up here, and we
+ * want the identity-fold tier to require a non-pmx anchoring signal.
  *
  * Counts are stored separately from the derived score so threshold
- * tweaks don't require recomputing edges. Run `?mode=cluster`
- * with `--reset` (via the backfill script) to re-derive `confidence`
- * after a ladder change.
+ * tweaks don't require recomputing edges. Run `?mode=cluster-recompute`
+ * to re-derive `confidence` after a ladder change.
+ *
+ * Tuning history is in CLUSTERING.md §4. Calibration against Matrica
+ * ground truth (2026-05-07): precision ~94% / recall ~40% at 9500;
+ * precision ~94% / recall ~28% at 9700; precision ~86% / recall <1%
+ * at the 9900 identity-fold band (B1 in effect).
  */
 export function confidenceFromCounts(c: EdgeCounts): number {
   let p = 0;
+
+  // CIH ladder.
   if (c.cih_count >= 1) p = Math.max(p, 0.8);
   if (c.cih_count >= 2) p = Math.max(p, 0.95);
   if (c.cih_count >= 3) p = Math.max(p, 0.98);
   if (c.cih_count >= 5) p = Math.max(p, 0.99);
 
-  const ab = c.self_xfer_ab ?? 0;
-  const ba = c.self_xfer_ba ?? 0;
-  const bidir = Math.min(ab, ba);
-  const total = c.self_xfer_count > 0 ? c.self_xfer_count : ab + ba;
+  // sx ladder. Direction-aware: bidirectional flow much stronger.
+  const sxAb = c.self_xfer_ab ?? 0;
+  const sxBa = c.self_xfer_ba ?? 0;
+  const sxBidir = Math.min(sxAb, sxBa);
+  const sxTotal = c.self_xfer_count > 0 ? c.self_xfer_count : sxAb + sxBa;
+  if (sxBidir >= 1) p = Math.max(p, 0.92);
+  if (sxBidir >= 2) p = Math.max(p, 0.99);
+  if (sxTotal >= 1) p = Math.max(p, 0.5);
+  if (sxTotal >= 3) p = Math.max(p, 0.8);
 
-  // Bidirectional self-xfer flow — strong same-person signal.
-  if (bidir >= 1) p = Math.max(p, 0.92);
-  if (bidir >= 2) p = Math.max(p, 0.99);
+  // CIH × sx combo — different mechanisms agreeing.
+  if (c.cih_count >= 1 && sxBidir >= 1) p = Math.max(p, 0.99);
+  if (c.cih_count >= 1 && sxTotal >= 1) p = Math.max(p, 0.95);
+  if (c.cih_count >= 2 && sxTotal >= 2) p = Math.max(p, 0.99);
 
-  // Total volume — weaker by itself; one-way could be a deposit channel.
-  if (total >= 1) p = Math.max(p, 0.5);
-  if (total >= 3) p = Math.max(p, 0.8);
-  // No higher tier from one-way alone — needs bidir or CIH to confirm.
+  // co_consolidator ladder. # of distinct hubs bridging the pair.
+  const cc = c.co_cons_count ?? 0;
+  if (cc >= 1) p = Math.max(p, 0.80);
+  if (cc >= 2) p = Math.max(p, 0.95);
+  if (cc >= 3) p = Math.max(p, 0.98);
+  if (cc >= 5) p = Math.max(p, 0.99);
 
-  // Mixed signals.
-  if (c.cih_count >= 1 && bidir >= 1) p = Math.max(p, 0.99);
-  if (c.cih_count >= 1 && total >= 1) p = Math.max(p, 0.95);
-  if (c.cih_count >= 2 && total >= 2) p = Math.max(p, 0.99);
+  // co_parent ladder. # of distinct non-MSR parents distributing to both.
+  const cp = c.co_parent_count ?? 0;
+  if (cp >= 1) p = Math.max(p, 0.80);
+  if (cp >= 2) p = Math.max(p, 0.95);
+  if (cp >= 3) p = Math.max(p, 0.98);
+
+  // pmx ladder. One-way pmx is moderate (could be one-off OTC trade);
+  // bidirectional pmx is strong. For the 0.99 identity-fold tier, we
+  // use the round-trip subset as the discriminator: pmx_rt counts the
+  // events where the receiver previously owned the inscription —
+  // empirically ~47% for legitimate consolidation vs ~10% for cross-
+  // traders. pmx_bidir ≥ 2 alone caps at 0.95 (B1 rule); reaching 0.99
+  // requires either pmx_rt_count ≥ 2 (round-trip-confirmed) OR an
+  // anchoring signal from another mechanism (handled by the indep
+  // bonus below).
+  const pmxAb = c.pmx_ab ?? 0;
+  const pmxBa = c.pmx_ba ?? 0;
+  const pmxBidir = Math.min(pmxAb, pmxBa);
+  const pmxTotal = c.pmx_count ?? (pmxAb + pmxBa);
+  const pmxRt = c.pmx_rt_count ?? 0;
+  if (pmxTotal >= 1) p = Math.max(p, 0.75);
+  if (pmxTotal >= 3) p = Math.max(p, 0.90);
+  if (pmxBidir >= 1) p = Math.max(p, 0.95);
+  if (pmxBidir >= 2 && pmxRt >= 2) p = Math.max(p, 0.99);
+
+  // Cross-mechanism bonus. Each of {cih, sx, cc, cp, pmx} is a distinct
+  // observable; two of them firing on the same pair is independent
+  // confirmation. Two → 0.97; three → 0.99.
+  let indep = 0;
+  if (c.cih_count >= 1) indep++;
+  if (sxAb + sxBa >= 1) indep++;
+  if (cc >= 1) indep++;
+  if (cp >= 1) indep++;
+  if (pmxTotal >= 1) indep++;
+  if (indep >= 2) p = Math.max(p, 0.97);
+  if (indep >= 3) p = Math.max(p, 0.99);
+
+  // B1: pmx_bidir≥2 alone clears 0.99 ONLY when round-trip confirms
+  // consolidation (pmx_rt_count ≥ 2). Without round-trip evidence and
+  // without an anchoring signal from another mechanism, cap at 0.95 —
+  // this is the cross-trader exclusion (ApeSoda↔goot pattern).
+  const onlyPmx = (c.cih_count === 0)
+    && (sxAb + sxBa === 0)
+    && (cc === 0)
+    && (cp === 0);
+  if (onlyPmx && pmxBidir >= 2 && pmxRt < 2 && p >= 0.99) p = 0.95;
 
   return Math.round(p * 10000);
 }
@@ -223,14 +314,37 @@ export const MAX_INPUTS_FOR_CIH = 20;
 
 /**
  * Multi-source receiver threshold. An address that's the new_owner of
- * `transferred` events from this many or more distinct senders is
- * almost certainly an exchange / custodial / market-aggregator
- * endpoint, not a peer in any human cluster. Both CIH and self-xfer
- * signals involving such an address are suppressed. ~639 OMB-related
- * addresses meet ≥5 in our corpus; legitimate collectors top out
- * around 1-2 distinct senders per receiver.
+ * `transferred` events from this many or more distinct senders qualifies
+ * as an MSR — historically suppressed wholesale to keep exchange /
+ * custodial endpoints out of clusters. v2 keeps the suppression for the
+ * sx + CIH signals (where it's working) but re-introduces a softer
+ * pmx (personal-MSR self-xfer) signal for the subset of MSRs that look
+ * personal — see PERSONAL_MSR_BIDIR_MIN / PERSONAL_MSR_RETENTION_MIN.
+ * ~639 OMB-related addresses meet ≥5 in our corpus.
  */
 export const MULTI_SOURCE_RECEIVER_THRESHOLD = 5;
+
+// === v2 tunables (used by runClusterRecompute) ===
+
+/** Max distinct lifetime recipients a sender can have to qualify as
+ *  "monogamous" for co-consolidator pairing. ≤2 covers the typical
+ *  one-shot-then-rest pattern and the rare two-hop split. */
+export const MONOG_FANOUT_MAX = 2;
+
+/** Symmetric — max distinct lifetime senders for monog-recipient (cp). */
+export const MONOG_FANIN_MAX = 2;
+
+/** Both addresses must be monog senders feeding the same hub to fire cc. */
+export const COCONS_MIN_DEGREE = 2;
+
+/** Parent must distribute to ≥this-many monog children to fire cp. */
+export const PARENT_FANOUT_MIN = 2;
+
+/** Bidirectional flow count for an MSR to be classified personal. */
+export const PERSONAL_MSR_BIDIR_MIN = 3;
+
+/** Retention rate (held-now / received) for an MSR to be classified personal. */
+export const PERSONAL_MSR_RETENTION_MIN = 0.4;
 
 /**
  * Mint wallets — duplicated from MINT_WALLETS in src/lib/db.ts because
@@ -267,6 +381,10 @@ export function appendEvidence(
  * Accumulator for building an edge map in memory during backfill. Keys
  * are `addr_a|addr_b` with addr_a < addr_b. Caller flushes to DB with
  * a single bulk INSERT in a transaction.
+ *
+ * The cc / cp counts are stored as Set<bridgeAddr> during accumulation
+ * so re-running the recompute on the same data doesn't double-count
+ * bridges; they're flushed to integers at write time.
  */
 export type EdgeAcc = Map<
   string,
@@ -277,6 +395,14 @@ export type EdgeAcc = Map<
     self_xfer_count: number;
     self_xfer_ab: number;
     self_xfer_ba: number;
+    co_cons_bridges: Set<string>;
+    co_parent_bridges: Set<string>;
+    pmx_count: number;
+    pmx_ab: number;
+    pmx_ba: number;
+    pmx_rt_count: number;
+    pmx_rt_ab: number;
+    pmx_rt_ba: number;
     evidence: EvidenceItem[];
     first_seen_at: number;
     last_seen_at: number;
@@ -318,16 +444,24 @@ export function bumpEdge(
       self_xfer_count: 0,
       self_xfer_ab: 0,
       self_xfer_ba: 0,
+      co_cons_bridges: new Set(),
+      co_parent_bridges: new Set(),
+      pmx_count: 0,
+      pmx_ab: 0,
+      pmx_ba: 0,
+      pmx_rt_count: 0,
+      pmx_rt_ab: 0,
+      pmx_rt_ba: 0,
       evidence: [],
       first_seen_at: ts,
       last_seen_at: ts,
     };
     acc.set(key, row);
   }
-  // Stamp direction on self_xfer evidence so the confidence formula has
-  // it without re-fetching events. CIH is symmetric; no direction.
+  // Stamp direction on directional evidence so the confidence formula
+  // has it without re-fetching events. CIH is symmetric; no direction.
   let stamped: EvidenceItem = evidence;
-  if (evidence.type === 'self_xfer' && !evidence.direction) {
+  if ((evidence.type === 'self_xfer' || evidence.type === 'pmx') && !evidence.direction) {
     stamped = { ...evidence, direction: from === x ? 'ab' : 'ba' };
   }
   // Dedup on (type,txid) — re-running backfill must not double-count.
@@ -337,10 +471,19 @@ export function bumpEdge(
   if (!dup) {
     if (stamped.type === 'cih') {
       row.cih_count += 1;
-    } else {
+    } else if (stamped.type === 'self_xfer') {
       row.self_xfer_count += 1;
       if (stamped.direction === 'ab') row.self_xfer_ab += 1;
       else if (stamped.direction === 'ba') row.self_xfer_ba += 1;
+    } else if (stamped.type === 'pmx') {
+      row.pmx_count += 1;
+      if (stamped.direction === 'ab') row.pmx_ab += 1;
+      else if (stamped.direction === 'ba') row.pmx_ba += 1;
+      if (stamped.round_trip) {
+        row.pmx_rt_count += 1;
+        if (stamped.direction === 'ab') row.pmx_rt_ab += 1;
+        else if (stamped.direction === 'ba') row.pmx_rt_ba += 1;
+      }
     }
   }
   row.evidence = appendEvidence(row.evidence, stamped);
@@ -348,6 +491,42 @@ export function bumpEdge(
     if (!row.first_seen_at || ts < row.first_seen_at) row.first_seen_at = ts;
     if (ts > row.last_seen_at) row.last_seen_at = ts;
   }
+}
+
+/**
+ * Display-time predicate used by the holder-page "likely linked"
+ * surface. Hides edges that match the cross-trader pattern: both
+ * endpoints are themselves multi-source receivers AND the only signal
+ * pushing them above threshold is non-round-trip pmx (i.e. they
+ * actively trade with each other but no inscription has ever returned
+ * to its origin). Examples from calibration: ApeSoda↔goot, JJL↔dor1tolover.
+ *
+ * Suppression is applied ONLY at the display reader — the underlying
+ * confidence and the identity-fold cluster_anchors are unaffected.
+ * Caller passes a Set of MSR addresses (from cluster_blacklist where
+ * reason='auto-high-degree') so this stays framework-free.
+ */
+export function isCrossTraderEdge(
+  e: {
+    addr_a: string;
+    addr_b: string;
+    cih_count: number;
+    self_xfer_count: number;
+    co_cons_count?: number;
+    co_parent_count?: number;
+    pmx_count?: number;
+    pmx_rt_count?: number;
+  },
+  msrSet: ReadonlySet<string>
+): boolean {
+  if (!msrSet.has(e.addr_a) || !msrSet.has(e.addr_b)) return false;
+  if ((e.pmx_rt_count ?? 0) > 0) return false; // any round-trip = consolidation
+  if (e.cih_count > 0) return false;            // CIH anchor → keep
+  if (e.self_xfer_count > 0) return false;      // sx anchor → keep
+  if ((e.co_parent_count ?? 0) > 0) return false; // cp anchor → keep
+  // Both endpoints MSRs, no anchoring signal, pmx never round-tripped:
+  // matches the ApeSoda↔goot trading-pair shape.
+  return true;
 }
 
 /**

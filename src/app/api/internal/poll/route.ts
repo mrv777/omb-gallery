@@ -34,7 +34,7 @@ import { runMagisatFingerprintTick } from '@/lib/magisatFingerprintTick';
 import { runMagicEdenFingerprintTick } from '@/lib/magicEdenFingerprintTick';
 import { runOrdNetFingerprintTick } from '@/lib/ordNetFingerprintTick';
 import { runRolesTick } from '@/lib/rolesStore';
-import { runClusterTick } from '@/lib/clusterStore';
+import { runClusterTick, runClusterRecompute } from '@/lib/clusterStore';
 import { log } from '@/lib/log';
 
 export const dynamic = 'force-dynamic';
@@ -203,6 +203,9 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         break;
       case 'cluster':
         result = await safeCluster();
+        break;
+      case 'cluster-recompute':
+        result = safeClusterRecompute();
         break;
       case 'auto':
       default: {
@@ -412,6 +415,22 @@ async function safeCluster(): Promise<TickResult> {
     const msg = e instanceof Error ? e.message : String(e);
     log.error('poll/cluster', 'tick failed', { error: msg });
     return { mode: 'cluster', error: msg };
+  }
+}
+
+// Global recompute of v2 cluster signals (cc, cp, pmx, pmx_rt). Does
+// NOT run inside `auto` — depends on whole-corpus fan-out maps so the
+// per-tick cost (~5s on the May 2026 snapshot) doesn't fit the 60s
+// auto budget alongside ord+satflow+notify. Run from its own hourly
+// cron (see CLAUDE.md). The live `cluster` tick handles incremental
+// CIH + sx and intentionally leaves cc/cp/pmx columns alone.
+function safeClusterRecompute(): TickResult {
+  try {
+    return runClusterRecompute() as TickResult;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    log.error('poll/cluster-recompute', 'recompute failed', { error: msg });
+    return { mode: 'cluster-recompute', error: msg };
   }
 }
 

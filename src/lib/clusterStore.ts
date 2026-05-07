@@ -11,10 +11,17 @@ import {
   confidenceFromCounts,
   edgeKey,
   hasAcpInput,
+  isCrossTraderEdge,
   IDENTITY_FOLD_THRESHOLD,
   MAX_INPUTS_FOR_CIH,
   MINT_WALLET_ADDRS,
   MULTI_SOURCE_RECEIVER_THRESHOLD,
+  COCONS_MIN_DEGREE,
+  MONOG_FANIN_MAX,
+  MONOG_FANOUT_MAX,
+  PARENT_FANOUT_MIN,
+  PERSONAL_MSR_BIDIR_MIN,
+  PERSONAL_MSR_RETENTION_MIN,
   UnionFind,
   type EdgeAcc,
   type EvidenceItem,
@@ -98,9 +105,15 @@ function stmts() {
     ),
     selectEdge: db.prepare(
       `SELECT cih_count, self_xfer_count, self_xfer_ab, self_xfer_ba,
+              co_cons_count, co_parent_count,
+              pmx_count, pmx_ab, pmx_ba,
+              pmx_rt_count, pmx_rt_ab, pmx_rt_ba,
               evidence_json, first_seen_at, last_seen_at
          FROM wallet_cluster_edges WHERE addr_a = ? AND addr_b = ?`
     ),
+    // Live tick UPSERT — touches v1 fields only. cc/cp/pmx columns are
+    // managed by runClusterRecompute and intentionally NOT clobbered
+    // here (they preserve their last-recompute values on UPDATE).
     upsertEdge: db.prepare(
       `INSERT INTO wallet_cluster_edges
          (addr_a, addr_b, confidence, cih_count, self_xfer_count,
@@ -133,6 +146,22 @@ function loadBlacklist(): Set<string> {
   for (const r of s.selectBlacklist.all() as Array<{ address: string }>) {
     out.add(r.address);
   }
+  return out;
+}
+
+/**
+ * Hard blacklist for the v2 recompute: mint wallets + non-auto reasons
+ * only. We deliberately exclude `auto-high-degree` rows because those
+ * ARE the multi-source receivers we want to classify as personal vs
+ * not — using the soft blacklist would zero out the MSR set every
+ * recompute (since it self-references the previous run's output).
+ */
+function loadHardBlacklist(): Set<string> {
+  const out = new Set<string>(MINT_WALLET_ADDRS);
+  const rows = getDb()
+    .prepare(`SELECT address FROM cluster_blacklist WHERE reason != 'auto-high-degree'`)
+    .all() as Array<{ address: string }>;
+  for (const r of rows) out.add(r.address);
   return out;
 }
 
@@ -394,6 +423,14 @@ export async function runClusterTick(): Promise<TickResult> {
             self_xfer_count: number;
             self_xfer_ab: number;
             self_xfer_ba: number;
+            co_cons_count: number;
+            co_parent_count: number;
+            pmx_count: number;
+            pmx_ab: number;
+            pmx_ba: number;
+            pmx_rt_count: number;
+            pmx_rt_ab: number;
+            pmx_rt_ba: number;
             evidence_json: string;
             first_seen_at: number;
             last_seen_at: number;
@@ -403,6 +440,12 @@ export async function runClusterTick(): Promise<TickResult> {
       let self = row.self_xfer_count;
       let selfAb = row.self_xfer_ab;
       let selfBa = row.self_xfer_ba;
+      // cc/cp/pmx are recompute-owned. Read from existing if present
+      // (preserved through the UPSERT) so the confidence formula sees
+      // the full picture; the live tick never increments them.
+      let cc = 0, cp = 0;
+      let pmx = 0, pmxAb = 0, pmxBa = 0;
+      let pmxRt = 0, pmxRtAb = 0, pmxRtBa = 0;
       let evidence: EvidenceItem[] = [];
       let firstSeen = row.first_seen_at;
       let lastSeen = row.last_seen_at;
@@ -411,6 +454,14 @@ export async function runClusterTick(): Promise<TickResult> {
         self = existing.self_xfer_count;
         selfAb = existing.self_xfer_ab;
         selfBa = existing.self_xfer_ba;
+        cc = existing.co_cons_count;
+        cp = existing.co_parent_count;
+        pmx = existing.pmx_count;
+        pmxAb = existing.pmx_ab;
+        pmxBa = existing.pmx_ba;
+        pmxRt = existing.pmx_rt_count;
+        pmxRtAb = existing.pmx_rt_ab;
+        pmxRtBa = existing.pmx_rt_ba;
         firstSeen = Math.min(existing.first_seen_at || firstSeen, firstSeen);
         lastSeen = Math.max(existing.last_seen_at || 0, lastSeen);
         try {
@@ -425,11 +476,13 @@ export async function runClusterTick(): Promise<TickResult> {
           if (!dup) {
             if (e.type === 'cih') {
               cih += 1;
-            } else {
+            } else if (e.type === 'self_xfer') {
               self += 1;
               if (e.direction === 'ab') selfAb += 1;
               else if (e.direction === 'ba') selfBa += 1;
             }
+            // pmx evidence is never produced by the live tick — only by
+            // runClusterRecompute, which writes columns directly.
           }
           evidence = appendEvidence(evidence, e);
         }
@@ -444,6 +497,14 @@ export async function runClusterTick(): Promise<TickResult> {
           self_xfer_count: self,
           self_xfer_ab: selfAb,
           self_xfer_ba: selfBa,
+          co_cons_count: cc,
+          co_parent_count: cp,
+          pmx_count: pmx,
+          pmx_ab: pmxAb,
+          pmx_ba: pmxBa,
+          pmx_rt_count: pmxRt,
+          pmx_rt_ab: pmxRtAb,
+          pmx_rt_ba: pmxRtBa,
         }),
         cih_count: cih,
         self_xfer_count: self,
@@ -489,6 +550,401 @@ function maybeRefreshAnchors(): void {
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+// =============================================================
+// runClusterRecompute — global pass for v2 signals (cc, cp, pmx, pmx_rt)
+// =============================================================
+//
+// These three signals depend on whole-corpus fan-out maps; they can't
+// be computed from a single new transferred event the way CIH and sx
+// can. Recompute is meant to run hourly via `?mode=cluster-recompute`,
+// not in the live `cluster` tick.
+//
+// Strategy: load every marketplace=NULL transferred event into memory,
+// build sender→recipients and receiver→senders adjacency, classify
+// MSRs and the personal-MSR subset, then emit pairwise cc/cp/pmx bumps
+// into an in-memory accumulator. Round-trip flag for pmx is computed
+// against an inscription→ownership-history index built once. Flush
+// updates the dedicated columns on each existing edge (rows the live
+// tick has already written) and inserts new rows for cc/cp/pmx-only
+// pairs that the live tick has never seen.
+//
+// Cost on the May 2026 snapshot: ~1.5 GB peak RAM (set-of-bridges per
+// edge), ~5s wallclock. Comfortable within a hourly cron.
+
+type RecomputeResult = {
+  mode: 'cluster-recompute';
+  events_scanned: number;
+  msrs: number;
+  personal_msrs: number;
+  cc_bumps: number;
+  cp_bumps: number;
+  pmx_events: number;
+  pmx_rt_events: number;
+  edges_written: number;
+  duration_ms: number;
+  error?: string;
+};
+
+export function runClusterRecompute(): RecomputeResult {
+  const startedAt = Date.now();
+  const db = getDb();
+  const result: RecomputeResult = {
+    mode: 'cluster-recompute',
+    events_scanned: 0,
+    msrs: 0,
+    personal_msrs: 0,
+    cc_bumps: 0,
+    cp_bumps: 0,
+    pmx_events: 0,
+    pmx_rt_events: 0,
+    edges_written: 0,
+    duration_ms: 0,
+  };
+  // Use the HARD blacklist (mints + manual + marketplace/liquidium) so
+  // auto-high-degree MSRs from the prior recompute aren't filtered out
+  // before we get a chance to re-classify them this round.
+  const blacklist = loadHardBlacklist();
+
+  // Pull every marketplace=NULL transferred event in id order so the
+  // round-trip lookup (was the receiver an earlier owner?) is a
+  // straight prefix scan over inscEvents[insc].
+  const xferRows = db.prepare(
+    `SELECT id, inscription_number, old_owner, new_owner, txid, block_timestamp
+       FROM events
+      WHERE event_type='transferred' AND marketplace IS NULL
+        AND old_owner IS NOT NULL AND new_owner IS NOT NULL AND old_owner != new_owner
+      ORDER BY id ASC`
+  ).all() as Array<{
+    id: number;
+    inscription_number: number;
+    old_owner: string;
+    new_owner: string;
+    txid: string;
+    block_timestamp: number;
+  }>;
+  result.events_scanned = xferRows.length;
+
+  // Per-inscription event timeline (for round-trip detection). We only
+  // need (id, new_owner) tuples for ALL events touching the inscription
+  // so a "did B previously own this" check is O(timeline-length) but
+  // each chain is short (median ~3, max ~30).
+  const inscTimeline = new Map<number, Array<{ id: number; new_owner: string }>>();
+  for (const r of db.prepare(
+    `SELECT id, inscription_number, new_owner FROM events
+      WHERE new_owner IS NOT NULL ORDER BY id ASC`
+  ).all() as Array<{ id: number; inscription_number: number; new_owner: string }>) {
+    let arr = inscTimeline.get(r.inscription_number);
+    if (!arr) { arr = []; inscTimeline.set(r.inscription_number, arr); }
+    arr.push({ id: r.id, new_owner: r.new_owner });
+  }
+
+  function isRoundTrip(insc: number, beforeId: number, who: string): boolean {
+    const arr = inscTimeline.get(insc);
+    if (!arr) return false;
+    for (const ev of arr) {
+      if (ev.id >= beforeId) return false;
+      if (ev.new_owner === who) return true;
+    }
+    return false;
+  }
+
+  // Fan-out / fan-in maps over non-blacklist endpoints.
+  const senderRecv = new Map<string, Set<string>>();
+  const recvSender = new Map<string, Set<string>>();
+  for (const r of xferRows) {
+    if (blacklist.has(r.old_owner) || blacklist.has(r.new_owner)) continue;
+    let s = senderRecv.get(r.old_owner);
+    if (!s) { s = new Set(); senderRecv.set(r.old_owner, s); }
+    s.add(r.new_owner);
+    let t = recvSender.get(r.new_owner);
+    if (!t) { t = new Set(); recvSender.set(r.new_owner, t); }
+    t.add(r.old_owner);
+  }
+  const msrSet = new Set<string>();
+  Array.from(recvSender.entries()).forEach(([a, set]) => {
+    if (set.size >= MULTI_SOURCE_RECEIVER_THRESHOLD) msrSet.add(a);
+  });
+  result.msrs = msrSet.size;
+
+  // Personal-MSR classification.
+  const personalMsr = new Set<string>();
+  const retentionStmt = db.prepare(
+    `WITH recv AS (
+       SELECT DISTINCT inscription_number FROM events
+        WHERE event_type='transferred' AND marketplace IS NULL
+          AND old_owner != new_owner AND new_owner = ?
+     )
+     SELECT COUNT(*) AS recv_n,
+            SUM(CASE WHEN i.effective_owner = ? THEN 1 ELSE 0 END) AS held_n
+       FROM recv r JOIN inscriptions i USING(inscription_number)`
+  );
+  Array.from(msrSet).forEach(c => {
+    const senders = recvSender.get(c) ?? new Set<string>();
+    let bidir = 0;
+    const myRecips = senderRecv.get(c) ?? new Set<string>();
+    Array.from(senders).forEach(s => { if (myRecips.has(s)) bidir++; });
+    if (bidir >= PERSONAL_MSR_BIDIR_MIN) { personalMsr.add(c); return; }
+    const ret = retentionStmt.get(c, c) as { recv_n: number; held_n: number };
+    if (ret.recv_n >= 5 && ret.held_n / ret.recv_n >= PERSONAL_MSR_RETENTION_MIN) {
+      personalMsr.add(c);
+    }
+  });
+  result.personal_msrs = personalMsr.size;
+
+  // Per-edge accumulator for cc/cp/pmx counts. We don't reuse EdgeAcc
+  // because we're only computing the v2 columns; the v1 columns come
+  // straight from the existing rows.
+  type V2Row = {
+    addr_a: string;
+    addr_b: string;
+    cc: Set<string>;
+    cp: Set<string>;
+    pmx: number;
+    pmx_ab: number;
+    pmx_ba: number;
+    pmx_rt: number;
+    pmx_rt_ab: number;
+    pmx_rt_ba: number;
+  };
+  const v2: Map<string, V2Row> = new Map();
+  function getRow(a: string, b: string): V2Row | null {
+    if (a === b) return null;
+    const [x, y] = a < b ? [a, b] : [b, a];
+    const key = `${x}|${y}`;
+    let r = v2.get(key);
+    if (!r) {
+      r = {
+        addr_a: x, addr_b: y,
+        cc: new Set(), cp: new Set(),
+        pmx: 0, pmx_ab: 0, pmx_ba: 0,
+        pmx_rt: 0, pmx_rt_ab: 0, pmx_rt_ba: 0,
+      };
+      v2.set(key, r);
+    }
+    return r;
+  }
+
+  // co_consolidator: monog senders sharing a destination ⇒ pair them.
+  Array.from(recvSender.entries()).forEach(([c, senders]) => {
+    if (senders.size < COCONS_MIN_DEGREE) return;
+    if (blacklist.has(c)) return;
+    const monog: string[] = [];
+    Array.from(senders).forEach(s => {
+      if (s === c || blacklist.has(s)) return;
+      const fan = senderRecv.get(s)?.size ?? 0;
+      if (fan >= 1 && fan <= MONOG_FANOUT_MAX) monog.push(s);
+    });
+    if (monog.length < COCONS_MIN_DEGREE) return;
+    for (let i = 0; i < monog.length; i++) {
+      for (let j = i + 1; j < monog.length; j++) {
+        const r = getRow(monog[i], monog[j]);
+        if (!r) continue;
+        r.cc.add(c);
+        result.cc_bumps += 1;
+      }
+      // Also link each monog sender directly to C (the consolidator
+      // is presumed same-owner at the same confidence as the cohort).
+      const r = getRow(monog[i], c);
+      if (r) r.cc.add(c);
+    }
+  });
+
+  // co_parent: monog receivers sharing a non-MSR parent ⇒ pair them.
+  Array.from(senderRecv.entries()).forEach(([p, recips]) => {
+    if (recips.size < PARENT_FANOUT_MIN) return;
+    // Skip exchange-like distributors (MSR but not personal).
+    if (msrSet.has(p) && !personalMsr.has(p)) return;
+    if (blacklist.has(p)) return;
+    const monog: string[] = [];
+    Array.from(recips).forEach(r => {
+      if (r === p || blacklist.has(r)) return;
+      const fan = recvSender.get(r)?.size ?? 0;
+      if (fan >= 1 && fan <= MONOG_FANIN_MAX) monog.push(r);
+    });
+    if (monog.length < PARENT_FANOUT_MIN) return;
+    for (let i = 0; i < monog.length; i++) {
+      for (let j = i + 1; j < monog.length; j++) {
+        const r = getRow(monog[i], monog[j]);
+        if (!r) continue;
+        r.cp.add(p);
+        result.cp_bumps += 1;
+      }
+    }
+  });
+
+  // pmx: direct transfers where one endpoint is a personal-MSR.
+  for (const e of xferRows) {
+    if (blacklist.has(e.old_owner) || blacklist.has(e.new_owner)) continue;
+    if (!personalMsr.has(e.old_owner) && !personalMsr.has(e.new_owner)) continue;
+    const r = getRow(e.old_owner, e.new_owner);
+    if (!r) continue;
+    r.pmx += 1;
+    const isAb = e.old_owner === r.addr_a;
+    if (isAb) r.pmx_ab += 1; else r.pmx_ba += 1;
+    if (isRoundTrip(e.inscription_number, e.id, e.new_owner)) {
+      r.pmx_rt += 1;
+      if (isAb) r.pmx_rt_ab += 1; else r.pmx_rt_ba += 1;
+      result.pmx_rt_events += 1;
+    }
+    result.pmx_events += 1;
+  }
+
+  // Flush v2 columns + recompute confidence for every edge that has
+  // any signal. We need to:
+  //   (a) preserve cih_count / self_xfer_* on existing rows,
+  //   (b) write cc/cp/pmx values into existing rows or insert new ones,
+  //   (c) recompute confidence with the merged counts.
+  const upsertV2 = db.prepare(
+    `INSERT INTO wallet_cluster_edges
+       (addr_a, addr_b, confidence, cih_count, self_xfer_count,
+        self_xfer_ab, self_xfer_ba, evidence_json, first_seen_at, last_seen_at,
+        co_cons_count, co_parent_count,
+        pmx_count, pmx_ab, pmx_ba,
+        pmx_rt_count, pmx_rt_ab, pmx_rt_ba)
+     VALUES (@addr_a, @addr_b, @confidence, 0, 0, 0, 0, '[]', unixepoch(), unixepoch(),
+             @cc, @cp, @pmx, @pmx_ab, @pmx_ba, @pmx_rt, @pmx_rt_ab, @pmx_rt_ba)
+     ON CONFLICT(addr_a, addr_b) DO UPDATE SET
+       confidence      = excluded.confidence,
+       co_cons_count   = excluded.co_cons_count,
+       co_parent_count = excluded.co_parent_count,
+       pmx_count       = excluded.pmx_count,
+       pmx_ab          = excluded.pmx_ab,
+       pmx_ba          = excluded.pmx_ba,
+       pmx_rt_count    = excluded.pmx_rt_count,
+       pmx_rt_ab       = excluded.pmx_rt_ab,
+       pmx_rt_ba       = excluded.pmx_rt_ba`
+  );
+
+  // Also need to zero-out v2 columns on existing edges that no longer
+  // have any v2 evidence (e.g. a sender's monog status flipped, so its
+  // cc bridges shouldn't survive). One bulk UPDATE before applying the
+  // accumulator does it.
+  db.exec(
+    `UPDATE wallet_cluster_edges
+        SET co_cons_count = 0, co_parent_count = 0,
+            pmx_count = 0, pmx_ab = 0, pmx_ba = 0,
+            pmx_rt_count = 0, pmx_rt_ab = 0, pmx_rt_ba = 0`
+  );
+  // After zeroing, also need to recompute confidence using the existing
+  // v1 fields only — otherwise rows whose only signal was a v2 one
+  // would still carry stale high confidence until their (a,b) pair
+  // appears in v2. Iterate existing rows once and update.
+  const allExisting = db.prepare(
+    `SELECT addr_a, addr_b, cih_count, self_xfer_count, self_xfer_ab, self_xfer_ba
+       FROM wallet_cluster_edges`
+  ).all() as Array<{
+    addr_a: string; addr_b: string;
+    cih_count: number; self_xfer_count: number;
+    self_xfer_ab: number; self_xfer_ba: number;
+  }>;
+  const updateConfOnly = db.prepare(
+    `UPDATE wallet_cluster_edges SET confidence = ? WHERE addr_a = ? AND addr_b = ?`
+  );
+
+  const writeTx = db.transaction(() => {
+    for (const row of allExisting) {
+      const conf = confidenceFromCounts({
+        cih_count: row.cih_count,
+        self_xfer_count: row.self_xfer_count,
+        self_xfer_ab: row.self_xfer_ab,
+        self_xfer_ba: row.self_xfer_ba,
+      });
+      updateConfOnly.run(conf, row.addr_a, row.addr_b);
+    }
+  });
+  writeTx();
+
+  // Now apply v2 — needs to read existing v1 to compute the right
+  // confidence. selectEdge returns all fields after our earlier change.
+  const v1Stmt = db.prepare(
+    `SELECT cih_count, self_xfer_count, self_xfer_ab, self_xfer_ba
+       FROM wallet_cluster_edges WHERE addr_a = ? AND addr_b = ?`
+  );
+  const writeV2 = db.transaction(() => {
+    Array.from(v2.values()).forEach(r => {
+      const v1 = v1Stmt.get(r.addr_a, r.addr_b) as
+        | { cih_count: number; self_xfer_count: number; self_xfer_ab: number; self_xfer_ba: number }
+        | undefined;
+      const conf = confidenceFromCounts({
+        cih_count: v1?.cih_count ?? 0,
+        self_xfer_count: v1?.self_xfer_count ?? 0,
+        self_xfer_ab: v1?.self_xfer_ab ?? 0,
+        self_xfer_ba: v1?.self_xfer_ba ?? 0,
+        co_cons_count: r.cc.size,
+        co_parent_count: r.cp.size,
+        pmx_count: r.pmx,
+        pmx_ab: r.pmx_ab,
+        pmx_ba: r.pmx_ba,
+        pmx_rt_count: r.pmx_rt,
+        pmx_rt_ab: r.pmx_rt_ab,
+        pmx_rt_ba: r.pmx_rt_ba,
+      });
+      upsertV2.run({
+        addr_a: r.addr_a,
+        addr_b: r.addr_b,
+        confidence: conf,
+        cc: r.cc.size,
+        cp: r.cp.size,
+        pmx: r.pmx,
+        pmx_ab: r.pmx_ab,
+        pmx_ba: r.pmx_ba,
+        pmx_rt: r.pmx_rt,
+        pmx_rt_ab: r.pmx_rt_ab,
+        pmx_rt_ba: r.pmx_rt_ba,
+      });
+      result.edges_written += 1;
+    });
+  });
+  writeV2();
+
+  // Refresh the cluster_anchors materialized view so leaderboards /
+  // holder pages reflect the new identity-fold composition.
+  try {
+    recomputeClusterAnchors();
+  } catch (err) {
+    log.warn('poll/cluster-recompute', 'recomputeClusterAnchors failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // Record the auto-high-degree blacklist update too (mirrors what the
+  // backfill script does so the live tick's in-memory MSR set stays
+  // current).
+  const insertBL = db.prepare(
+    `INSERT OR REPLACE INTO cluster_blacklist (address, reason, degree, added_at, notes)
+     VALUES (?, 'auto-high-degree', ?, unixepoch(), ?)`
+  );
+  db.transaction(() => {
+    Array.from(msrSet).forEach(a => {
+      const degree = recvSender.get(a)?.size ?? 0;
+      insertBL.run(a, degree, `received transferred-events from ${degree} distinct senders`);
+    });
+  })();
+
+  result.duration_ms = Date.now() - startedAt;
+  log.info('poll/cluster-recompute', 'done', result);
+  return result;
+}
+
+/**
+ * Loads the MSR set (auto-high-degree blacklist entries) for use by
+ * display-time filters. Cached briefly per-process to avoid a query
+ * per "likely linked" lookup; readers refresh implicitly between
+ * cluster-recompute runs (hourly).
+ */
+let _msrCache: { set: Set<string>; loadedAt: number } | null = null;
+const MSR_CACHE_TTL_MS = 60_000;
+function loadMsrSet(): Set<string> {
+  const now = Date.now();
+  if (_msrCache && (now - _msrCache.loadedAt) < MSR_CACHE_TTL_MS) return _msrCache.set;
+  const rows = getDb().prepare(
+    `SELECT address FROM cluster_blacklist WHERE reason = 'auto-high-degree'`
+  ).all() as Array<{ address: string }>;
+  const set = new Set(rows.map(r => r.address));
+  _msrCache = { set, loadedAt: now };
+  return set;
 }
 
 /**
@@ -652,6 +1108,11 @@ export type ClusterEdgeRow = {
  * with confidence ≥ minConfidence (default = CLUSTER_THRESHOLD). The
  * caller's wallet appears as either addr_a or addr_b — we normalize so
  * `peer` is always the OTHER wallet.
+ *
+ * Display filter: edges that match the cross-trader pattern
+ * (isCrossTraderEdge — both endpoints MSRs, only signal is non-round-
+ * trip pmx) are dropped before returning. Underlying confidence and
+ * cluster_anchors are unaffected.
  */
 export function getInferredLinksForAddress(
   addr: string,
@@ -668,23 +1129,33 @@ export function getInferredLinksForAddress(
   const db = getDb();
   const rows = db
     .prepare(
-      `SELECT addr_a, addr_b, confidence, cih_count, self_xfer_count, evidence_json, last_seen_at
+      `SELECT addr_a, addr_b, confidence, cih_count, self_xfer_count,
+              co_cons_count, co_parent_count,
+              pmx_count, pmx_rt_count,
+              evidence_json, last_seen_at
          FROM wallet_cluster_edges
         WHERE (addr_a = @addr OR addr_b = @addr)
           AND confidence >= @min
         ORDER BY confidence DESC, last_seen_at DESC
         LIMIT @lim`
     )
-    .all({ addr, min: minConfidence, lim: limit }) as Array<{
+    .all({ addr, min: minConfidence, lim: limit * 2 }) as Array<{
     addr_a: string;
     addr_b: string;
     confidence: number;
     cih_count: number;
     self_xfer_count: number;
+    co_cons_count: number;
+    co_parent_count: number;
+    pmx_count: number;
+    pmx_rt_count: number;
     evidence_json: string;
     last_seen_at: number;
   }>;
-  return rows.map(r => {
+  const msrSet = loadMsrSet();
+  const out: ReturnType<typeof getInferredLinksForAddress> = [];
+  for (const r of rows) {
+    if (isCrossTraderEdge(r, msrSet)) continue;
     let evidence: EvidenceItem[] = [];
     try {
       const parsed = JSON.parse(r.evidence_json);
@@ -692,15 +1163,17 @@ export function getInferredLinksForAddress(
     } catch {
       /* ignore */
     }
-    return {
+    out.push({
       peer: r.addr_a === addr ? r.addr_b : r.addr_a,
       confidence: r.confidence,
       cih_count: r.cih_count,
       self_xfer_count: r.self_xfer_count,
       evidence,
       last_seen_at: r.last_seen_at,
-    };
-  });
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 /**
@@ -789,7 +1262,10 @@ export function getLikelyLinkedForWallets(
   >();
 
   const select = db.prepare(
-    `SELECT addr_a, addr_b, confidence, cih_count, self_xfer_count, evidence_json, last_seen_at
+    `SELECT addr_a, addr_b, confidence, cih_count, self_xfer_count,
+            co_cons_count, co_parent_count,
+            pmx_count, pmx_rt_count,
+            evidence_json, last_seen_at
        FROM wallet_cluster_edges
       WHERE (addr_a = @addr OR addr_b = @addr)
         AND confidence >= @min
@@ -797,6 +1273,7 @@ export function getLikelyLinkedForWallets(
       LIMIT 200`
   );
 
+  const msrSet = loadMsrSet();
   for (const w of wallets) {
     const rows = select.all({ addr: w, min: minConfidence }) as Array<{
       addr_a: string;
@@ -804,10 +1281,15 @@ export function getLikelyLinkedForWallets(
       confidence: number;
       cih_count: number;
       self_xfer_count: number;
+      co_cons_count: number;
+      co_parent_count: number;
+      pmx_count: number;
+      pmx_rt_count: number;
       evidence_json: string;
       last_seen_at: number;
     }>;
     for (const r of rows) {
+      if (isCrossTraderEdge(r, msrSet)) continue;
       const peer = r.addr_a === w ? r.addr_b : r.addr_a;
       if (owned.has(peer)) continue;
       let evidence: EvidenceItem[] = [];
