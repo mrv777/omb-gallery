@@ -16,7 +16,7 @@ import HoldingDurationHistogram from '@/components/Charts/HoldingDurationHistogr
 import { SITE_NAME, buildSocial } from '@/lib/metadata';
 import { estimateLoanExpiration } from '@/lib/loanExpiration';
 import RarestRolesCard from '@/components/Explorer/RarestRolesCard';
-import { getRoleHolderCounts, getRolesForUsers } from '@/lib/rolesStore';
+import { getRoleHolderCounts } from '@/lib/rolesStore';
 
 export async function generateMetadata({
   searchParams,
@@ -102,11 +102,6 @@ export default async function ExplorerPage({
     collection,
     color: colorParam,
   }) as HoldingDurationBucketRow[];
-  // Bulk-fetch role IDs for every Matrica-user row in this leaderboard page
-  // (one query, not N) so we can render badges next to each row without an
-  // N+1 lookup. Non-Matrica wallets simply have no entry → empty role list.
-  const matricaUserIds = holderRows.filter(r => r.is_user === 1).map(r => r.group_key);
-  const rolesByUser = getRolesForUsers(matricaUserIds);
   const holders: ApiHolder[] = holderRows.map(r => ({
     group_key: r.group_key,
     is_user: r.is_user === 1,
@@ -115,7 +110,6 @@ export default async function ExplorerPage({
     wallets: (r.wallets_csv ?? '').split(',').filter(Boolean),
     inscription_count: r.inscription_count,
     updated_at: r.updated_at,
-    role_ids: r.is_user === 1 ? (rolesByUser.get(r.group_key) ?? []) : [],
   }));
 
   const roleHolderCounts = getRoleHolderCounts();

@@ -2,10 +2,6 @@ import { getRoleById, sortRoleIds, type Role } from '@/lib/roles';
 
 type Props = {
   roleIds: string[];
-  /** Truncate to this many badges + show a "+N" overflow chip. */
-  max?: number;
-  /** Smaller text/spacing for tight rows (e.g. leaderboard). */
-  dense?: boolean;
   /** Optional className on the outer flex wrapper. */
   className?: string;
 };
@@ -18,44 +14,30 @@ type Props = {
  * Display priority follows the order of ROLES in src/lib/roles.ts. Reordering
  * that array changes the rendered order everywhere.
  */
-export default function RoleBadges({ roleIds, max, dense, className }: Props) {
+export default function RoleBadges({ roleIds, className }: Props) {
   if (!roleIds || roleIds.length === 0) return null;
 
   const ordered = sortRoleIds(roleIds);
-  const visible = max != null ? ordered.slice(0, max) : ordered;
-  const overflow = max != null ? ordered.length - visible.length : 0;
-
-  const text = dense ? 'text-[13px]' : 'text-[15px]';
-  const gap = dense ? 'gap-0.5' : 'gap-1';
-  const pillPad = dense ? 'px-1 py-px' : 'px-1.5 py-0.5';
 
   return (
     <span
-      className={`inline-flex flex-wrap items-center ${gap} ${text} leading-none align-middle ${className ?? ''}`}
+      className={`inline-flex flex-wrap items-center gap-1 text-[15px] leading-none align-middle ${className ?? ''}`}
     >
-      {visible.map((id) => {
+      {ordered.map((id) => {
         const role = getRoleById(id);
         if (!role) return null;
-        return <Badge key={id} role={role} pillPad={pillPad} />;
+        return <Badge key={id} role={role} />;
       })}
-      {overflow > 0 && (
-        <span
-          title={`${overflow} more`}
-          className={`inline-flex items-center ${pillPad} rounded-full border border-bone-dim/30 text-[10px] tracking-wider text-bone-dim`}
-        >
-          +{overflow}
-        </span>
-      )}
     </span>
   );
 }
 
-function Badge({ role, pillPad }: { role: Role; pillPad: string }) {
+function Badge({ role }: { role: Role }) {
   if (role.combo) {
     return (
       <span
         title={role.label}
-        className={`inline-flex items-center rounded-full border border-bone-dim/30 ${pillPad}`}
+        className="inline-flex items-center rounded-full border border-bone-dim/30 px-1.5 py-0.5"
       >
         {role.emoji.join('')}
       </span>
@@ -67,4 +49,3 @@ function Badge({ role, pillPad }: { role: Role; pillPad: string }) {
     </span>
   );
 }
-

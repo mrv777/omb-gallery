@@ -69,6 +69,14 @@ describe('evaluateRoles — discrete tiers, stacking', () => {
   it('1 red + 1 blue → red-1, blue-1, AND R&B combo (combos stack)', () => {
     const ids = evaluateRoles({ ...emptyCounts(), red: 1, blue: 1 });
     expect(ids).toEqual(expect.arrayContaining(['rnb', 'red-1', 'blue-1']));
+    expect(ids).not.toContain('double-rnb'); // needs 2 of each
+  });
+
+  it('2 red + 2 blue → double-rnb + R&B + single-color tiers, ranked rarest first', () => {
+    const ids = evaluateRoles({ ...emptyCounts(), red: 2, blue: 2 });
+    expect(ids).toEqual(expect.arrayContaining(['double-rnb', 'rnb', 'red-1', 'blue-1']));
+    // double-rnb is rarer than rnb in the catalog → must come first.
+    expect(ids.indexOf('double-rnb')).toBeLessThan(ids.indexOf('rnb'));
   });
 
   it('1 red + 1 blue + 1 green → R&B + rainbow + all three single-colors', () => {

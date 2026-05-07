@@ -31,6 +31,13 @@ export const ROLES: Role[] = [
     requires: { blue: 1, red: 1, green: 8 },
   },
   {
+    id: 'double-rnb',
+    label: '2 Blue + 2 Red',
+    emoji: ['🔵', '🔵', '🔴', '🔴'],
+    combo: true,
+    requires: { blue: 2, red: 2 },
+  },
+  {
     id: 'rainbow',
     label: '1 Green + 1 Blue + 1 Red',
     emoji: ['🟢', '🔵', '🔴'],

@@ -3,7 +3,6 @@ import { getStmts, type GroupedHolderRow, type InscriptionRow } from '@/lib/db';
 import type { ApiHolder } from '@/components/Activity/types';
 import { colorParamForSql, parseColorParam } from '@/lib/colorFilter';
 import { estimateLoanExpiration } from '@/lib/loanExpiration';
-import { getRolesForUsers } from '@/lib/rolesStore';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -56,9 +55,6 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ type: strin
       cursor_primary: cursor?.primary ?? null,
       cursor_secondary: cursor ? (cursor.secondary as string) : null,
     }) as GroupedHolderRow[];
-    // Bulk-fetch role IDs for all Matrica users on this page in one query.
-    const matricaUserIds = rows.filter(r => r.is_user === 1).map(r => r.group_key);
-    const rolesByUser = getRolesForUsers(matricaUserIds);
     const items: ApiHolder[] = rows.map(r => ({
       group_key: r.group_key,
       is_user: r.is_user === 1,
@@ -67,7 +63,6 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ type: strin
       wallets: (r.wallets_csv ?? '').split(',').filter(Boolean),
       inscription_count: r.inscription_count,
       updated_at: r.updated_at,
-      role_ids: r.is_user === 1 ? (rolesByUser.get(r.group_key) ?? []) : [],
     }));
     const next_cursor =
       items.length === limit

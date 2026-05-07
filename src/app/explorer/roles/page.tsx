@@ -2,16 +2,14 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import SubpageShell from '@/components/SubpageShell';
 import SafeImg from '@/components/SafeImg';
-import { ROLES, sortRoleIds } from '@/lib/roles';
+import { ROLES } from '@/lib/roles';
 import {
   getRoleHolderCounts,
   getHoldersForRole,
-  getRolesForUsers,
   type RoleHolderRow as RoleHolderRowData,
 } from '@/lib/rolesStore';
 import { truncateAddr } from '@/lib/format';
 import { lookupWalletLabel } from '@/lib/walletLabels';
-import RoleBadges from '@/components/RoleBadges';
 import { SITE_NAME, buildSocial } from '@/lib/metadata';
 
 export const dynamic = 'force-dynamic';
@@ -32,16 +30,11 @@ export async function generateMetadata(): Promise<Metadata> {
 export default function RolesPage() {
   const counts = getRoleHolderCounts();
 
-  // For each role: the top N holders, plus their full earned-role list (so the
-  // row's badge cluster shows everything they've earned, not just the role
-  // we're under). One bulk query per role keeps things simple — at ~10 roles
-  // x 25 holders, total rows are bounded.
-  const sections = ROLES.map((role) => {
-    const holders = getHoldersForRole(role.id, HOLDERS_PER_ROLE);
-    const userIds = holders.map((h) => h.user_id);
-    const roles = getRolesForUsers(userIds);
-    return { role, holders, count: counts[role.id] ?? 0, roles };
-  });
+  const sections = ROLES.map((role) => ({
+    role,
+    holders: getHoldersForRole(role.id, HOLDERS_PER_ROLE),
+    count: counts[role.id] ?? 0,
+  }));
 
   return (
     <SubpageShell active="explorer">
@@ -62,14 +55,12 @@ export default function RolesPage() {
         </header>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {sections.map(({ role, holders, count, roles }) => (
+          {sections.map(({ role, holders, count }) => (
             <div key={role.id} className="border border-ink-2 bg-ink-1">
               <div className="px-4 py-3 border-b border-ink-2">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div className="flex items-center gap-2 min-w-0">
-                    <span
-                      className={`inline-flex items-center text-[16px] leading-none ${role.combo ? 'border border-bone-dim/30 rounded-full px-2 py-0.5' : ''}`}
-                    >
+                    <span className="inline-flex items-center text-[16px] leading-none">
                       {role.emoji.join('')}
                     </span>
                     <h2 className="font-mono text-[12px] tracking-[0.04em] text-bone normal-case truncate">
@@ -88,12 +79,7 @@ export default function RolesPage() {
               ) : (
                 <ol className="divide-y divide-ink-2">
                   {holders.map((h, i) => (
-                    <RoleHolderRow
-                      key={h.user_id}
-                      row={h}
-                      rank={i + 1}
-                      earnedRoles={roles.get(h.user_id) ?? []}
-                    />
+                    <RoleHolderRow key={h.user_id} row={h} rank={i + 1} />
                   ))}
                 </ol>
               )}
@@ -105,19 +91,10 @@ export default function RolesPage() {
   );
 }
 
-function RoleHolderRow({
-  row,
-  rank,
-  earnedRoles,
-}: {
-  row: RoleHolderRowData;
-  rank: number;
-  earnedRoles: string[];
-}) {
+function RoleHolderRow({ row, rank }: { row: RoleHolderRowData; rank: number }) {
   // Deep-link to the first known wallet — the holder page aggregates across
   // all the user's wallets server-side.
   const wallet = row.first_wallet ?? row.user_id;
-  const ordered = sortRoleIds(earnedRoles);
   const manual = lookupWalletLabel(wallet);
   const displayName =
     manual?.name ??
@@ -141,17 +118,10 @@ function RoleHolderRow({
             />
           )}
         </span>
-        <span className="flex items-center gap-2 min-w-0">
-          <span
-            className={`font-mono text-xs truncate ${manual ? 'text-accent-orange' : 'text-bone'}`}
-          >
-            {displayName}
-          </span>
-          {ordered.length > 0 && (
-            <span className="hidden sm:inline-flex shrink-0">
-              <RoleBadges roleIds={ordered} max={4} dense />
-            </span>
-          )}
+        <span
+          className={`font-mono text-xs truncate ${manual ? 'text-accent-orange' : 'text-bone'}`}
+        >
+          {displayName}
         </span>
         <span className="font-mono text-[11px] text-bone-dim tabular-nums whitespace-nowrap">
           {row.inscription_count.toLocaleString()}

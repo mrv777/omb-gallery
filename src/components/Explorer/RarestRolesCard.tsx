@@ -26,7 +26,7 @@ export default function RarestRolesCard({ countsByRole }: Props) {
           </Link>
         </div>
         <p className="font-mono text-[10px] tracking-[0.04em] text-bone-dim mt-1 normal-case">
-          Earned by Matrica-linked holders based on the colors they hold. Rarest first.
+          Holder roles based on colors they hold for matrica linked users only.
         </p>
       </div>
       {/* Two columns on desktop so 11 roles fit without a tall card; one on mobile.
@@ -50,9 +50,7 @@ export default function RarestRolesCard({ countsByRole }: Props) {
                 title={role.label}
                 className="grid grid-cols-[1fr_auto] items-center gap-3 px-4 py-2 hover:bg-ink-2 transition-colors"
               >
-                <span
-                  className={`inline-flex items-center text-[14px] leading-none ${role.combo ? 'border border-bone-dim/30 rounded-full px-1.5 py-0.5 self-start' : ''}`}
-                >
+                <span className="inline-flex items-center text-[14px] leading-none">
                   {role.emoji.join('')}
                 </span>
                 <span className="font-mono text-xs text-bone tabular-nums whitespace-nowrap">

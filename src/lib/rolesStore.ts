@@ -19,7 +19,6 @@ let cached: {
   selectColorsForUser: Statement;
   selectHolderCountsByRole: Statement;
   selectHoldersForRole: Statement;
-  selectEarnedForUsers: Statement;
 } | null = null;
 
 function stmts() {
@@ -87,16 +86,6 @@ function stmts() {
       WHERE re.role_id = @role_id
       ORDER BY inscription_count DESC, re.matrica_user_id ASC
       LIMIT @limit
-    `),
-
-    // Bulk-fetch earned role IDs for a JSON-array of Matrica user_ids.
-    // Returns one row per (user_id, role_id), ordered by rank so callers can
-    // GROUP_CONCAT in priority order client-side (or just walk the rows).
-    selectEarnedForUsers: db.prepare(`
-      SELECT matrica_user_id AS user_id, role_id, rank
-      FROM roles_earned
-      WHERE matrica_user_id IN (SELECT value FROM json_each(@user_ids_json))
-      ORDER BY matrica_user_id, rank ASC
     `),
   };
   return cached;
@@ -237,26 +226,4 @@ export type RoleHolderRow = {
 
 export function getHoldersForRole(roleId: string, limit: number): RoleHolderRow[] {
   return stmts().selectHoldersForRole.all({ role_id: roleId, limit }) as RoleHolderRow[];
-}
-
-/**
- * Bulk-fetch earned role IDs (in priority order) for a list of Matrica user_ids.
- * Returns a Map<user_id, roleId[]>. Used by the leaderboard renderer to attach
- * badges to each row in one query rather than N+1 lookups.
- */
-export function getRolesForUsers(userIds: string[]): Map<string, string[]> {
-  const out = new Map<string, string[]>();
-  if (userIds.length === 0) return out;
-  const rows = stmts().selectEarnedForUsers.all({
-    user_ids_json: JSON.stringify(userIds),
-  }) as Array<{ user_id: string; role_id: string; rank: number }>;
-  for (const r of rows) {
-    let arr = out.get(r.user_id);
-    if (!arr) {
-      arr = [];
-      out.set(r.user_id, arr);
-    }
-    arr.push(r.role_id);
-  }
-  return out;
 }
