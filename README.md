@@ -1,111 +1,63 @@
 # OMB Gallery
 
-A zoomable gallery for showcasing OMB ordinal images plus an on-chain activity feed and explorer surfaced from a self-hosted `ord` node. Built on Next.js 16 with TanStack Virtual for the gallery, SQLite (`better-sqlite3`) for the activity / explorer side, and Tailwind for the punk-zine palette.
+A zoomable gallery for the OMB ordinal collection, plus an on-chain
+activity feed and explorer driven by a self-hosted `ord` node. Live at
+[ordinalmaxibiz.wiki](https://ordinalmaxibiz.wiki).
 
 ![OMB Gallery Screenshot](screenshot.png)
 
 ## Features
 
-- **Zoomable gallery**: pinch / scroll / drag to move around, click any inscription to open the modal with arrow-key navigation
-- **Color filter**: red / blue / green / orange / black, with the chosen filter persisted across the activity / explorer surfaces too
-- **Activity feed** (`/activity`): live transfers, sales, listings, mints, and loan events for OMB inscriptions. Backed by an `ord` UTXO-diff poller plus on-chain marketplace fingerprinting (Magisat) and Satflow sale enrichment.
-- **Explorer** (`/explorer`): leaderboards — most-transferred, longest-unmoved, top sale volume, highest single sale, most borrowed against, currently loaned out, and top holders.
-- **Slideshow + share**: play a filtered set sequentially or randomly, optionally fullscreen, and mint a shareable short-link to the snapshot.
-- **Notifications**: opt-in Telegram or Discord webhook alerts for per-inscription / per-color / firehose events.
+- **Gallery** — pinch / scroll / drag to navigate ~9k inscriptions; click
+  any image for the modal view; filter by color.
+- **Activity feed** (`/activity`) — live transfers, sales, listings,
+  mints, and loan events. Marketplace fingerprinting (Magisat / Magic
+  Eden / ord.net) plus Satflow enrichment.
+- **Explorer** (`/explorer`) — leaderboards: most-transferred, longest-
+  unmoved, top sale volume, highest single sale, most borrowed against,
+  currently loaned out, top holders, and rarest roles.
+- **Slideshow** — sequential or random playback of any filtered set,
+  optionally fullscreen, with shareable short-links.
+- **Notifications** — opt-in Telegram or Discord webhook alerts for
+  per-inscription, per-color, or firehose events.
+- **Holder profiles** — Matrica-linked wallet aggregation plus an
+  on-chain heuristic that surfaces likely-linked sub-wallets.
 
-## Technologies Used
+## Stack
 
-- Next.js 16 App Router, React 19
-- TanStack Virtual (gallery virtualization)
-- `better-sqlite3` (SQLite at `/data/app.db` — activity feed, leaderboards, notifications)
-- Tailwind CSS
+Next.js 16 (App Router) · React 19 · TypeScript · Tailwind ·
+`@tanstack/react-virtual` · `better-sqlite3` · `sharp` (build-time
+thumbnails).
 
-## Installation
+## Local development
 
-### Prerequisites
-
-- Node.js 24 (LTS, pinned via `engines` and used in the production Docker image)
-- pnpm 10.30+ (`corepack enable && corepack prepare pnpm@latest --activate`)
-
-### Setup
-
-1. Clone the repository:
-
-   ```bash
-   git clone https://github.com/yourusername/omb-gallery.git
-   cd omb-gallery
-   ```
-
-2. Install dependencies:
-
-   ```bash
-   pnpm install
-   ```
-
-3. Generate optimized thumbnails from `public/images/`:
-
-   ```bash
-   pnpm run optimize-images
-   ```
-
-4. Run the development server:
-
-   ```bash
-   pnpm dev
-   ```
-
-5. Open [http://localhost:3000](http://localhost:3000) in your browser to see the gallery.
-
-## Usage
-
-### Viewing the Gallery
-
-- **Zoom**: Use the mouse wheel, pinch gesture, or hold Ctrl while scrolling
-- **Pan**: Click and drag to move around when zoomed in
-- **Filter**: Click the colored buttons in the top-right corner to filter by color
-- **View Image**: Click any image to open it in the modal view
-
-### Modal Controls
-
-- **Navigate**: Use the arrow buttons or keyboard arrow keys to move between images
-- **Close**: Click the X button, click outside the image, or press Escape to exit the modal
-- **View Details**: Image captions are displayed at the bottom of the modal when available
-
-## Project Structure
-
-```
-omb-gallery/
-├── public/
-│   └── images/
-│       ├── red/
-│       ├── blue/
-│       ├── green/
-│       ├── orange/
-│       └── black/
-├── src/
-│   ├── app/
-│   │   ├── api/
-│   │   │   └── images/
-│   │   │       └── route.ts
-│   │   ├── globals.css
-│   │   ├── layout.tsx
-│   │   └── page.tsx
-│   ├── components/
-│   │   └── ZoomableGallery.tsx
-│   └── lib/
-│       └── types.ts
-├── scripts/
-│   └── copy-images.js
-└── package.json
-```
-
-## Building for Production
+Requires Node.js 24 LTS and pnpm 10.30+ (`corepack enable`).
 
 ```bash
-npm run build
-npm run start
+pnpm install
+pnpm run optimize-images   # one-time, generates public/optimized-images/
+pnpm dev                   # http://localhost:3000
+```
+
+The activity / explorer surfaces need an `ord` node and a SQLite DB at
+`/data/app.db`; without those env vars the gallery still works
+standalone. See `DEPLOYMENT.md` if you want to run the full stack.
+
+## Production build
+
+```bash
+pnpm build
+pnpm start
+```
+
+## Tips
+
+If this project is useful to you, a small Bitcoin tip is appreciated:
+
+```
+bc1q0k2wu6wn276fccpjemvkj889q4g8eltwz2kjtc
 ```
 
 ## License
 
-MIT License
+MIT
