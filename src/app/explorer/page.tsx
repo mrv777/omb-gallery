@@ -134,7 +134,9 @@ export default async function ExplorerPage({
           <Leaderboard type="highest-sale" items={highSale} showSeeAll color={color} />
           <Leaderboard type="most-loaned" items={mostLoaned} showSeeAll color={color} />
           <Leaderboard type="currently-loaned" items={currentlyLoaned} showSeeAll color={color} />
-          <RarestRolesCard countsByRole={roleHolderCounts} />
+          <div className="md:col-span-2">
+            <RarestRolesCard countsByRole={roleHolderCounts} />
+          </div>
           <div className="md:col-span-2">
             <Leaderboard type="top-holders" items={holders} showSeeAll color={color} />
           </div>
