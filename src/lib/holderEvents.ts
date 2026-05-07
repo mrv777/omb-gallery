@@ -1,11 +1,16 @@
 import 'server-only';
 import {
+  getDb,
   getStmts,
   type EventRow,
   type HolderColorHighlightRow,
   type WalletLinkRow,
 } from '@/lib/db';
-import { getClusterMembersForAddress } from '@/lib/clusterStore';
+import {
+  getClusterAnchorForAddress,
+  getClusterMembersForAddress,
+  getClusterMembersForMatricaUser,
+} from '@/lib/clusterStore';
 
 /**
  * Resolve the full set of wallets a profile aggregates over.
@@ -44,15 +49,67 @@ export function resolveAggregatedWallets(address: string): {
     }>;
     for (const s of siblings) matricaSet.add(s.wallet_addr);
   }
-  const clusterMembers = getClusterMembersForAddress(address);
-  const inferredWallets: string[] = [];
-  for (const m of clusterMembers) {
-    if (!matricaSet.has(m)) inferredWallets.push(m);
+  // Cluster fold: union members reachable from the input address with the
+  // full Matrica-keyed cluster set. The Matrica-keyed lookup is the load-
+  // bearing one — cluster_anchors only stores wallets that actually have
+  // edges, so a Matrica user's "main" wallet (no on-chain link) wouldn't
+  // see its inferred-peer siblings via getClusterMembersForAddress alone.
+  const clusterMembers = new Set<string>(getClusterMembersForAddress(address));
+  if (userId) {
+    for (const w of getClusterMembersForMatricaUser(userId)) clusterMembers.add(w);
   }
-  const merged = new Set<string>([address, ...clusterMembers]);
-  Array.from(matricaSet).forEach(w => merged.add(w));
+  const inferredWallets: string[] = [];
+  clusterMembers.forEach(m => {
+    if (!matricaSet.has(m)) inferredWallets.push(m);
+  });
+  const merged = new Set<string>([address]);
+  matricaSet.forEach(w => merged.add(w));
+  clusterMembers.forEach(w => merged.add(w));
   const wallets = Array.from(merged);
   return { wallets, link, inferredWallets };
+}
+
+/**
+ * Resolve the canonical wallet to render the holder page for. Returns
+ * null when `address` is the canonical address (or is in a singleton)
+ * and the page should render in place.
+ *
+ * Rationale: visiting an inferred-only sibling (e.g. a wallet folded into
+ * a Matrica identity by the on-chain heuristic) should land on the same
+ * profile as visiting any of the user's confirmed wallets — otherwise
+ * users see a different sub-profile per click and can't tell the
+ * identity apart.
+ *
+ * Rules:
+ *   - Matrica-linked address: render in place. Every Matrica sibling
+ *     already aggregates the same identity; no need to canonicalize.
+ *   - No Matrica directly, cluster_anchors with matrica_user_id set:
+ *     redirect to the lex-min Matrica-linked wallet for that user.
+ *   - No Matrica anywhere, unlinked cluster: redirect to the cluster's
+ *     anchor wallet (lex-min member) when not already there.
+ *   - Singleton or unknown: render in place.
+ */
+export function resolveCanonicalHolderAddress(address: string): string | null {
+  const stmts = getStmts();
+  const link = stmts.getWalletLink.get({ wallet_addr: address }) as WalletLinkRow | undefined;
+  if (link?.matrica_user_id) return null;
+
+  const anchor = getClusterAnchorForAddress(address);
+  if (!anchor) return null;
+
+  if (anchor.matrica_user_id) {
+    const row = getDb()
+      .prepare(
+        `SELECT wallet_addr FROM wallet_links
+          WHERE matrica_user_id = ?
+          ORDER BY wallet_addr ASC LIMIT 1`
+      )
+      .get(anchor.matrica_user_id) as { wallet_addr: string } | undefined;
+    if (row?.wallet_addr && row.wallet_addr !== address) return row.wallet_addr;
+    return null;
+  }
+
+  return anchor.anchor_id !== address ? anchor.anchor_id : null;
 }
 
 export type HolderEventsCursor = { ts: number; id: number };

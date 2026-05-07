@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import SubpageShell from '@/components/SubpageShell';
 import HolderProfile from '@/components/HolderProfile/HolderProfile';
 import {
@@ -21,6 +21,7 @@ import {
   fetchHolderColorHighlights,
   fetchHolderEventsPage,
   resolveAggregatedWallets,
+  resolveCanonicalHolderAddress,
 } from '@/lib/holderEvents';
 
 type Params = { address: string };
@@ -94,6 +95,13 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
   // Trust the URL param verbatim — bech32 is case-sensitive, and the DB
   // stores whatever ord returned. Don't normalize.
   const address = addressRaw;
+
+  // Inferred-only siblings (folded onto a Matrica identity by the cluster
+  // heuristic) get redirected to a canonical wallet for that identity, so
+  // visiting any sibling lands on the same profile. Matrica-confirmed
+  // addresses render in place.
+  const canonical = resolveCanonicalHolderAddress(address);
+  if (canonical) redirect(`/holder/${canonical}`);
 
   const stmts = getStmts();
 

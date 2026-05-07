@@ -1070,6 +1070,25 @@ export function getClusterAnchorForAddress(address: string): {
 }
 
 /**
+ * Returns every wallet folded onto the given Matrica user via
+ * cluster_anchors at IDENTITY_FOLD_THRESHOLD. Includes both Matrica-
+ * confirmed siblings that participate in on-chain edges AND inferred
+ * peers; Matrica wallets without on-chain links are NOT in this set
+ * (they sit in wallet_links only) — callers should union with the
+ * Matrica-sibling list to get the full identity wallet set.
+ */
+export function getClusterMembersForMatricaUser(userId: string): string[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT wallet_addr FROM cluster_anchors
+        WHERE matrica_user_id = ? ORDER BY wallet_addr ASC`
+    )
+    .all(userId) as Array<{ wallet_addr: string }>;
+  return rows.map(r => r.wallet_addr);
+}
+
+/**
  * Returns every wallet that shares a cluster anchor with `address`, or
  * just `[address]` if it's in a singleton. The address itself is always
  * the first element.
