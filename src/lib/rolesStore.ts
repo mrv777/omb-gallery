@@ -1,6 +1,7 @@
 import 'server-only';
 import type { Statement } from 'better-sqlite3';
 import { getDb } from './db';
+import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 import {
   ROLES,
   type ColorCounts,
@@ -19,6 +20,8 @@ let cached: {
   selectColorsForUser: Statement;
   selectHolderCountsByRole: Statement;
   selectHoldersForRole: Statement;
+  selectLinkageByColor: Statement;
+  selectLinkedUserCount: Statement;
 } | null = null;
 
 function stmts() {
@@ -63,6 +66,29 @@ function stmts() {
 
     selectHolderCountsByRole: db.prepare(`
       SELECT role_id, COUNT(*) AS n FROM roles_earned GROUP BY role_id
+    `),
+
+    // Per-color totals + linked counts, matching the project-wide convention
+    // of excluding protocol wallets (mint + treasury) from aggregates.
+    // `effective_owner` is loan-aware → loaned-out OMBs credit the lender.
+    selectLinkageByColor: db.prepare(`
+      SELECT
+        i.color AS color,
+        COUNT(*) AS total,
+        SUM(CASE WHEN wl.matrica_user_id IS NOT NULL THEN 1 ELSE 0 END) AS linked
+      FROM inscriptions i
+      LEFT JOIN wallet_links wl ON wl.wallet_addr = i.effective_owner
+      WHERE i.color IS NOT NULL
+        AND i.effective_owner IS NOT NULL
+        AND i.effective_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST})
+      GROUP BY i.color
+    `),
+
+    // Distinct linked Matrica users currently holding ≥1 OMB. Reading from
+    // `roles_earned` is equivalent (every linked holder earns ≥1 role) and
+    // cheap — no join needed.
+    selectLinkedUserCount: db.prepare(`
+      SELECT COUNT(DISTINCT matrica_user_id) AS n FROM roles_earned
     `),
 
     // Holders for a single role, ordered by their total inscription count desc.
@@ -226,4 +252,55 @@ export type RoleHolderRow = {
 
 export function getHoldersForRole(roleId: string, limit: number): RoleHolderRow[] {
   return stmts().selectHoldersForRole.all({ role_id: roleId, limit }) as RoleHolderRow[];
+}
+
+export type LinkageStats = {
+  linkedUsers: number;
+  totalSupply: number;
+  linkedSupply: number;
+  byColor: { color: EyeColor; total: number; linked: number }[];
+};
+
+// Counts inscriptions (not wallets) so one whale linking moves the % more than
+// one minnow. "Unlinked" lumps "asked Matrica, no profile" with "not yet asked"
+// — steady-state drift is small (poller cycles hourly).
+export function getLinkageStats(): LinkageStats {
+  const s = stmts();
+  const rows = s.selectLinkageByColor.all() as Array<{
+    color: string;
+    total: number;
+    linked: number;
+  }>;
+
+  // Build a map first so any color missing from the result still renders as 0.
+  const map = new Map<EyeColor, { total: number; linked: number }>();
+  let totalSupply = 0;
+  let linkedSupply = 0;
+  for (const r of rows) {
+    if (
+      r.color === 'black' ||
+      r.color === 'orange' ||
+      r.color === 'green' ||
+      r.color === 'blue' ||
+      r.color === 'red'
+    ) {
+      map.set(r.color, { total: r.total, linked: r.linked });
+      totalSupply += r.total;
+      linkedSupply += r.linked;
+    }
+  }
+  // Rarest → commonest mint order, for stable display.
+  const order: EyeColor[] = ['red', 'blue', 'green', 'orange', 'black'];
+  const byColor = order.map((color) => {
+    const v = map.get(color) ?? { total: 0, linked: 0 };
+    return { color, total: v.total, linked: v.linked };
+  });
+
+  const userRow = s.selectLinkedUserCount.get() as { n: number } | undefined;
+  return {
+    linkedUsers: userRow?.n ?? 0,
+    totalSupply,
+    linkedSupply,
+    byColor,
+  };
 }

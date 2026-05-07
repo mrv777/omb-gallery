@@ -2,10 +2,12 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import SubpageShell from '@/components/SubpageShell';
 import SafeImg from '@/components/SafeImg';
-import { ROLES } from '@/lib/roles';
+import { ROLES, COLOR_EMOJI, type EyeColor } from '@/lib/roles';
 import {
   getRoleHolderCounts,
   getHoldersForRole,
+  getLinkageStats,
+  type LinkageStats,
   type RoleHolderRow as RoleHolderRowData,
 } from '@/lib/rolesStore';
 import { truncateAddr } from '@/lib/format';
@@ -29,6 +31,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default function RolesPage() {
   const counts = getRoleHolderCounts();
+  const linkage = getLinkageStats();
 
   const sections = ROLES.map((role) => ({
     role,
@@ -53,6 +56,8 @@ export default function RolesPage() {
             holder.
           </p>
         </header>
+
+        <LinkageStatsStrip stats={linkage} />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {sections.map(({ role, holders, count }) => (
@@ -133,4 +138,87 @@ function RoleHolderRow({ row, rank }: { row: RoleHolderRowData; rank: number }) 
 
 function looksLikeAddress(s: string): boolean {
   return /^bc1[a-z0-9]{30,}$/i.test(s) || /^0x[a-f0-9]{40}$/i.test(s) || s.length > 30;
+}
+
+const COLOR_BAR_BG: Record<EyeColor, string> = {
+  red: 'bg-accent-red',
+  blue: 'bg-accent-blue',
+  green: 'bg-accent-green',
+  orange: 'bg-accent-orange',
+  black: 'bg-accent-black',
+};
+
+function LinkageStatsStrip({ stats }: { stats: LinkageStats }) {
+  const supplyPct =
+    stats.totalSupply > 0 ? Math.round((stats.linkedSupply / stats.totalSupply) * 1000) / 10 : 0;
+
+  return (
+    <div className="border border-ink-2 bg-ink-1 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-ink-2">
+        <Stat
+          label="Linked Matrica users"
+          value={stats.linkedUsers.toLocaleString()}
+          sub="Matrica-linked holders with at least 1 OMB"
+        />
+        <Stat
+          label="Supply linked"
+          value={`${stats.linkedSupply.toLocaleString()} / ${stats.totalSupply.toLocaleString()}`}
+          sub={`${supplyPct.toFixed(1)}% of OMBs held by linked users`}
+        />
+      </div>
+      <div className="border-t border-ink-2 px-4 py-3">
+        <div className="font-mono text-[10px] tracking-[0.12em] uppercase text-bone-dim mb-2">
+          By eye color
+        </div>
+        <ul className="space-y-1.5">
+          {stats.byColor.map((row) => (
+            <ColorRow key={row.color} row={row} />
+          ))}
+        </ul>
+        <p className="font-mono text-[10px] text-bone-dim/70 normal-case mt-3">
+          Protocol wallets (mint, treasury) excluded from totals. &ldquo;Unlinked&rdquo; includes
+          wallets the Matrica poller hasn&rsquo;t classified yet (cycles ~hourly).
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value, sub }: { label: string; value: string; sub: string }) {
+  return (
+    <div className="px-4 py-3">
+      <div className="font-mono text-[10px] tracking-[0.12em] uppercase text-bone-dim">{label}</div>
+      <div className="font-mono text-xl text-bone tabular-nums mt-1">{value}</div>
+      <div className="font-mono text-[10px] text-bone-dim normal-case mt-1">{sub}</div>
+    </div>
+  );
+}
+
+function ColorRow({ row }: { row: { color: EyeColor; total: number; linked: number } }) {
+  const pct = row.total > 0 ? (row.linked / row.total) * 100 : 0;
+  const pctLabel = row.total > 0 ? `${Math.round(pct)}%` : '—';
+  return (
+    <li className="grid grid-cols-[1.5rem_1fr_auto] items-center gap-3">
+      <span className="text-[14px] leading-none" aria-label={row.color}>
+        {COLOR_EMOJI[row.color]}
+      </span>
+      <span
+        className="relative h-2 bg-ink-2 rounded-sm overflow-hidden"
+        title={`${row.linked.toLocaleString()} linked / ${row.total.toLocaleString()} total ${row.color}`}
+      >
+        <span
+          className={`absolute left-0 top-0 h-full ${COLOR_BAR_BG[row.color]}`}
+          style={{ width: `${pct}%` }}
+        />
+      </span>
+      <span className="font-mono text-[11px] text-bone tabular-nums whitespace-nowrap">
+        {row.linked.toLocaleString()}
+        <span className="text-bone-dim">
+          {' / '}
+          {row.total.toLocaleString()}
+        </span>
+        <span className="text-bone-dim ml-2">{pctLabel}</span>
+      </span>
+    </li>
+  );
 }
