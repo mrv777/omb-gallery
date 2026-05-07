@@ -56,6 +56,13 @@ type Props = {
   /** Subset of `wallets` that came from cluster_anchors (not Matrica).
    * Drives the "+N inferred" hint and per-row tag in the wallets list. */
   inferredWallets: string[];
+  /** How many of `ombHoldings` sit in an inferred wallet — drives the
+   * subtle dot on the OMB stat card when nonzero. */
+  ombFromInferred: number;
+  /** Same idea for the bravocados card. */
+  bravoFromInferred: number;
+  /** Same idea for the events card. */
+  eventsFromInferred: number;
 };
 
 export default function HolderProfile({
@@ -76,6 +83,9 @@ export default function HolderProfile({
   isMatricaUser,
   likelyLinked,
   inferredWallets,
+  ombFromInferred,
+  bravoFromInferred,
+  eventsFromInferred,
 }: Props) {
   // Manual identity label (treasury etc.). Looked up against any wallet in
   // the aggregated set so it's stable regardless of which sibling wallet
@@ -141,9 +151,24 @@ export default function HolderProfile({
               </div>
             </div>
             <dl className="grid grid-cols-3 gap-x-4 text-[11px] tracking-[0.08em] uppercase text-bone-dim mb-4">
-              <Stat label="OMB" value={ombHoldings.length.toLocaleString()} />
-              <Stat label="bravocados" value={bravoHoldings.length.toLocaleString()} />
-              <Stat label="events" value={eventTotal.toLocaleString()} />
+              <Stat
+                label="OMB"
+                value={ombHoldings.length.toLocaleString()}
+                inferredCount={ombFromInferred}
+                singular="OMB"
+              />
+              <Stat
+                label="bravocados"
+                value={bravoHoldings.length.toLocaleString()}
+                inferredCount={bravoFromInferred}
+                singular="bravocado"
+              />
+              <Stat
+                label="events"
+                value={eventTotal.toLocaleString()}
+                inferredCount={eventsFromInferred}
+                singular="event"
+              />
             </dl>
             <WalletsList wallets={wallets} inferredWallets={inferredWallets} />
             {isMatricaUser && <RoleLadder earned={roleIds} counts={colorCounts} />}
@@ -158,9 +183,24 @@ export default function HolderProfile({
               {address}
             </div>
             <dl className="grid grid-cols-3 gap-x-4 text-[11px] tracking-[0.08em] uppercase text-bone-dim mb-4">
-              <Stat label="OMB" value={ombHoldings.length.toLocaleString()} />
-              <Stat label="bravocados" value={bravoHoldings.length.toLocaleString()} />
-              <Stat label="events" value={eventTotal.toLocaleString()} />
+              <Stat
+                label="OMB"
+                value={ombHoldings.length.toLocaleString()}
+                inferredCount={ombFromInferred}
+                singular="OMB"
+              />
+              <Stat
+                label="bravocados"
+                value={bravoHoldings.length.toLocaleString()}
+                inferredCount={bravoFromInferred}
+                singular="bravocado"
+              />
+              <Stat
+                label="events"
+                value={eventTotal.toLocaleString()}
+                inferredCount={eventsFromInferred}
+                singular="event"
+              />
             </dl>
             <div className="flex flex-wrap gap-2 text-[10px] tracking-[0.12em] uppercase mb-4">
               <a
@@ -281,11 +321,41 @@ export default function HolderProfile({
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({
+  label,
+  value,
+  inferredCount = 0,
+  singular,
+}: {
+  label: string;
+  value: string;
+  /** When > 0, mark the stat as partially sourced from on-chain inference
+   * with a subtle leading dot + tooltip; the count itself already includes
+   * these (no separate "+N" math, just disclosure). */
+  inferredCount?: number;
+  singular?: string;
+}) {
+  const inferred = inferredCount > 0;
+  const noun =
+    inferredCount === 1 && singular ? singular : `${singular ?? label.toLowerCase()}s`;
+  const tooltip = inferred
+    ? `${inferredCount} ${noun} from on-chain-inferred wallet${inferredCount === 1 ? '' : 's'} (≥99% confidence, not Matrica-confirmed)`
+    : undefined;
   return (
     <div>
       <dt className="text-bone-dim">{label}</dt>
-      <dd className="text-bone normal-case tracking-normal tabular-nums mt-0.5">{value}</dd>
+      <dd
+        className="text-bone normal-case tracking-normal tabular-nums mt-0.5 flex items-center gap-1.5"
+        title={tooltip}
+      >
+        {inferred ? (
+          <span
+            aria-label="includes on-chain-inferred wallets"
+            className="inline-block w-1.5 h-1.5 rounded-full bg-bone-dim shrink-0"
+          />
+        ) : null}
+        {value}
+      </dd>
     </div>
   );
 }

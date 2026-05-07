@@ -125,6 +125,24 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
   ombHoldings.sort((a, b) => a.inscription_number - b.inscription_number);
   bravoHoldings.sort((a, b) => a.inscription_number - b.inscription_number);
 
+  // How many of each holding sit in an on-chain-inferred wallet (i.e.
+  // included only because cluster_anchors folded it in, not because Matrica
+  // confirmed it). Drives the subtle "inferred-source" marker on the stat
+  // cards. Zero-cost when no wallets were folded.
+  const inferredSet = new Set(inferredWallets);
+  const ombFromInferred = inferredSet.size
+    ? ombHoldings.reduce(
+        (n, h) => (h.effective_owner && inferredSet.has(h.effective_owner) ? n + 1 : n),
+        0
+      )
+    : 0;
+  const bravoFromInferred = inferredSet.size
+    ? bravoHoldings.reduce(
+        (n, h) => (h.effective_owner && inferredSet.has(h.effective_owner) ? n + 1 : n),
+        0
+      )
+    : 0;
+
   // Events — first SSR page. The same fan-out + dedupe logic powers
   // /api/holder/[address]/events for "load more" so the cursor returned here
   // is interpretable by that route. eventTotal is summed across wallets;
@@ -138,9 +156,11 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
     RECENT_EVENTS_DISPLAY
   );
   let eventTotalSum = 0;
+  let eventsFromInferred = 0;
   for (const w of wallets) {
     const c = stmts.countEventsByAddress.get({ owner: w }) as { n: number };
     eventTotalSum += c.n;
+    if (inferredSet.has(w)) eventsFromInferred += c.n;
   }
   const initialEventsCursor = initialNextCursor ? encodeCursor(initialNextCursor) : null;
 
@@ -202,6 +222,9 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
         isMatricaUser={!!matricaUserId}
         likelyLinked={likelyLinked}
         inferredWallets={inferredWallets}
+        ombFromInferred={ombFromInferred}
+        bravoFromInferred={bravoFromInferred}
+        eventsFromInferred={eventsFromInferred}
       />
     </SubpageShell>
   );
