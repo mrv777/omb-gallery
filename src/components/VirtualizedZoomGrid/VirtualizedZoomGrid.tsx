@@ -6,6 +6,8 @@ import debounce from 'lodash.debounce';
 import { GalleryImage } from '@/lib/types';
 import { useFavorites } from '@/lib/FavoritesContext';
 import { useColorFilter } from '@/lib/useColorFilter';
+import { useSearchQueryParam } from '@/lib/useSearchQueryParam';
+import { useFavoritesOnlyParam } from '@/lib/useFavoritesOnlyParam';
 import { encodeIds } from '@/lib/slideshowCodec';
 import ImageModal from '../ImageModal';
 import FilterControls from '../FilterControls';
@@ -38,12 +40,15 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     return () => mq.removeEventListener('change', update);
   }, []);
 
-  // Filter state — color lives in the URL so it persists across gallery ↔
-  // activity ↔ explorer navigation. Search and favorites stay session-local.
+  // Filter state lives in the URL so the full filtered view is shareable.
+  // Search keeps a local buffer for snappy typing — the URL is updated on the
+  // same 500ms debounce as the actual filter, not on every keystroke.
   const { color: colorFilter, setColor: setColorFilter } = useColorFilter();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
-  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+  const { query: urlQuery, setQuery: setUrlQuery } = useSearchQueryParam();
+  const { favoritesOnly: showFavoritesOnly, setFavoritesOnly: setShowFavoritesOnly } =
+    useFavoritesOnlyParam();
+  const [searchQuery, setSearchQuery] = useState(urlQuery);
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(urlQuery);
 
   // Favorites
   const { isFavorite } = useFavorites();
@@ -57,11 +62,19 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
   const searchInputRef = useRef<HTMLInputElement>(null);
   const { width: containerWidth } = useGridDimensions(parentRef);
 
-  // Debounced search
+  // Debounced search — also writes the URL so the filter is shareable, but
+  // through a ref so each new searchParams snapshot doesn't cancel the
+  // pending timer (setUrlQuery's identity changes whenever the URL changes).
+  const setUrlQueryRef = useRef(setUrlQuery);
+  useEffect(() => {
+    setUrlQueryRef.current = setUrlQuery;
+  }, [setUrlQuery]);
+
   const debouncedSetSearch = useMemo(
     () =>
       debounce((value: string) => {
         setDebouncedSearchQuery(value);
+        setUrlQueryRef.current(value);
       }, 500),
     []
   );
@@ -72,6 +85,17 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
       debouncedSetSearch.cancel();
     };
   }, [searchQuery, debouncedSetSearch]);
+
+  // Reflect external URL changes (back/forward, paste) into the local input,
+  // unless the user is actively typing — don't clobber an in-progress edit.
+  const lastUrlQuery = useRef(urlQuery);
+  useEffect(() => {
+    if (urlQuery === lastUrlQuery.current) return;
+    lastUrlQuery.current = urlQuery;
+    if (document.activeElement === searchInputRef.current) return;
+    setSearchQuery(urlQuery);
+    setDebouncedSearchQuery(urlQuery);
+  }, [urlQuery]);
 
   const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(e.target.value);
@@ -158,8 +182,8 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
   }, []);
 
   const handleToggleFavoritesOnly = useCallback(() => {
-    setShowFavoritesOnly(prev => !prev);
-  }, []);
+    setShowFavoritesOnly(!showFavoritesOnly);
+  }, [showFavoritesOnly, setShowFavoritesOnly]);
 
   const handleMovePrev = useCallback(() => {
     setCurrentImage(prev => (prev - 1 + filteredImages.length) % filteredImages.length);
