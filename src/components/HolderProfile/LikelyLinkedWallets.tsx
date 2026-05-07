@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import type { LikelyLinkedRow } from '@/lib/clusterStore';
 import { truncateAddr } from '@/lib/format';
@@ -8,6 +9,8 @@ import { lookupWalletLabel } from '@/lib/walletLabels';
 type Props = {
   rows: readonly LikelyLinkedRow[];
 };
+
+const COLLAPSED_LIMIT = 8;
 
 /**
  * "Likely-linked wallets (on-chain)" — surfaced under the Matrica
@@ -20,16 +23,30 @@ type Props = {
  * row reaching it is displayed without further filtering.
  */
 export default function LikelyLinkedWallets({ rows }: Props) {
+  const [expanded, setExpanded] = useState(false);
   if (rows.length === 0) return null;
+
+  const visible = expanded ? rows : rows.slice(0, COLLAPSED_LIMIT);
+  const hasMore = rows.length > COLLAPSED_LIMIT;
+  const minThreshold = Math.round(rows[rows.length - 1].confidence / 100);
+
   return (
     <div className="mt-8 mb-12">
-      <div className="flex items-baseline justify-between mb-3">
-        <h2 className="font-mono text-xs tracking-[0.12em] uppercase text-bone">
-          likely-linked wallets{' '}
-          <span className="text-bone-dim tabular-nums">· {rows.length}</span>
+      <div className="flex items-baseline justify-between mb-3 gap-3">
+        <h2 className="font-mono text-xs tracking-[0.12em] uppercase text-bone flex items-baseline gap-2">
+          <span>
+            likely-linked wallets{' '}
+            <span className="text-bone-dim tabular-nums">· {rows.length}</span>
+          </span>
+          <span
+            className="text-[9px] tracking-[0.12em] uppercase text-bone-dim border border-ink-2 px-1.5 py-0.5 leading-none"
+            title="Heuristic — not Matrica-confirmed"
+          >
+            beta
+          </span>
         </h2>
-        <span className="font-mono text-[10px] tracking-[0.08em] uppercase text-bone-dim">
-          on-chain analysis · ≥ {Math.round((rows[rows.length - 1].confidence / 100))}%
+        <span className="font-mono text-[10px] tracking-[0.08em] uppercase text-bone-dim shrink-0">
+          on-chain analysis · ≥ {minThreshold}%
         </span>
       </div>
       <p className="font-mono text-[11px] text-bone-dim mb-4 normal-case tracking-normal">
@@ -37,11 +54,25 @@ export default function LikelyLinkedWallets({ rows }: Props) {
         Matrica-confirmed — high probability, not certainty. Click a
         row to inspect the evidence.
       </p>
+      {rows.length >= 3 ? (
+        <p className="font-mono text-[10px] tracking-[0.08em] uppercase text-bone-dim mb-3">
+          cluster size · {rows.length + 1} wallets
+        </p>
+      ) : null}
       <ul className="border border-ink-2 divide-y divide-ink-2 font-mono text-[12px]">
-        {rows.map(r => (
+        {visible.map(r => (
           <LikelyLinkedRowItem key={r.peer} row={r} />
         ))}
       </ul>
+      {hasMore ? (
+        <button
+          type="button"
+          onClick={() => setExpanded(v => !v)}
+          className="mt-2 font-mono text-[10px] tracking-[0.08em] uppercase text-bone-dim hover:text-bone"
+        >
+          {expanded ? `show fewer ↑` : `show all (${rows.length}) ↓`}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -53,6 +84,7 @@ function LikelyLinkedRowItem({ row }: { row: LikelyLinkedRow }) {
   const signals: string[] = [];
   if (row.cih_count > 0) signals.push(`${row.cih_count}× co-input`);
   if (row.self_xfer_count > 0) signals.push(`${row.self_xfer_count}× transfer`);
+  const lastSeen = row.last_seen_at ? formatRelative(row.last_seen_at) : '';
 
   return (
     <li>
@@ -72,8 +104,14 @@ function LikelyLinkedRowItem({ row }: { row: LikelyLinkedRow }) {
           >
             {display}
           </Link>
+          {row.omb_count > 0 ? (
+            <span className="text-[10px] tracking-[0.08em] uppercase text-bone-dim shrink-0 tabular-nums">
+              holds {row.omb_count}
+            </span>
+          ) : null}
           <span className="text-[10px] tracking-[0.08em] uppercase text-bone-dim shrink-0">
             {signals.join(' · ')}
+            {lastSeen ? ` · ${lastSeen}` : ''}
           </span>
           <span className="text-bone-dim shrink-0 group-open:rotate-90 transition-transform">
             ›

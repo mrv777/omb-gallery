@@ -585,6 +585,8 @@ export type LikelyLinkedRow = {
   self_xfer_count: number;
   evidence: EvidenceItem[];
   last_seen_at: number;
+  /** OMBs the peer currently holds (live count from inscriptions). */
+  omb_count: number;
   /** Matrica display info for this peer wallet, if linked. */
   matrica: { user_id: string; username: string | null; avatar_url: string | null } | null;
 };
@@ -679,6 +681,37 @@ export function getLikelyLinkedForWallets(
 
   if (byPeer.size === 0) return [];
 
+  // Filter peers whose /holder/<addr> page would 404, and compute the live
+  // OMB-holding count for the remainder. The 404 condition matches
+  // src/app/holder/[address]/page.tsx exactly: no inscriptions held AND no
+  // events touching the address. Pure funding-only co-spenders (typical
+  // P2SH change wallets that contribute fee inputs but never own an OMB)
+  // are real signal but produce dead links — drop them at the reader.
+  const peerMeta = db.prepare(
+    `SELECT
+       (SELECT COUNT(*) FROM inscriptions
+         WHERE effective_owner = @peer AND collection_slug = 'omb') AS omb_count,
+       EXISTS(SELECT 1 FROM events
+               WHERE old_owner = @peer OR new_owner = @peer) AS has_event,
+       EXISTS(SELECT 1 FROM inscriptions
+               WHERE effective_owner = @peer) AS has_insc`
+  );
+  const peerCounts = new Map<string, number>();
+  Array.from(byPeer.keys()).forEach(peer => {
+    const m = peerMeta.get({ peer }) as {
+      omb_count: number;
+      has_event: number;
+      has_insc: number;
+    };
+    if (!m.has_event && !m.has_insc) {
+      byPeer.delete(peer);
+      return;
+    }
+    peerCounts.set(peer, m.omb_count);
+  });
+
+  if (byPeer.size === 0) return [];
+
   // Join Matrica info for each peer in one statement.
   const peers = Array.from(byPeer.keys());
   const placeholders = peers.map(() => '?').join(',');
@@ -719,6 +752,7 @@ export function getLikelyLinkedForWallets(
       self_xfer_count: agg.self_xfer_count,
       evidence: agg.evidence,
       last_seen_at: agg.last_seen_at,
+      omb_count: peerCounts.get(peer) ?? 0,
       matrica: matricaByAddr.get(peer) ?? null,
     });
   });
