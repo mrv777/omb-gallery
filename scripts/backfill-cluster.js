@@ -547,6 +547,26 @@ async function main() {
        WHERE stream = 'cluster' AND collection_slug = 'omb'`
     ).run(String(maxId), Math.floor(Date.now() / 1000), 'backfill-ok', acc.size);
     console.log(`[cluster-backfill] cursor set to events.id=${maxId}`);
+
+    // Materialize cluster_anchors so leaderboards + holder aggregation
+    // reflect the new edges immediately, without waiting for the next
+    // live tick. Same logic as src/lib/clusterStore.ts:recomputeClusterAnchors.
+    const anchorTableExists = db
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='cluster_anchors'`
+      )
+      .get();
+    if (anchorTableExists) {
+      const anchorStats = recomputeAnchorsForBackfill(db);
+      console.log(
+        `[cluster-backfill] cluster_anchors: ${anchorStats.components} components, ` +
+          `${anchorStats.members} members, ${anchorStats.skipped_split_clusters} split clusters skipped`
+      );
+    } else {
+      console.log(
+        `[cluster-backfill] cluster_anchors table missing — run app once to apply v31 migration, then re-run backfill`
+      );
+    }
   }
 
   // Threshold report.
@@ -781,6 +801,103 @@ function runValidation(db, acc) {
     dump('REAL disagreements', real);
     dump('auto-shell pairings (heuristic likely correct, Matrica unclaimed)', shell);
   }
+}
+
+/**
+ * Rebuild cluster_anchors from wallet_cluster_edges at IDENTITY_FOLD_THRESHOLD
+ * (9900 — keep in sync with src/lib/cluster.ts). Mirror of
+ * src/lib/clusterStore.ts:recomputeClusterAnchors so the script is
+ * self-contained (CLI runs against prod without needing the Next.js
+ * build artifacts).
+ */
+function recomputeAnchorsForBackfill(db) {
+  const IDENTITY_FOLD = 9900;
+  const edges = db
+    .prepare(
+      `SELECT addr_a, addr_b FROM wallet_cluster_edges WHERE confidence >= ?`
+    )
+    .all(IDENTITY_FOLD);
+
+  const parent = new Map();
+  const findRoot = (x) => {
+    let p = parent.get(x);
+    if (p === undefined) {
+      parent.set(x, x);
+      return x;
+    }
+    if (p === x) return x;
+    const r = findRoot(p);
+    parent.set(x, r);
+    return r;
+  };
+  const unionAB = (a, b) => {
+    const ra = findRoot(a);
+    const rb = findRoot(b);
+    if (ra !== rb) parent.set(ra, rb);
+  };
+  for (const e of edges) unionAB(e.addr_a, e.addr_b);
+
+  const components = new Map();
+  for (const node of parent.keys()) {
+    const r = findRoot(node);
+    let arr = components.get(r);
+    if (!arr) {
+      arr = [];
+      components.set(r, arr);
+    }
+    arr.push(node);
+  }
+
+  const allNodes = [];
+  for (const m of components.values()) allNodes.push(...m);
+  const matricaByAddr = new Map();
+  if (allNodes.length > 0) {
+    const placeholders = allNodes.map(() => '?').join(',');
+    const rows = db
+      .prepare(
+        `SELECT wallet_addr, matrica_user_id FROM wallet_links
+          WHERE matrica_user_id IS NOT NULL AND wallet_addr IN (${placeholders})`
+      )
+      .all(...allNodes);
+    for (const r of rows) matricaByAddr.set(r.wallet_addr, r.matrica_user_id);
+  }
+
+  const insertAnchor = db.prepare(
+    `INSERT INTO cluster_anchors
+       (wallet_addr, anchor_id, matrica_user_id, cluster_size, computed_at)
+     VALUES (?, ?, ?, ?, unixepoch())`
+  );
+  let componentCount = 0;
+  let memberCount = 0;
+  let skipped = 0;
+  const apply = db.transaction(() => {
+    db.exec(`DELETE FROM cluster_anchors`);
+    for (const members of components.values()) {
+      if (members.length < 2) continue;
+      const matricaIds = new Set();
+      for (const m of members) {
+        const mid = matricaByAddr.get(m);
+        if (mid) matricaIds.add(mid);
+      }
+      if (matricaIds.size > 1) {
+        skipped++;
+        continue;
+      }
+      const matricaId = matricaIds.size === 1 ? Array.from(matricaIds)[0] : null;
+      const anchorId = matricaId !== null ? matricaId : members.slice().sort()[0];
+      componentCount++;
+      for (const wallet of members) {
+        insertAnchor.run(wallet, anchorId, matricaId, members.length);
+        memberCount++;
+      }
+    }
+  });
+  apply();
+  return {
+    components: componentCount,
+    members: memberCount,
+    skipped_split_clusters: skipped,
+  };
 }
 
 main().catch((err) => {

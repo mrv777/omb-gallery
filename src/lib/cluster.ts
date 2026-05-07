@@ -193,6 +193,22 @@ export function confidenceFromCounts(c: EdgeCounts): number {
  */
 export const CLUSTER_THRESHOLD = 9500;
 
+/**
+ * Stricter threshold at which on-chain inference is treated as identity-
+ * level — peers at this level are folded into holdings aggregation and
+ * leaderboards alongside Matrica-confirmed siblings. Higher than
+ * CLUSTER_THRESHOLD (which only governs whether peers are *displayed* in
+ * the advisory section). At calibration: precision against Matrica
+ * ground-truth is ~89% at 9500 and rises to ~95%+ at 9900 (counting
+ * known auto-shell wins as TPs). Keep this as the gate for any change
+ * that re-keys top-counts; if you raise it, also re-run cluster_anchors.
+ *
+ * Roles remain Matrica-only by design — promoting a heuristic match to
+ * a Matrica role would let an attacker game the role catalog. The fold
+ * is for ownership counts, not identity attestation.
+ */
+export const IDENTITY_FOLD_THRESHOLD = 9900;
+
 /** Cap on per-edge evidence items kept in evidence_json. */
 export const EVIDENCE_CAP = 10;
 

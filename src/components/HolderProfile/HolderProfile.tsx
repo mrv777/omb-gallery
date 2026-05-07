@@ -53,6 +53,9 @@ type Props = {
   /** On-chain-inferred peers not already in `wallets`. Empty when the
    * cluster pipeline hasn't run or no edges meet the public threshold. */
   likelyLinked: LikelyLinkedRow[];
+  /** Subset of `wallets` that came from cluster_anchors (not Matrica).
+   * Drives the "+N inferred" hint and per-row tag in the wallets list. */
+  inferredWallets: string[];
 };
 
 export default function HolderProfile({
@@ -72,6 +75,7 @@ export default function HolderProfile({
   colorCounts,
   isMatricaUser,
   likelyLinked,
+  inferredWallets,
 }: Props) {
   // Manual identity label (treasury etc.). Looked up against any wallet in
   // the aggregated set so it's stable regardless of which sibling wallet
@@ -141,7 +145,7 @@ export default function HolderProfile({
               <Stat label="bravocados" value={bravoHoldings.length.toLocaleString()} />
               <Stat label="events" value={eventTotal.toLocaleString()} />
             </dl>
-            <WalletsList wallets={wallets} />
+            <WalletsList wallets={wallets} inferredWallets={inferredWallets} />
             {isMatricaUser && <RoleLadder earned={roleIds} counts={colorCounts} />}
           </>
         ) : (
@@ -158,7 +162,7 @@ export default function HolderProfile({
               <Stat label="bravocados" value={bravoHoldings.length.toLocaleString()} />
               <Stat label="events" value={eventTotal.toLocaleString()} />
             </dl>
-            <div className="flex flex-wrap gap-2 text-[10px] tracking-[0.12em] uppercase">
+            <div className="flex flex-wrap gap-2 text-[10px] tracking-[0.12em] uppercase mb-4">
               <a
                 href={ordNetWalletLink(address)}
                 target="_blank"
@@ -176,6 +180,9 @@ export default function HolderProfile({
                 ord.io ↗
               </a>
             </div>
+            {wallets.length > 1 ? (
+              <WalletsList wallets={wallets} inferredWallets={inferredWallets} />
+            ) : null}
           </>
         )}
       </div>

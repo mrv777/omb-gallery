@@ -11,9 +11,11 @@ import {
   confidenceFromCounts,
   edgeKey,
   hasAcpInput,
+  IDENTITY_FOLD_THRESHOLD,
   MAX_INPUTS_FOR_CIH,
   MINT_WALLET_ADDRS,
   MULTI_SOURCE_RECEIVER_THRESHOLD,
+  UnionFind,
   type EdgeAcc,
   type EvidenceItem,
 } from './cluster';
@@ -265,6 +267,10 @@ export async function runClusterTick(): Promise<TickResult> {
       });
       result.cursor_advanced = true;
     }
+    // Bootstrap-friendly recompute: even if no new candidates landed this
+    // tick, the cluster_anchors table may be empty (first tick after a
+    // deploy with the v31 schema, or after a backfill). Cheap to redo.
+    maybeRefreshAnchors();
     result.duration_ms = Date.now() - startedAt;
     return result;
   }
@@ -453,6 +459,11 @@ export async function runClusterTick(): Promise<TickResult> {
   tx();
   result.edges_touched = touched;
 
+  // Refresh the materialized cluster_anchors so leaderboards, holder
+  // aggregation, and counts pick up new identity-folds without waiting
+  // for a separate pass. Cheap: walks ~hundreds of edges at threshold.
+  maybeRefreshAnchors();
+
   // Advance cursor to the highest candidate id processed.
   const newCursor = candidates[candidates.length - 1].id;
   s.updateState.run({
@@ -465,6 +476,162 @@ export async function runClusterTick(): Promise<TickResult> {
   result.cursor_advanced = true;
   result.duration_ms = Date.now() - startedAt;
   return result;
+}
+
+/** Wrapper that swallows errors so cluster_anchors freshness never
+ *  breaks the live tick. The recompute is best-effort: anchors lag a
+ *  tick on RPC partial failure, which is acceptable. */
+function maybeRefreshAnchors(): void {
+  try {
+    recomputeClusterAnchors();
+  } catch (err) {
+    log.warn('poll/cluster', 'recomputeClusterAnchors failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
+ * Rebuild the `cluster_anchors` materialized view from
+ * `wallet_cluster_edges` at IDENTITY_FOLD_THRESHOLD.
+ *
+ * Picks an anchor per connected component:
+ *   - If the component contains exactly one Matrica user, anchor =
+ *     that user_id (so unlinked members fold onto the linked user).
+ *   - If it contains multiple distinct Matrica users, the component is
+ *     SKIPPED — heuristic merges must never silently re-key authoritative
+ *     Matrica linkage. Each member falls through to its own Matrica user
+ *     or address downstream.
+ *   - If unlinked-only, anchor = lex-min wallet address.
+ *
+ * Runs inside a single transaction; truncate-and-reinsert is fine at
+ * our scale (~hundreds of components total).
+ */
+export function recomputeClusterAnchors(): {
+  components: number;
+  members: number;
+  skipped_split_clusters: number;
+} {
+  const db = getDb();
+  const edges = db
+    .prepare(
+      `SELECT addr_a, addr_b
+         FROM wallet_cluster_edges
+        WHERE confidence >= ?`
+    )
+    .all(IDENTITY_FOLD_THRESHOLD) as Array<{ addr_a: string; addr_b: string }>;
+
+  const uf = new UnionFind();
+  for (const e of edges) uf.union(e.addr_a, e.addr_b);
+  const components = uf.groups();
+
+  // Bulk-look up Matrica linkage for every node in any component, so we
+  // don't N+1 the DB inside the per-component loop.
+  const allNodes: string[] = [];
+  Array.from(components.values()).forEach(members => {
+    allNodes.push(...members);
+  });
+  const matricaByAddr = new Map<string, string>();
+  if (allNodes.length > 0) {
+    const placeholders = allNodes.map(() => '?').join(',');
+    const rows = db
+      .prepare(
+        `SELECT wallet_addr, matrica_user_id
+           FROM wallet_links
+          WHERE matrica_user_id IS NOT NULL
+            AND wallet_addr IN (${placeholders})`
+      )
+      .all(...allNodes) as Array<{ wallet_addr: string; matrica_user_id: string }>;
+    for (const r of rows) matricaByAddr.set(r.wallet_addr, r.matrica_user_id);
+  }
+
+  let componentCount = 0;
+  let memberCount = 0;
+  let skipped = 0;
+  const insertAnchor = db.prepare(
+    `INSERT INTO cluster_anchors
+       (wallet_addr, anchor_id, matrica_user_id, cluster_size, computed_at)
+     VALUES (@wallet_addr, @anchor_id, @matrica_user_id, @cluster_size, unixepoch())`
+  );
+
+  const apply = db.transaction(() => {
+    db.exec(`DELETE FROM cluster_anchors`);
+    Array.from(components.values()).forEach(members => {
+      if (members.length < 2) return;
+      const matricaIds = new Set<string>();
+      for (const m of members) {
+        const mid = matricaByAddr.get(m);
+        if (mid) matricaIds.add(mid);
+      }
+      if (matricaIds.size > 1) {
+        skipped += 1;
+        return;
+      }
+      const matricaId = matricaIds.size === 1 ? Array.from(matricaIds)[0] : null;
+      const anchorId = matricaId ?? members.slice().sort()[0];
+      componentCount += 1;
+      for (const wallet of members) {
+        insertAnchor.run({
+          wallet_addr: wallet,
+          anchor_id: anchorId,
+          matrica_user_id: matricaId,
+          cluster_size: members.length,
+        });
+        memberCount += 1;
+      }
+    });
+  });
+  apply();
+
+  return {
+    components: componentCount,
+    members: memberCount,
+    skipped_split_clusters: skipped,
+  };
+}
+
+/**
+ * Returns the cluster anchor row for `address` at IDENTITY_FOLD_THRESHOLD,
+ * or null if the address is in a singleton component (no fold). Used by
+ * holder-page aggregation to extend the wallet set beyond Matrica
+ * siblings.
+ */
+export function getClusterAnchorForAddress(address: string): {
+  anchor_id: string;
+  matrica_user_id: string | null;
+  cluster_size: number;
+} | null {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `SELECT anchor_id, matrica_user_id, cluster_size
+         FROM cluster_anchors WHERE wallet_addr = ?`
+    )
+    .get(address) as
+    | { anchor_id: string; matrica_user_id: string | null; cluster_size: number }
+    | undefined;
+  return row ?? null;
+}
+
+/**
+ * Returns every wallet that shares a cluster anchor with `address`, or
+ * just `[address]` if it's in a singleton. The address itself is always
+ * the first element.
+ */
+export function getClusterMembersForAddress(address: string): string[] {
+  const anchor = getClusterAnchorForAddress(address);
+  if (!anchor) return [address];
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT wallet_addr FROM cluster_anchors
+        WHERE anchor_id = ? ORDER BY wallet_addr ASC`
+    )
+    .all(anchor.anchor_id) as Array<{ wallet_addr: string }>;
+  const members = rows.map(r => r.wallet_addr);
+  // Hoist `address` to the front for caller convenience (page deep-links).
+  if (!members.includes(address)) return [address, ...members];
+  return [address, ...members.filter(m => m !== address)];
 }
 
 // ---------------- Readers (UI surface) ----------------

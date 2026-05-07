@@ -5,30 +5,54 @@ import {
   type HolderColorHighlightRow,
   type WalletLinkRow,
 } from '@/lib/db';
+import { getClusterMembersForAddress } from '@/lib/clusterStore';
 
 /**
- * Resolve the full set of wallets a profile aggregates over. If `address` is
- * linked to a Matrica user, returns every sibling wallet we've indexed under
- * that user (including `address`). Otherwise returns just `[address]`.
+ * Resolve the full set of wallets a profile aggregates over.
  *
- * Mirrors the logic in `src/app/holder/[address]/page.tsx` so the API route
- * and the SSR page see the same wallet set for the same URL.
+ * Two layers fold into the wallet set:
+ *   1. Matrica siblings — authoritative, always included when present.
+ *   2. cluster_anchors members — on-chain inferred peers at the
+ *      IDENTITY_FOLD_THRESHOLD (≥99% confidence). Folded in alongside
+ *      Matrica siblings so OMB count, tiles, events, color spread, and
+ *      bag-size all reflect the merged identity. The fold is permissive
+ *      (union both sets) — never substitutive — so a Matrica-linked
+ *      wallet's identity is preserved even if it sits in a heuristic
+ *      component.
+ *
+ * `inferredCount` is the number of wallets added by cluster_anchors that
+ * weren't already covered by Matrica — surfaced in the UI as a small
+ * "+N inferred" hint near the WALLETS list. Mirrors the same fan-out
+ * used by /api/holder/[address]/events so SSR and pagination see the
+ * same set.
  */
 export function resolveAggregatedWallets(address: string): {
   wallets: string[];
   link: WalletLinkRow | undefined;
+  /** Subset of `wallets` that came from cluster_anchors and aren't Matrica
+   * siblings. Used to render the "+N inferred" hint and tag those rows
+   * in the wallets list. */
+  inferredWallets: string[];
 } {
   const stmts = getStmts();
   const link = stmts.getWalletLink.get({ wallet_addr: address }) as WalletLinkRow | undefined;
   const userId = link?.matrica_user_id ?? null;
-  let wallets: string[] = [address];
+  const matricaSet = new Set<string>([address]);
   if (userId) {
     const siblings = stmts.getWalletsForUser.all({ user_id: userId }) as Array<{
       wallet_addr: string;
     }>;
-    wallets = Array.from(new Set<string>([address, ...siblings.map(s => s.wallet_addr)]));
+    for (const s of siblings) matricaSet.add(s.wallet_addr);
   }
-  return { wallets, link };
+  const clusterMembers = getClusterMembersForAddress(address);
+  const inferredWallets: string[] = [];
+  for (const m of clusterMembers) {
+    if (!matricaSet.has(m)) inferredWallets.push(m);
+  }
+  const merged = new Set<string>([address, ...clusterMembers]);
+  Array.from(matricaSet).forEach(w => merged.add(w));
+  const wallets = Array.from(merged);
+  return { wallets, link, inferredWallets };
 }
 
 export type HolderEventsCursor = { ts: number; id: number };

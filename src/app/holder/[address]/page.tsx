@@ -97,12 +97,14 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
 
   const stmts = getStmts();
 
-  // Look up Matrica linkage and resolve the wallet set we aggregate over.
-  // When `matrica_user_id` is non-null, this is a multi-wallet identity and
-  // we fan out across siblings; otherwise it's just `[address]`. Same logic
-  // is shared with the /api/holder/[address]/events route so paginated
-  // "load more" sees the same wallets.
-  const { wallets, link } = resolveAggregatedWallets(address);
+  // Look up Matrica linkage + 99%+ inferred peers and resolve the wallet
+  // set we aggregate over. Matrica siblings are always included when
+  // present; cluster_anchors members at IDENTITY_FOLD_THRESHOLD are folded
+  // in alongside so top counts, tiles, events, color spread, and bag-size
+  // reflect the merged identity. `inferredCount` drives the "+N inferred"
+  // hint near the WALLETS list. Same fan-out is used by the events API
+  // route so paginated "load more" sees the same wallets.
+  const { wallets, link, inferredWallets } = resolveAggregatedWallets(address);
 
   // Holdings — fetch per wallet, concat, sort by inscription_number for
   // stable grid ordering. Each call walks idx_insc_owner; small N (typically 1).
@@ -199,6 +201,7 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
         colorCounts={colorCounts}
         isMatricaUser={!!matricaUserId}
         likelyLinked={likelyLinked}
+        inferredWallets={inferredWallets}
       />
     </SubpageShell>
   );

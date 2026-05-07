@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 30;
+const SCHEMA_VERSION = 31;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -162,6 +162,7 @@ function migrate(db: DB): void {
         upgradeV27ToV28(db);
         upgradeV28ToV29(db);
         upgradeV29ToV30(db);
+        upgradeV30ToV31(db);
       } else {
         initSchemaLatest(db);
       }
@@ -195,6 +196,7 @@ function migrate(db: DB): void {
       if (current < 28) upgradeV27ToV28(db);
       if (current < 29) upgradeV28ToV29(db);
       if (current < 30) upgradeV29ToV30(db);
+      if (current < 31) upgradeV30ToV31(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -509,6 +511,27 @@ function initSchemaLatest(db: DB): void {
       added_at INTEGER NOT NULL,
       notes    TEXT
     );
+
+    -- Materialized connected-components at IDENTITY_FOLD_THRESHOLD (9900).
+    -- One row per wallet that's a member of a non-singleton component;
+    -- absent wallets fall through Matrica then their own address in
+    -- leaderboard COALESCE chains. anchor_id is the canonical group key:
+    -- when the component contains exactly one Matrica user, anchor_id =
+    -- matrica_users.user_id (and matrica_user_id is set to enable display
+    -- joins); when the component is unlinked-only, anchor_id = lex-min
+    -- wallet address. Components with 2+ distinct Matrica users (rare —
+    -- two real people who heavily co-spend) are skipped to keep authoritative
+    -- Matrica linkage from being clobbered by heuristic merges. Recomputed
+    -- every cluster tick from wallet_cluster_edges; cheap (<500 wallets at
+    -- threshold).
+    CREATE TABLE IF NOT EXISTS cluster_anchors (
+      wallet_addr     TEXT PRIMARY KEY,
+      anchor_id       TEXT NOT NULL,
+      matrica_user_id TEXT REFERENCES matrica_users (user_id),
+      cluster_size    INTEGER NOT NULL,
+      computed_at     INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_cluster_anchors_anchor ON cluster_anchors (anchor_id);
   `);
 }
 
@@ -1496,6 +1519,25 @@ function upgradeV29ToV30(db: DB): void {
     DROP TABLE poll_state;
     ALTER TABLE poll_state_v30 RENAME TO poll_state;
     INSERT OR IGNORE INTO poll_state (stream, collection_slug) VALUES ('cluster', 'omb');
+  `);
+}
+
+function upgradeV30ToV31(db: DB): void {
+  // Materialize connected components at IDENTITY_FOLD_THRESHOLD so the
+  // top-holders leaderboard, color leaderboards, holder distribution
+  // histogram, and per-holder aggregation can fold high-confidence (99%+)
+  // inferred peers into the canonical identity alongside Matrica siblings.
+  // Schema only — population happens in runClusterTick on the next tick
+  // (or via the backfill script's existing one-shot path).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS cluster_anchors (
+      wallet_addr     TEXT PRIMARY KEY,
+      anchor_id       TEXT NOT NULL,
+      matrica_user_id TEXT REFERENCES matrica_users (user_id),
+      cluster_size    INTEGER NOT NULL,
+      computed_at     INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_cluster_anchors_anchor ON cluster_anchors (anchor_id);
   `);
 }
 
@@ -2700,27 +2742,39 @@ export function getStmts(): Stmts {
       WHERE wl.wallet_addr IN (SELECT value FROM json_each(@addrs_json))
     `),
 
-    // Reader: top holders, collapsed by Matrica user when one is known.
-    // Wallets without a wallet_links row, OR with matrica_user_id IS NULL
-    // (checked-no-profile), keep their wallet address as the group key.
-    // GROUP_CONCAT gives the route layer the full wallet set; the route
-    // splits it for `wallets[]` and uses the first entry for deep-linking.
+    // Reader: top holders, collapsed by Matrica user when one is known,
+    // then by cluster_anchors when on-chain inference at IDENTITY_FOLD
+    // confidence (≥99%) merges unlinked wallets into a same-person group.
+    // Wallets with neither a Matrica user nor a cluster row keep their
+    // wallet address as the group key. GROUP_CONCAT gives the route layer
+    // the full wallet set; the route splits for `wallets[]` and uses the
+    // first entry for deep-linking.
+    //
+    // COALESCE order matters: wl.matrica_user_id beats ca.anchor_id so
+    // an authoritatively-linked wallet is never re-keyed by a heuristic
+    // merge — the recompute also skips clusters that span multiple
+    // distinct Matrica users to keep this guarantee tight. Display joins
+    // fall back to mu_anchor for cluster-anchored Matrica usernames so
+    // a folded wallet shows the right avatar/handle.
     //
     // Keys on effective_owner (not current_owner) so loan-escrowed pieces
     // count for the borrower instead of surfacing the escrow taproot as a
     // 1-OMB "holder". Mirrors countHolders / topHolders / per-holder pages.
     topHoldersGrouped: db.prepare(`
       SELECT
-        COALESCE(wl.matrica_user_id, i.effective_owner)          AS group_key,
-        CASE WHEN wl.matrica_user_id IS NOT NULL THEN 1 ELSE 0 END AS is_user,
-        mu.username                                               AS username,
-        mu.avatar_url                                             AS avatar_url,
-        GROUP_CONCAT(DISTINCT i.effective_owner)                  AS wallets_csv,
-        COUNT(*)                                                  AS inscription_count,
-        unixepoch()                                               AS updated_at
+        COALESCE(wl.matrica_user_id, ca.anchor_id, i.effective_owner)            AS group_key,
+        CASE WHEN wl.matrica_user_id IS NOT NULL OR ca.matrica_user_id IS NOT NULL
+             THEN 1 ELSE 0 END                                                   AS is_user,
+        COALESCE(mu.username,   mu_a.username)                                   AS username,
+        COALESCE(mu.avatar_url, mu_a.avatar_url)                                 AS avatar_url,
+        GROUP_CONCAT(DISTINCT i.effective_owner)                                 AS wallets_csv,
+        COUNT(*)                                                                 AS inscription_count,
+        unixepoch()                                                              AS updated_at
       FROM inscriptions i
-      LEFT JOIN wallet_links  wl ON wl.wallet_addr = i.effective_owner
-      LEFT JOIN matrica_users mu ON mu.user_id     = wl.matrica_user_id
+      LEFT JOIN wallet_links     wl   ON wl.wallet_addr   = i.effective_owner
+      LEFT JOIN matrica_users    mu   ON mu.user_id       = wl.matrica_user_id
+      LEFT JOIN cluster_anchors  ca   ON ca.wallet_addr   = i.effective_owner
+      LEFT JOIN matrica_users    mu_a ON mu_a.user_id     = ca.matrica_user_id
       WHERE i.effective_owner IS NOT NULL
         AND i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
@@ -2730,23 +2784,26 @@ export function getStmts(): Stmts {
     `),
 
     // Paged variant for the /explorer/top-holders detail page. group_key is
-    // unique (Matrica user_id or raw wallet address), so the existing ORDER
-    // BY pair is already a stable keyset; we just add the cursor predicate.
-    // The HAVING clause is what filters here because GROUP BY happens before
-    // WHERE-on-group can run — applying the cursor as HAVING avoids a
-    // wrapping subquery.
+    // unique (Matrica user_id, cluster anchor_id, or raw wallet address),
+    // so the existing ORDER BY pair is a stable keyset; we just add the
+    // cursor predicate. The HAVING clause is what filters here because
+    // GROUP BY happens before WHERE-on-group can run — applying the
+    // cursor as HAVING avoids a wrapping subquery.
     topHoldersGroupedPaged: db.prepare(`
       SELECT
-        COALESCE(wl.matrica_user_id, i.effective_owner)          AS group_key,
-        CASE WHEN wl.matrica_user_id IS NOT NULL THEN 1 ELSE 0 END AS is_user,
-        mu.username                                               AS username,
-        mu.avatar_url                                             AS avatar_url,
-        GROUP_CONCAT(DISTINCT i.effective_owner)                  AS wallets_csv,
-        COUNT(*)                                                  AS inscription_count,
-        unixepoch()                                               AS updated_at
+        COALESCE(wl.matrica_user_id, ca.anchor_id, i.effective_owner)            AS group_key,
+        CASE WHEN wl.matrica_user_id IS NOT NULL OR ca.matrica_user_id IS NOT NULL
+             THEN 1 ELSE 0 END                                                   AS is_user,
+        COALESCE(mu.username,   mu_a.username)                                   AS username,
+        COALESCE(mu.avatar_url, mu_a.avatar_url)                                 AS avatar_url,
+        GROUP_CONCAT(DISTINCT i.effective_owner)                                 AS wallets_csv,
+        COUNT(*)                                                                 AS inscription_count,
+        unixepoch()                                                              AS updated_at
       FROM inscriptions i
-      LEFT JOIN wallet_links  wl ON wl.wallet_addr = i.effective_owner
-      LEFT JOIN matrica_users mu ON mu.user_id     = wl.matrica_user_id
+      LEFT JOIN wallet_links     wl   ON wl.wallet_addr   = i.effective_owner
+      LEFT JOIN matrica_users    mu   ON mu.user_id       = wl.matrica_user_id
+      LEFT JOIN cluster_anchors  ca   ON ca.wallet_addr   = i.effective_owner
+      LEFT JOIN matrica_users    mu_a ON mu_a.user_id     = ca.matrica_user_id
       WHERE i.effective_owner IS NOT NULL
         AND i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
@@ -2759,22 +2816,23 @@ export function getStmts(): Stmts {
       LIMIT @limit
     `),
 
-    // Count distinct identities (Matrica user OR raw wallet). Replaces the
-    // raw-wallet countHolders for the explorer's "N holders" stat once we
-    // wire it up.
+    // Count distinct identities (Matrica user, cluster anchor, or raw
+    // wallet). Mirrors the topHoldersGrouped collapse so the explorer's
+    // "N holders" stat squares with the leaderboard row count.
     countHolderIdentities: db.prepare(`
-      SELECT COUNT(DISTINCT COALESCE(wl.matrica_user_id, i.effective_owner)) AS n
+      SELECT COUNT(DISTINCT COALESCE(wl.matrica_user_id, ca.anchor_id, i.effective_owner)) AS n
       FROM inscriptions i
-      LEFT JOIN wallet_links wl ON wl.wallet_addr = i.effective_owner
+      LEFT JOIN wallet_links    wl ON wl.wallet_addr = i.effective_owner
+      LEFT JOIN cluster_anchors ca ON ca.wallet_addr = i.effective_owner
       WHERE i.effective_owner IS NOT NULL
         AND i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
     `),
 
-    // Charts: holder distribution histogram. Buckets identities (Matrica user
-    // when known, raw wallet otherwise) by how many inscriptions they hold.
-    // The inner query mirrors topHoldersGrouped — same Matrica collapse — so
-    // the bucket counts square with the top-holders leaderboard.
+    // Charts: holder distribution histogram. Buckets identities (Matrica
+    // user → cluster anchor → raw wallet) by how many inscriptions they
+    // hold. The inner query mirrors topHoldersGrouped — same collapse
+    // chain — so the bucket counts square with the top-holders leaderboard.
     //
     // Excludes special wallets (treasury) so the histogram reflects the
     // organic distribution rather than being skewed by a single mass holder.
@@ -2792,12 +2850,13 @@ export function getStmts(): Stmts {
         FROM (
           SELECT COUNT(*) AS cnt
           FROM inscriptions i
-          LEFT JOIN wallet_links wl ON wl.wallet_addr = i.effective_owner
+          LEFT JOIN wallet_links    wl ON wl.wallet_addr = i.effective_owner
+          LEFT JOIN cluster_anchors ca ON ca.wallet_addr = i.effective_owner
           WHERE i.effective_owner IS NOT NULL
             AND i.collection_slug = @collection
             AND (@color IS NULL OR i.color = @color)
             AND i.effective_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST})
-          GROUP BY COALESCE(wl.matrica_user_id, i.effective_owner)
+          GROUP BY COALESCE(wl.matrica_user_id, ca.anchor_id, i.effective_owner)
         )
       )
       GROUP BY bucket
