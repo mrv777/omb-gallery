@@ -256,6 +256,11 @@ const VirtualRow = memo(
                 width: cellSize,
                 height: cellSize,
                 flexShrink: 0,
+                // Skeleton fill (palette ink-2): visible only while the WebP
+                // hasn't painted — slow connections, post-filter remount of
+                // newly-virtualized rows. Reads as "tile is here, image
+                // arriving" instead of a transparent gap on page-black.
+                backgroundColor: '#151515',
                 backgroundImage: `url(${thumbnailUrl})`,
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
