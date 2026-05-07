@@ -8,6 +8,8 @@ import {
   type OwnershipDeltaRow,
   type WalletLinkRow,
 } from '@/lib/db';
+import { getRolesForUser, getColorCountsForUser } from '@/lib/rolesStore';
+import { emptyCounts } from '@/lib/roles';
 import { truncateAddr } from '@/lib/format';
 import { lookupInscription } from '@/lib/inscriptionLookup';
 import { buildSocial } from '@/lib/metadata';
@@ -155,6 +157,13 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
   // (sum of +1/-1 across wallet rows = 0) happens inside the helper.
   const colorHighlights = fetchHolderColorHighlights(wallets);
 
+  // Roles + per-color counts (for the badge row + ladder). Only populated
+  // when this is a Matrica-linked identity — unlinked wallets render no
+  // badges and no ladder.
+  const matricaUserId = link?.matrica_user_id ?? null;
+  const roleIds = matricaUserId ? getRolesForUser(matricaUserId) : [];
+  const colorCounts = matricaUserId ? getColorCountsForUser(matricaUserId) : emptyCounts();
+
   // Show a real 404 only when nothing in the DB references this address —
   // a wallet that emptied out (no current holdings but has past events)
   // should still render so users can see the activity. For aggregated users,
@@ -178,6 +187,9 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
         tileCap={TILE_CAP}
         ownershipDeltas={ownershipDeltas}
         colorHighlights={colorHighlights}
+        roleIds={roleIds}
+        colorCounts={colorCounts}
+        isMatricaUser={!!matricaUserId}
       />
     </SubpageShell>
   );

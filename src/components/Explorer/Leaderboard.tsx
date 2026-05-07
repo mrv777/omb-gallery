@@ -9,6 +9,7 @@ import { lookupWalletLabel } from '@/lib/walletLabels';
 import SafeImg from '@/components/SafeImg';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { HoverImagePreview } from '@/components/ui/HoverImagePreview';
+import RoleBadges from '@/components/RoleBadges';
 
 type Props = {
   type: LeaderboardKey;
@@ -175,27 +176,34 @@ export function HolderRow({ row, rank }: { row: ApiHolder; rank: number }) {
             />
           )}
         </span>
-        <Tooltip content={tooltip}>
-          <span className="font-mono text-xs text-bone truncate">
-            {manual ? (
-              <>
-                <span className="text-accent-orange">{manual.name}</span>
-                {manual.subtitle && (
-                  <span className="ml-1.5 text-[10px] text-bone-dim normal-case tracking-normal">
-                    {manual.subtitle}
-                  </span>
-                )}
-              </>
-            ) : showsUsername ? (
-              row.username
-            ) : (
-              truncateAddr(primaryWallet, 8, 6)
-            )}
-            {!manual && row.is_user && row.wallets.length > 1 && (
-              <span className="ml-1.5 text-[10px] text-bone-dim">×{row.wallets.length}</span>
-            )}
-          </span>
-        </Tooltip>
+        <span className="flex items-center gap-2 min-w-0">
+          <Tooltip content={tooltip}>
+            <span className="font-mono text-xs text-bone truncate">
+              {manual ? (
+                <>
+                  <span className="text-accent-orange">{manual.name}</span>
+                  {manual.subtitle && (
+                    <span className="ml-1.5 text-[10px] text-bone-dim normal-case tracking-normal">
+                      {manual.subtitle}
+                    </span>
+                  )}
+                </>
+              ) : showsUsername ? (
+                row.username
+              ) : (
+                truncateAddr(primaryWallet, 8, 6)
+              )}
+              {!manual && row.is_user && row.wallets.length > 1 && (
+                <span className="ml-1.5 text-[10px] text-bone-dim">×{row.wallets.length}</span>
+              )}
+            </span>
+          </Tooltip>
+          {row.role_ids && row.role_ids.length > 0 && (
+            <span className="hidden sm:inline-flex shrink-0">
+              <RoleBadges roleIds={row.role_ids} max={3} dense />
+            </span>
+          )}
+        </span>
         <span className="font-mono text-xs text-bone tabular-nums whitespace-nowrap">
           {row.inscription_count.toLocaleString()}
         </span>

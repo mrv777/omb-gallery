@@ -9,6 +9,7 @@ import type { ApiHolder, ApiInscription } from '@/components/Activity/types';
 import type { LeaderboardItem } from '@/components/Explorer/useLeaderboardFeed';
 import { colorParamForSql, parseColorParam } from '@/lib/colorFilter';
 import { SITE_NAME, buildSocial } from '@/lib/metadata';
+import { getRolesForUsers } from '@/lib/rolesStore';
 
 const VALID: LeaderboardKey[] = [
   'most-transferred',
@@ -81,6 +82,8 @@ export default async function LeaderboardDetailPage({
       cursor_primary: null,
       cursor_secondary: null,
     }) as GroupedHolderRow[];
+    const matricaUserIds = rows.filter(r => r.is_user === 1).map(r => r.group_key);
+    const rolesByUser = getRolesForUsers(matricaUserIds);
     const holders: ApiHolder[] = rows.map(r => ({
       group_key: r.group_key,
       is_user: r.is_user === 1,
@@ -89,6 +92,7 @@ export default async function LeaderboardDetailPage({
       wallets: (r.wallets_csv ?? '').split(',').filter(Boolean),
       inscription_count: r.inscription_count,
       updated_at: r.updated_at,
+      role_ids: r.is_user === 1 ? (rolesByUser.get(r.group_key) ?? []) : [],
     }));
     items = holders;
     nextCursor =

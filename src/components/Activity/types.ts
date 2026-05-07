@@ -90,4 +90,7 @@ export type ApiHolder = {
   wallets: string[];
   inscription_count: number;
   updated_at: number;
+  /** Earned role IDs in priority order (rarest first). Empty for unlinked
+   * wallets. Populated by the explorer SSR + the holders API route. */
+  role_ids?: string[];
 };

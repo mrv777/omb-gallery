@@ -9,6 +9,8 @@ import ColorPortfolioBar from '@/components/Charts/ColorPortfolioBar';
 import BagSizeOverTime from '@/components/Charts/BagSizeOverTime';
 import HolderActivityList from './HolderActivityList';
 import { OmbTile, BravocadosTile } from './HolderTiles';
+import RoleBadges from '@/components/RoleBadges';
+import { ROLES, type ColorCounts, shortfallFor, COLOR_EMOJI } from '@/lib/roles';
 
 // Bravocados thumbnails come straight from ordinals.com — there's no local
 // optimized variant. Limit how many we render before collapsing into a
@@ -38,6 +40,14 @@ type Props = {
    * bag-size-over-time chart. Internal transfers (between two of the user's
    * own wallets) are pre-filtered out by the page. */
   colorHighlights: HolderColorHighlight[];
+  /** Earned role IDs for this Matrica user (priority-ordered). Empty for
+   * unlinked wallets — badges only render for Matrica-linked identities. */
+  roleIds: string[];
+  /** Aggregated per-color holdings across all linked wallets — drives the
+   * ladder progress text. Zero counts for unlinked wallets. */
+  colorCounts: ColorCounts;
+  /** Whether the holder is Matrica-linked. Gates the badges + ladder UI. */
+  isMatricaUser: boolean;
 };
 
 export default function HolderProfile({
@@ -53,6 +63,9 @@ export default function HolderProfile({
   tileCap,
   ownershipDeltas,
   colorHighlights,
+  roleIds,
+  colorCounts,
+  isMatricaUser,
 }: Props) {
   // Manual identity label (treasury etc.). Looked up against any wallet in
   // the aggregated set so it's stable regardless of which sibling wallet
@@ -97,13 +110,18 @@ export default function HolderProfile({
                   />
                 )}
                 <div className="min-w-0">
-                  <h1
-                    className={`text-base sm:text-lg normal-case tracking-normal truncate ${
-                      manual ? 'text-accent-orange' : 'text-bone'
-                    }`}
-                  >
-                    {manual ? manual.name : username}
-                  </h1>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <h1
+                      className={`text-base sm:text-lg normal-case tracking-normal truncate ${
+                        manual ? 'text-accent-orange' : 'text-bone'
+                      }`}
+                    >
+                      {manual ? manual.name : username}
+                    </h1>
+                    {isMatricaUser && roleIds.length > 0 && (
+                      <RoleBadges roleIds={roleIds} className="shrink-0" />
+                    )}
+                  </div>
                   {manual?.subtitle && (
                     <div className="text-[11px] tracking-[0.08em] uppercase text-bone-dim mt-0.5">
                       {manual.subtitle}
@@ -118,6 +136,7 @@ export default function HolderProfile({
               <Stat label="events" value={eventTotal.toLocaleString()} />
             </dl>
             <WalletsList wallets={wallets} />
+            {isMatricaUser && <RoleLadder earned={roleIds} counts={colorCounts} />}
           </>
         ) : (
           // ── Wallet-centric header (no Matrica profile). Today's layout.
@@ -250,5 +269,53 @@ function Stat({ label, value }: { label: string; value: string }) {
       <dt className="text-bone-dim">{label}</dt>
       <dd className="text-bone normal-case tracking-normal tabular-nums mt-0.5">{value}</dd>
     </div>
+  );
+}
+
+/**
+ * Collapsible role-progress list. Shows every role in priority order, with a
+ * ✓ for ones earned and a "need: <emoji>×N" hint for unearned ones. Tucked
+ * inside a <details> so the page header stays tidy.
+ */
+function RoleLadder({ earned, counts }: { earned: string[]; counts: ColorCounts }) {
+  const earnedSet = new Set(earned);
+  const earnedN = earnedSet.size;
+  const totalN = ROLES.length;
+
+  return (
+    <details className="mt-4 group">
+      <summary className="cursor-pointer list-none flex items-center justify-between text-[11px] tracking-[0.08em] uppercase text-bone-dim hover:text-bone transition-colors">
+        <span>
+          Roles{' '}
+          <span className="text-bone tabular-nums">
+            {earnedN}/{totalN}
+          </span>
+        </span>
+        <span className="text-bone-dim group-open:rotate-90 transition-transform">›</span>
+      </summary>
+      <ul className="mt-3 space-y-1.5">
+        {ROLES.map((role) => {
+          const has = earnedSet.has(role.id);
+          const shortfall = has ? [] : shortfallFor(role, counts);
+          return (
+            <li
+              key={role.id}
+              className={`flex flex-wrap items-center gap-2 text-[12px] ${has ? 'text-bone' : 'text-bone-dim'}`}
+            >
+              <span className="w-3 inline-block tabular-nums">{has ? '✓' : '·'}</span>
+              <span className={`leading-none ${role.combo ? 'border border-bone-dim/30 rounded-full px-1.5 py-0.5' : ''}`}>
+                {role.emoji.join('')}
+              </span>
+              <span className="flex-1 min-w-0">{role.label}</span>
+              {!has && shortfall.length > 0 && (
+                <span className="text-[10px] tracking-[0.08em] uppercase text-bone-dim shrink-0">
+                  need {shortfall.map((s) => `${COLOR_EMOJI[s.color]}×${s.need}`).join(' ')}
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </details>
   );
 }

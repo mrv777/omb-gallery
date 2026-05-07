@@ -33,6 +33,7 @@ import { runLoanTick } from '@/lib/loanDetect';
 import { runMagisatFingerprintTick } from '@/lib/magisatFingerprintTick';
 import { runMagicEdenFingerprintTick } from '@/lib/magicEdenFingerprintTick';
 import { runOrdNetFingerprintTick } from '@/lib/ordNetFingerprintTick';
+import { runRolesTick } from '@/lib/rolesStore';
 import { log } from '@/lib/log';
 
 export const dynamic = 'force-dynamic';
@@ -196,6 +197,9 @@ async function handle(req: NextRequest): Promise<NextResponse> {
       case 'ord-net-fp':
         result = await safeOrdNetFp();
         break;
+      case 'roles':
+        result = safeRoles();
+        break;
       case 'auto':
       default: {
         // Matrica is intentionally NOT in 'auto'. Auto runs every 5min;
@@ -221,8 +225,19 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         const satflow = await iterateSatflowCollections(onlyCollection, {});
         const listings = await iterateListingsCollections(onlyCollection, { force: false });
         const loans = await safeLoans();
+        const roles = safeRoles();
         const notify = await safeNotify();
-        result = [ord, magisatFp, magicEdenFp, ordNetFp, ...satflow, ...listings, loans, notify];
+        result = [
+          ord,
+          magisatFp,
+          magicEdenFp,
+          ordNetFp,
+          ...satflow,
+          ...listings,
+          loans,
+          roles,
+          notify,
+        ];
         break;
       }
     }
@@ -365,6 +380,18 @@ async function safeOrdNetFp(): Promise<TickResult> {
     const msg = e instanceof Error ? e.message : String(e);
     log.error('poll/ord-net-fp', 'tick failed', { error: msg });
     return { mode: 'ord-net-fp', error: msg };
+  }
+}
+
+function safeRoles(): TickResult {
+  try {
+    const r = runRolesTick();
+    log.info('poll/roles', 'tick complete', r);
+    return { mode: 'roles', ...r };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    log.error('poll/roles', 'tick failed', { error: msg });
+    return { mode: 'roles', error: msg };
   }
 }
 

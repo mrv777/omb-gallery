@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 28;
+const SCHEMA_VERSION = 29;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -160,6 +160,7 @@ function migrate(db: DB): void {
         upgradeV25ToV26(db);
         upgradeV26ToV27(db);
         upgradeV27ToV28(db);
+        upgradeV28ToV29(db);
       } else {
         initSchemaLatest(db);
       }
@@ -191,6 +192,7 @@ function migrate(db: DB): void {
       if (current < 26) upgradeV25ToV26(db);
       if (current < 27) upgradeV26ToV27(db);
       if (current < 28) upgradeV27ToV28(db);
+      if (current < 29) upgradeV28ToV29(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -441,6 +443,23 @@ function initSchemaLatest(db: DB): void {
       FOREIGN KEY (event_id) REFERENCES events (id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_notify_pending_enqueued ON notify_pending (enqueued_at);
+
+    -- Holder roles (Phase 7). Derived from inscriptions.color counts per
+    -- Matrica user. Recomputed every auto tick after loans finalize. Only
+    -- Matrica-linked users get rows; unlinked wallets are excluded by design
+    -- (link your profile to earn badges). \`rank\` denormalizes the index of
+    -- the role in src/lib/roles.ts ROLES so leaderboard queries can ORDER BY
+    -- rank without an IN-list join. \`earned_at\` is preserved across recomputes
+    -- when the role survives the diff (informational; not currently surfaced).
+    CREATE TABLE IF NOT EXISTS roles_earned (
+      matrica_user_id TEXT    NOT NULL,
+      role_id         TEXT    NOT NULL,
+      rank            INTEGER NOT NULL,
+      earned_at       INTEGER NOT NULL,
+      PRIMARY KEY (matrica_user_id, role_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_roles_earned_role ON roles_earned (role_id);
+    CREATE INDEX IF NOT EXISTS idx_roles_earned_user ON roles_earned (matrica_user_id);
   `);
 }
 
@@ -1352,6 +1371,24 @@ function upgradeV27ToV28(db: DB): void {
     DROP TABLE poll_state;
     ALTER TABLE poll_state_v28 RENAME TO poll_state;
     INSERT OR IGNORE INTO poll_state (stream, collection_slug) VALUES ('ord_net_fp', 'omb');
+  `);
+}
+
+function upgradeV28ToV29(db: DB): void {
+  // Phase 7: holder roles. Pure additive — adds the roles_earned derived
+  // table. The runRolesTick step in the auto poll populates it on the next
+  // tick after deploy; until then queries against it return zero rows
+  // (badges simply don't render).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS roles_earned (
+      matrica_user_id TEXT    NOT NULL,
+      role_id         TEXT    NOT NULL,
+      rank            INTEGER NOT NULL,
+      earned_at       INTEGER NOT NULL,
+      PRIMARY KEY (matrica_user_id, role_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_roles_earned_role ON roles_earned (role_id);
+    CREATE INDEX IF NOT EXISTS idx_roles_earned_user ON roles_earned (matrica_user_id);
   `);
 }
 
