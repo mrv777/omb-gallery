@@ -85,11 +85,11 @@ export async function GET(req: NextRequest) {
   }
 
   const ipKey = clientIpKey(req.headers);
-  const ipCheck = checkAndConsumePerIp(ipKey, PER_IP_PER_MIN, PER_IP_PER_DAY_UNBOUNDED);
+  const ipCheck = checkAndConsumePerIp('upscale', ipKey, PER_IP_PER_MIN, PER_IP_PER_DAY_UNBOUNDED);
   if (!ipCheck.ok) {
     return rateLimitResponse(ipCheck.retryAfterSec, 'per-ip');
   }
-  const globalCheck = checkAndConsumeGlobal(GLOBAL_WINDOW_MS, GLOBAL_LIMIT);
+  const globalCheck = checkAndConsumeGlobal('upscale', GLOBAL_WINDOW_MS, GLOBAL_LIMIT);
   if (!globalCheck.ok) {
     return rateLimitResponse(globalCheck.retryAfterSec, 'global');
   }

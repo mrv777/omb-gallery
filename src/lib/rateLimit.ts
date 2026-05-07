@@ -3,11 +3,16 @@ import 'server-only';
 // In-memory sliding-window counters. Single Hetzner container = one process,
 // so a per-instance Map is adequate. On restart the buckets reset; that's fine
 // — worst case is a brief window of no rate limiting right after a deploy.
+//
+// Bucket keys are namespaced by `feature` so unrelated endpoints (slideshow,
+// upscale, subscribe…) don't share a budget. Without the namespace, slideshow
+// activity counts against upscale's much smaller global cap, and per-IP slots
+// for one feature get consumed by another.
 
 export type RateCheck = { ok: true } | { ok: false; retryAfterSec: number };
 
 const perIp = new Map<string, number[]>();
-let globalEvents: number[] = [];
+const globalEvents = new Map<string, number[]>();
 
 const DAY_MS = 86_400_000;
 const MINUTE_MS = 60_000;
@@ -32,20 +37,27 @@ function sweepExpired(now: number): void {
   });
 }
 
-export function checkAndConsumePerIp(ipKey: string, perMin: number, perDay: number): RateCheck {
+export function checkAndConsumePerIp(
+  feature: string,
+  ipKey: string,
+  perMin: number,
+  perDay: number
+): RateCheck {
   const now = Date.now();
   sweepExpired(now);
 
+  const key = `${feature}:${ipKey}`;
+
   // Saturation fail-closed: if the tracker is full and this is a new key,
   // refuse rather than keep growing. 100k buckets is ~a few MB in practice.
-  if (perIp.size >= MAX_TRACKED_IPS && !perIp.has(ipKey)) {
+  if (perIp.size >= MAX_TRACKED_IPS && !perIp.has(key)) {
     return { ok: false, retryAfterSec: 60 };
   }
 
   const dayAgo = now - DAY_MS;
   const minuteAgo = now - MINUTE_MS;
 
-  const pruned = prune(perIp.get(ipKey) ?? [], dayAgo);
+  const pruned = prune(perIp.get(key) ?? [], dayAgo);
 
   let minuteCount = 0;
   let oldestInMinute = now;
@@ -55,39 +67,45 @@ export function checkAndConsumePerIp(ipKey: string, perMin: number, perDay: numb
     oldestInMinute = pruned[i];
   }
   if (minuteCount >= perMin) {
-    if (pruned.length === 0) perIp.delete(ipKey);
-    else perIp.set(ipKey, pruned);
+    if (pruned.length === 0) perIp.delete(key);
+    else perIp.set(key, pruned);
     return {
       ok: false,
       retryAfterSec: Math.max(1, Math.ceil((oldestInMinute + MINUTE_MS - now) / 1000)),
     };
   }
   if (pruned.length >= perDay) {
-    perIp.set(ipKey, pruned);
+    perIp.set(key, pruned);
     return { ok: false, retryAfterSec: Math.max(1, Math.ceil((pruned[0] + DAY_MS - now) / 1000)) };
   }
   pruned.push(now);
-  perIp.set(ipKey, pruned);
+  perIp.set(key, pruned);
   return { ok: true };
 }
 
-export function checkAndConsumeGlobal(windowMs: number, limit: number): RateCheck {
+export function checkAndConsumeGlobal(
+  feature: string,
+  windowMs: number,
+  limit: number
+): RateCheck {
   const now = Date.now();
   const cutoff = now - windowMs;
-  globalEvents = prune(globalEvents, cutoff);
-  if (globalEvents.length >= limit) {
+  const pruned = prune(globalEvents.get(feature) ?? [], cutoff);
+  if (pruned.length >= limit) {
+    globalEvents.set(feature, pruned);
     return {
       ok: false,
-      retryAfterSec: Math.max(1, Math.ceil((globalEvents[0] + windowMs - now) / 1000)),
+      retryAfterSec: Math.max(1, Math.ceil((pruned[0] + windowMs - now) / 1000)),
     };
   }
-  globalEvents.push(now);
+  pruned.push(now);
+  globalEvents.set(feature, pruned);
   return { ok: true };
 }
 
 // Test / admin helper.
 export function __resetRateLimits(): void {
   perIp.clear();
-  globalEvents = [];
+  globalEvents.clear();
   lastSweep = 0;
 }

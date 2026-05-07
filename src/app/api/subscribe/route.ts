@@ -179,7 +179,7 @@ export async function POST(req: NextRequest) {
   }
 
   // No session — go through the full per-channel onboarding flow.
-  const perIp = checkAndConsumePerIp(ip, PER_MIN, PER_DAY);
+  const perIp = checkAndConsumePerIp('subscribe', ip, PER_MIN, PER_DAY);
   if (!perIp.ok) {
     return new NextResponse(JSON.stringify({ error: 'rate-limited' }), {
       status: 429,

@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
 
   // 2 & 3. Rate limits (reject before spending a Turnstile verify call).
   const ip = clientIpKey(req.headers);
-  const perIp = checkAndConsumePerIp(ip, PER_MIN, PER_DAY);
+  const perIp = checkAndConsumePerIp('slideshow', ip, PER_MIN, PER_DAY);
   if (!perIp.ok) {
     return new NextResponse(JSON.stringify({ error: 'rate-limited' }), {
       status: 429,
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
       },
     });
   }
-  const global = checkAndConsumeGlobal(GLOBAL_WINDOW_MS, GLOBAL_LIMIT);
+  const global = checkAndConsumeGlobal('slideshow', GLOBAL_WINDOW_MS, GLOBAL_LIMIT);
   if (!global.ok) {
     return new NextResponse(JSON.stringify({ error: 'busy' }), {
       status: 429,
