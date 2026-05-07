@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 29;
+const SCHEMA_VERSION = 30;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -161,6 +161,7 @@ function migrate(db: DB): void {
         upgradeV26ToV27(db);
         upgradeV27ToV28(db);
         upgradeV28ToV29(db);
+        upgradeV29ToV30(db);
       } else {
         initSchemaLatest(db);
       }
@@ -193,6 +194,7 @@ function migrate(db: DB): void {
       if (current < 27) upgradeV26ToV27(db);
       if (current < 28) upgradeV27ToV28(db);
       if (current < 29) upgradeV28ToV29(db);
+      if (current < 30) upgradeV29ToV30(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -318,7 +320,7 @@ function initSchemaLatest(db: DB): void {
     -- one batch poll covers every inscription regardless of collection. The
     -- 'matrica' stream is also collection-agnostic — one row keyed to 'omb'.
     CREATE TABLE IF NOT EXISTS poll_state (
-      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica','notify','loans','magisat_fp','magic_eden_fp','ord_net_fp')),
+      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica','notify','loans','magisat_fp','magic_eden_fp','ord_net_fp','cluster')),
       collection_slug           TEXT NOT NULL REFERENCES collections (slug),
       last_cursor               TEXT,
       last_run_at               INTEGER,
@@ -338,7 +340,8 @@ function initSchemaLatest(db: DB): void {
       ('loans', 'omb'),
       ('magisat_fp', 'omb'),
       ('magic_eden_fp', 'omb'),
-      ('ord_net_fp', 'omb');
+      ('ord_net_fp', 'omb'),
+      ('cluster', 'omb');
 
     -- Matrica wallet-linking (Phase 5). matrica_users holds one row per
     -- distinct Matrica user we've seen (across any wallet); wallet_links
@@ -460,6 +463,52 @@ function initSchemaLatest(db: DB): void {
     );
     CREATE INDEX IF NOT EXISTS idx_roles_earned_role ON roles_earned (role_id);
     CREATE INDEX IF NOT EXISTS idx_roles_earned_user ON roles_earned (matrica_user_id);
+
+    -- Phase 8: on-chain wallet clustering. Pairs stored in canonical order
+    -- (addr_a < addr_b) so each unordered pair has exactly one row. Raw
+    -- counts (cih_count, self_xfer_count) are preserved separately from
+    -- the derived confidence so post-hoc threshold tweaks don't require
+    -- a full recompute. evidence_json is capped at the most recent N items
+    -- (see src/lib/cluster.ts EVIDENCE_CAP).
+    CREATE TABLE IF NOT EXISTS wallet_cluster_edges (
+      addr_a          TEXT    NOT NULL,
+      addr_b          TEXT    NOT NULL,
+      confidence      INTEGER NOT NULL,
+      cih_count       INTEGER NOT NULL DEFAULT 0,
+      -- Total self-xfer count = self_xfer_ab + self_xfer_ba. Kept as a
+      -- denormalized column so simple readers don't need to compute it.
+      self_xfer_count INTEGER NOT NULL DEFAULT 0,
+      -- Directional self-transfer counts. self_xfer_ab is the count of
+      -- transferred events where old_owner = addr_a → new_owner = addr_b
+      -- (and addr_a < addr_b by canonical-pair invariant). Bidirectional
+      -- flow (both columns nonzero) is a much stronger same-person signal
+      -- than one-way flow — exchanges and custodial endpoints typically
+      -- only receive, never reciprocate. The confidence formula in
+      -- src/lib/cluster.ts gates the strongest tier on min(ab, ba) ≥ 1.
+      self_xfer_ab    INTEGER NOT NULL DEFAULT 0,
+      self_xfer_ba    INTEGER NOT NULL DEFAULT 0,
+      evidence_json   TEXT    NOT NULL DEFAULT '[]',
+      first_seen_at   INTEGER NOT NULL,
+      last_seen_at    INTEGER NOT NULL,
+      PRIMARY KEY (addr_a, addr_b),
+      CHECK (addr_a < addr_b)
+    );
+    CREATE INDEX IF NOT EXISTS idx_cluster_edges_a    ON wallet_cluster_edges (addr_a, confidence DESC);
+    CREATE INDEX IF NOT EXISTS idx_cluster_edges_b    ON wallet_cluster_edges (addr_b, confidence DESC);
+    CREATE INDEX IF NOT EXISTS idx_cluster_edges_conf ON wallet_cluster_edges (confidence DESC);
+
+    -- CIH-blacklist: addresses that co-input alongside unrelated parties
+    -- (marketplace fee splices, Liquidium loan originations, mint
+    -- distributions) plus auto-detected high-degree nodes (≥N distinct
+    -- counterparties in a window). 'manual' is reserved for operator-set
+    -- excludes that don't fit the other categories.
+    CREATE TABLE IF NOT EXISTS cluster_blacklist (
+      address  TEXT PRIMARY KEY,
+      reason   TEXT NOT NULL CHECK (reason IN ('marketplace','liquidium','mint','auto-high-degree','manual')),
+      degree   INTEGER,
+      added_at INTEGER NOT NULL,
+      notes    TEXT
+    );
   `);
 }
 
@@ -1389,6 +1438,64 @@ function upgradeV28ToV29(db: DB): void {
     );
     CREATE INDEX IF NOT EXISTS idx_roles_earned_role ON roles_earned (role_id);
     CREATE INDEX IF NOT EXISTS idx_roles_earned_user ON roles_earned (matrica_user_id);
+  `);
+}
+
+function upgradeV29ToV30(db: DB): void {
+  // Phase 8: on-chain wallet clustering. Adds `wallet_cluster_edges`
+  // (undirected pairs in canonical order with a confidence score and a
+  // capped JSON evidence trail), `cluster_blacklist` (addresses that
+  // multiplex unrelated parties — marketplace fee outputs, Liquidium
+  // pubkey, mint wallets, plus auto-detected high-degree nodes), and
+  // adds the 'cluster' poll_state stream so the live tick can advance
+  // an event-id cursor without re-walking history. Existing poll_state
+  // rows are preserved via copy-and-swap (sole reason we touch that
+  // table — confidence stays out of it).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS wallet_cluster_edges (
+      addr_a          TEXT    NOT NULL,
+      addr_b          TEXT    NOT NULL,
+      -- Confidence in [0,10000]; readers divide by 10000.
+      confidence      INTEGER NOT NULL,
+      cih_count       INTEGER NOT NULL DEFAULT 0,
+      self_xfer_count INTEGER NOT NULL DEFAULT 0,
+      self_xfer_ab    INTEGER NOT NULL DEFAULT 0,
+      self_xfer_ba    INTEGER NOT NULL DEFAULT 0,
+      -- Capped JSON array of {type,txid,ts,direction?}. Most-recent N retained.
+      evidence_json   TEXT    NOT NULL DEFAULT '[]',
+      first_seen_at   INTEGER NOT NULL,
+      last_seen_at    INTEGER NOT NULL,
+      PRIMARY KEY (addr_a, addr_b),
+      CHECK (addr_a < addr_b)
+    );
+    CREATE INDEX IF NOT EXISTS idx_cluster_edges_a    ON wallet_cluster_edges (addr_a, confidence DESC);
+    CREATE INDEX IF NOT EXISTS idx_cluster_edges_b    ON wallet_cluster_edges (addr_b, confidence DESC);
+    CREATE INDEX IF NOT EXISTS idx_cluster_edges_conf ON wallet_cluster_edges (confidence DESC);
+
+    CREATE TABLE IF NOT EXISTS cluster_blacklist (
+      address  TEXT PRIMARY KEY,
+      reason   TEXT NOT NULL CHECK (reason IN ('marketplace','liquidium','mint','auto-high-degree','manual')),
+      degree   INTEGER,
+      added_at INTEGER NOT NULL,
+      notes    TEXT
+    );
+
+    CREATE TABLE poll_state_v30 (
+      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica','notify','loans','magisat_fp','magic_eden_fp','ord_net_fp','cluster')),
+      collection_slug           TEXT NOT NULL REFERENCES collections (slug),
+      last_cursor               TEXT,
+      last_run_at               INTEGER,
+      last_status               TEXT,
+      last_event_count          INTEGER,
+      is_backfilling            INTEGER NOT NULL DEFAULT 0,
+      last_known_height         INTEGER,
+      backfill_unresolved_seen  INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (stream, collection_slug)
+    );
+    INSERT INTO poll_state_v30 SELECT * FROM poll_state;
+    DROP TABLE poll_state;
+    ALTER TABLE poll_state_v30 RENAME TO poll_state;
+    INSERT OR IGNORE INTO poll_state (stream, collection_slug) VALUES ('cluster', 'omb');
   `);
 }
 

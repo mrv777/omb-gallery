@@ -34,6 +34,7 @@ import { runMagisatFingerprintTick } from '@/lib/magisatFingerprintTick';
 import { runMagicEdenFingerprintTick } from '@/lib/magicEdenFingerprintTick';
 import { runOrdNetFingerprintTick } from '@/lib/ordNetFingerprintTick';
 import { runRolesTick } from '@/lib/rolesStore';
+import { runClusterTick } from '@/lib/clusterStore';
 import { log } from '@/lib/log';
 
 export const dynamic = 'force-dynamic';
@@ -200,6 +201,9 @@ async function handle(req: NextRequest): Promise<NextResponse> {
       case 'roles':
         result = safeRoles();
         break;
+      case 'cluster':
+        result = await safeCluster();
+        break;
       case 'auto':
       default: {
         // Matrica is intentionally NOT in 'auto'. Auto runs every 5min;
@@ -226,6 +230,11 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         const listings = await iterateListingsCollections(onlyCollection, { force: false });
         const loans = await safeLoans();
         const roles = safeRoles();
+        // Clustering walks events past its cursor and bumps wallet_cluster_edges.
+        // Runs after roles so role badges reflect Matrica-only linkage; runs
+        // before notify because cluster runs are read-only from notify's
+        // perspective and ordering doesn't affect notification correctness.
+        const cluster = await safeCluster();
         const notify = await safeNotify();
         result = [
           ord,
@@ -236,6 +245,7 @@ async function handle(req: NextRequest): Promise<NextResponse> {
           ...listings,
           loans,
           roles,
+          cluster,
           notify,
         ];
         break;
@@ -392,6 +402,16 @@ function safeRoles(): TickResult {
     const msg = e instanceof Error ? e.message : String(e);
     log.error('poll/roles', 'tick failed', { error: msg });
     return { mode: 'roles', error: msg };
+  }
+}
+
+async function safeCluster(): Promise<TickResult> {
+  try {
+    return (await runClusterTick()) as TickResult;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    log.error('poll/cluster', 'tick failed', { error: msg });
+    return { mode: 'cluster', error: msg };
   }
 }
 

@@ -4,6 +4,8 @@ import type { HolderColorHighlight } from '@/lib/holderEvents';
 import { addressLink, ordNetWalletLink, truncateAddr } from '@/lib/format';
 import { lookupWalletLabel } from '@/lib/walletLabels';
 import { WalletsList } from './WalletsList';
+import LikelyLinkedWallets from './LikelyLinkedWallets';
+import type { LikelyLinkedRow } from '@/lib/clusterStore';
 import SafeImg from '@/components/SafeImg';
 import ColorPortfolioBar from '@/components/Charts/ColorPortfolioBar';
 import BagSizeOverTime from '@/components/Charts/BagSizeOverTime';
@@ -48,6 +50,9 @@ type Props = {
   colorCounts: ColorCounts;
   /** Whether the holder is Matrica-linked. Gates the badges + ladder UI. */
   isMatricaUser: boolean;
+  /** On-chain-inferred peers not already in `wallets`. Empty when the
+   * cluster pipeline hasn't run or no edges meet the public threshold. */
+  likelyLinked: LikelyLinkedRow[];
 };
 
 export default function HolderProfile({
@@ -66,6 +71,7 @@ export default function HolderProfile({
   roleIds,
   colorCounts,
   isMatricaUser,
+  likelyLinked,
 }: Props) {
   // Manual identity label (treasury etc.). Looked up against any wallet in
   // the aggregated set so it's stable regardless of which sibling wallet
@@ -247,6 +253,11 @@ export default function HolderProfile({
           </div>
         </div>
       )}
+
+      {/* Inferred-links — heuristic only, surfaced separately from
+          Matrica-confirmed wallets. Renders nothing if no peers cleared
+          the public threshold (CLUSTER_THRESHOLD in cluster.ts). */}
+      <LikelyLinkedWallets rows={likelyLinked} />
 
       {/* Activity timeline — events involving this address (or any sibling
           wallet, when aggregated) on either side. The list is a client

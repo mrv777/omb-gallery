@@ -9,6 +9,8 @@ import {
   type WalletLinkRow,
 } from '@/lib/db';
 import { getRolesForUser, getColorCountsForUser } from '@/lib/rolesStore';
+import { getLikelyLinkedForWallets } from '@/lib/clusterStore';
+import { CLUSTER_THRESHOLD } from '@/lib/cluster';
 import { emptyCounts } from '@/lib/roles';
 import { truncateAddr } from '@/lib/format';
 import { lookupInscription } from '@/lib/inscriptionLookup';
@@ -164,6 +166,12 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
   const roleIds = matricaUserId ? getRolesForUser(matricaUserId) : [];
   const colorCounts = matricaUserId ? getColorCountsForUser(matricaUserId) : emptyCounts();
 
+  // On-chain inferred peers, with Matrica-confirmed siblings already
+  // excluded. Threshold is the conservative public default — at our
+  // calibration this matches Matrica with 100% precision in the labeled
+  // subset (low recall, see src/lib/cluster.ts CLUSTER_THRESHOLD).
+  const likelyLinked = getLikelyLinkedForWallets(wallets, CLUSTER_THRESHOLD);
+
   // Show a real 404 only when nothing in the DB references this address —
   // a wallet that emptied out (no current holdings but has past events)
   // should still render so users can see the activity. For aggregated users,
@@ -190,6 +198,7 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
         roleIds={roleIds}
         colorCounts={colorCounts}
         isMatricaUser={!!matricaUserId}
+        likelyLinked={likelyLinked}
       />
     </SubpageShell>
   );
