@@ -16,10 +16,15 @@ Two production surfaces depend on it:
    never silently re-keys authoritative linkage. Roles stay Matrica-
    only by design (preventing a heuristic match from gaming the catalog).
 2. **"Likely linked wallets" panel** on holder profiles
-   (`getLikelyLinkedForWallets` at `CLUSTER_THRESHOLD = 9500`). Shows
+   (`getLikelyLinkedForWallets` at `CLUSTER_THRESHOLD = 9900` —
+   intentionally aligned with `IDENTITY_FOLD_THRESHOLD`). Shows
    on-chain-only peer suggestions next to a user's Matrica-confirmed
-   siblings. Uses the same edge table but applies a display-time
-   filter to suppress the cross-trader pattern (see §5).
+   siblings. Below 9900 the heuristic mixes in cross-trader pairs
+   (active P2P trading partners — different humans whose on-chain
+   shape resembles consolidation) and we observed those dominating
+   the 95–98% tier on real holder pages. The display-time filter
+   (`isCrossTraderEdge` — see §5) is kept as defense-in-depth in case
+   the threshold is lowered later for a forensics surface.
 
 It is read by inscription / holder pages and by the activity feed's
 username resolver. It does NOT drive notification fan-out — Matrica is

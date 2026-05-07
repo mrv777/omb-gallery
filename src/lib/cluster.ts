@@ -274,25 +274,31 @@ export function confidenceFromCounts(c: EdgeCounts): number {
 }
 
 /**
- * Default public-display threshold. 9500 = 0.95. After the auto-shell
- * reclassification + direction-aware ladder, real precision against
- * claimed-Matrica-vs-claimed-Matrica pairs is ~89% at this band
- * (1 real FP / 9 known) and ~82% at 9000. The bulk of pairs at 9500
- * have 2+ distinct CIH txs between them — strong on-chain evidence
- * Matrica simply doesn't have data for. Forensics surfaces (future
- * route) can pass a lower minConfidence to expose more.
+ * Default public-display threshold. Aligned with IDENTITY_FOLD_THRESHOLD
+ * (both 9900) — peers shown in the holder-page "likely linked" panel
+ * are exactly the peers folded into the leaderboard cluster. Below
+ * 9900 the heuristic mixes in too many cross-trader pairs (active P2P
+ * trading partners, e.g. ApeSoda↔goot) where the on-chain shape
+ * resembles consolidation but the wallets are different humans.
+ *
+ * History: started at 9500 (~94% precision but ~6% cross-trader FPs
+ * on display) — moved to 9900 after observing the 97% tier was
+ * dominated by cross-trader noise on real holder profiles. Forensics
+ * surfaces (future) can pass a lower minConfidence to expose more
+ * candidates.
  */
-export const CLUSTER_THRESHOLD = 9500;
+export const CLUSTER_THRESHOLD = 9900;
 
 /**
- * Stricter threshold at which on-chain inference is treated as identity-
- * level — peers at this level are folded into holdings aggregation and
- * leaderboards alongside Matrica-confirmed siblings. Higher than
- * CLUSTER_THRESHOLD (which only governs whether peers are *displayed* in
- * the advisory section). At calibration: precision against Matrica
- * ground-truth is ~89% at 9500 and rises to ~95%+ at 9900 (counting
- * known auto-shell wins as TPs). Keep this as the gate for any change
- * that re-keys top-counts; if you raise it, also re-run cluster_anchors.
+ * Threshold at which on-chain inference is treated as identity-level —
+ * peers at this level are folded into holdings aggregation and
+ * leaderboards alongside Matrica-confirmed siblings, AND surfaced in
+ * the holder-page "likely linked" panel (CLUSTER_THRESHOLD is the
+ * same value — see history note there).
+ *
+ * Calibration against Matrica ground truth (May 2026): 88% precision
+ * (counting known auto-shell wins as TPs) with the round-trip-aware
+ * B1 backoff filtering most cross-trader noise.
  *
  * Roles remain Matrica-only by design — promoting a heuristic match to
  * a Matrica role would let an attacker game the role catalog. The fold
