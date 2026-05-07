@@ -93,6 +93,6 @@ function loadInitialActivity(color: ColorFilter): InitialActivity {
           is_backfilling: pollRow.is_backfilling === 1,
         }
       : null,
-    matrica: matricaProfilesForEvents(events),
+    matrica: matricaProfilesForEvents(events, { includeInferred: true }),
   };
 }

@@ -113,7 +113,7 @@ export async function GET(req: NextRequest) {
             is_backfilling: poll.is_backfilling === 1,
           }
         : null,
-      matrica: matricaProfilesForEvents(events),
+      matrica: matricaProfilesForEvents(events, { includeInferred: true }),
     },
     headers ? { headers } : undefined
   );

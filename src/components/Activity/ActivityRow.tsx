@@ -245,13 +245,30 @@ function OwnerLink({ addr, matrica }: { addr: string | null; matrica: ApiMatrica
   const profile = matrica[addr];
   const username =
     !manual && profile?.username && !looksLikeAddress(profile.username) ? profile.username : null;
+  const inferred = !manual && username && profile?.inferred === true;
+  // Tooltip discloses the heuristic so users hovering an inferred username
+  // can tell it's not a direct Matrica claim. The dot is the at-a-glance
+  // affordance; the tooltip is the explanation.
+  const tooltipBody = manual
+    ? `${manual.name} — ${addr}`
+    : inferred
+      ? `${addr}\non-chain inferred to be ${username} (≥99% confidence, not Matrica-confirmed)`
+      : addr;
   return (
-    <Tooltip content={manual ? `${manual.name} — ${addr}` : addr}>
-      <Link href={`/holder/${addr}`} prefetch={false} className="hover:text-accent-orange truncate">
+    <Tooltip content={tooltipBody}>
+      <Link href={`/holder/${addr}`} prefetch={false} className="hover:text-accent-orange truncate inline-flex items-baseline gap-1">
         {manual ? (
           <span className="text-accent-orange normal-case tracking-normal">{manual.name}</span>
         ) : username ? (
-          <span className="text-bone normal-case tracking-normal">{username}</span>
+          <>
+            {inferred ? (
+              <span
+                aria-label="on-chain inferred"
+                className="inline-block w-1 h-1 rounded-full bg-bone-dim shrink-0 self-center"
+              />
+            ) : null}
+            <span className="text-bone normal-case tracking-normal">{username}</span>
+          </>
         ) : (
           truncateAddr(addr)
         )}

@@ -1783,6 +1783,7 @@ type Stmts = {
   getWalletLink: ReturnType<DB['prepare']>;
   getWalletsForUser: ReturnType<DB['prepare']>;
   getMatricaProfilesForAddrs: ReturnType<DB['prepare']>;
+  getMatricaProfilesForAddrsWithInferred: ReturnType<DB['prepare']>;
   topHoldersGrouped: ReturnType<DB['prepare']>;
   countHolderIdentities: ReturnType<DB['prepare']>;
   // charts
@@ -2735,11 +2736,41 @@ export function getStmts(): Stmts {
     // addresses. Used by /api/activity and the activity SSR pass to overlay
     // @username on event rows. json_each(?) lets one prepared statement
     // handle a dynamic IN-list — pass JSON.stringify(addrs).
+    //
+    // Strict variant: only direct wl.matrica_user_id matches. Used by the
+    // notifications path where heuristic merges would risk misclassifying
+    // an "internal transfer" — the strict guarantee is load-bearing for
+    // delivery correctness, so it intentionally ignores cluster_anchors.
     getMatricaProfilesForAddrs: db.prepare(`
       SELECT wl.wallet_addr, wl.matrica_user_id AS user_id, mu.username, mu.avatar_url
       FROM wallet_links wl
       JOIN matrica_users mu ON mu.user_id = wl.matrica_user_id
       WHERE wl.wallet_addr IN (SELECT value FROM json_each(@addrs_json))
+    `),
+
+    // Permissive variant: also resolves via cluster_anchors so wallets that
+    // are heuristically folded into a Matrica identity (≥99% confidence)
+    // surface the right username. The `inferred` column distinguishes the
+    // two so UI layers can mark it visually. Direct Matrica wins when both
+    // exist, matching the leaderboard COALESCE chain.
+    //
+    // Used by /api/activity + /activity SSR — the high-visibility surface
+    // where the cluster work pays off most. NOT used by notifications.
+    getMatricaProfilesForAddrsWithInferred: db.prepare(`
+      SELECT
+        addr.value AS wallet_addr,
+        COALESCE(wl.matrica_user_id, ca.matrica_user_id)        AS user_id,
+        COALESCE(mu_d.username,      mu_c.username)             AS username,
+        COALESCE(mu_d.avatar_url,    mu_c.avatar_url)           AS avatar_url,
+        CASE WHEN wl.matrica_user_id IS NOT NULL THEN 0 ELSE 1 END AS inferred
+      FROM json_each(@addrs_json) addr
+      LEFT JOIN wallet_links     wl   ON wl.wallet_addr = addr.value
+                                     AND wl.matrica_user_id IS NOT NULL
+      LEFT JOIN matrica_users    mu_d ON mu_d.user_id   = wl.matrica_user_id
+      LEFT JOIN cluster_anchors  ca   ON ca.wallet_addr = addr.value
+                                     AND ca.matrica_user_id IS NOT NULL
+      LEFT JOIN matrica_users    mu_c ON mu_c.user_id   = ca.matrica_user_id
+      WHERE COALESCE(wl.matrica_user_id, ca.matrica_user_id) IS NOT NULL
     `),
 
     // Reader: top holders, collapsed by Matrica user when one is known,

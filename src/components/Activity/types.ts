@@ -23,10 +23,19 @@ export type ApiEvent = {
  * wallets that have a non-default Matrica profile. The map is restricted to
  * addresses appearing in the events on this page so payload stays small.
  * `user_id` lets the UI detect transfers between two wallets owned by the
- * same Matrica user (rendered as "internal"). */
+ * same Matrica user (rendered as "internal").
+ *
+ * `inferred` is set when the wallet was matched via cluster_anchors (≥99%
+ * on-chain confidence) rather than a direct Matrica link. UI marks these
+ * subtly so heuristic folds don't read as authoritative. */
 export type ApiMatricaMap = Record<
   string,
-  { user_id: string; username: string | null; avatar_url: string | null }
+  {
+    user_id: string;
+    username: string | null;
+    avatar_url: string | null;
+    inferred?: boolean;
+  }
 >;
 
 export type ApiActivityResponse = {
