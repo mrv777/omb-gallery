@@ -362,7 +362,11 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
         return allIds;
       }
       const dead = r.error.kind === 'blocked';
-      recordDeliveryFailure(bucket.channel, bucket.channelTarget, dead);
+      const retryable =
+        r.error.kind === 'config' || r.error.kind === 'rate-limit' || r.error.kind === 'network';
+      if (!retryable) {
+        recordDeliveryFailure(bucket.channel, bucket.channelTarget, dead);
+      }
       log.warn('notify/telegram', 'send failed', {
         target: hashTarget(bucket.channelTarget),
         error: r.error,
@@ -376,7 +380,13 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
       return allIds;
     }
     const dead = r.error.kind === 'dead' || r.error.kind === 'invalid-url';
-    recordDeliveryFailure(bucket.channel, bucket.channelTarget, dead);
+    const retryable =
+      r.error.kind === 'rate-limit' ||
+      r.error.kind === 'network' ||
+      (r.error.kind === 'http' && r.error.status >= 500);
+    if (!retryable) {
+      recordDeliveryFailure(bucket.channel, bucket.channelTarget, dead);
+    }
     log.warn('notify/discord', 'post failed', {
       target: hashTarget(bucket.channelTarget),
       error: r.error,
