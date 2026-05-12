@@ -29,6 +29,102 @@ function inscriptionId(src: string): string {
   return file.replace(/\.[^./]+$/, '');
 }
 
+function neighborLabel(direction: 'prev' | 'next', image: GalleryImage | null): string {
+  if (!image) return direction === 'prev' ? 'No previous OMB' : 'No next OMB';
+  const label = direction === 'prev' ? 'Previous' : 'Next';
+  return `${label} OMB #${inscriptionId(image.src)}`;
+}
+
+interface NeighborTileProps {
+  direction: 'prev' | 'next';
+  image: GalleryImage | null;
+  onClick: () => void;
+}
+
+function NeighborTile({ direction, image, onClick }: NeighborTileProps) {
+  const isPrev = direction === 'prev';
+  const id = image ? inscriptionId(image.src) : '';
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!image}
+      className={`group flex h-16 min-w-0 items-center gap-2 border border-ink-2 bg-ink-0 px-2 font-mono uppercase transition-colors sm:h-20 sm:gap-3 sm:px-3 ${
+        isPrev ? 'justify-start text-left' : 'justify-end text-right'
+      } ${
+        image
+          ? 'text-bone-dim hover:border-bone-dim/60 hover:bg-ink-1 hover:text-bone'
+          : 'cursor-default opacity-30'
+      }`}
+      aria-label={neighborLabel(direction, image)}
+    >
+      {image ? (
+        <>
+          {isPrev && (
+            <Image
+              src={image.thumbnail}
+              alt=""
+              width={64}
+              height={64}
+              className="h-12 w-12 shrink-0 border border-ink-2 object-cover sm:h-14 sm:w-14"
+            />
+          )}
+          <span className="hidden min-w-0 flex-col sm:flex">
+            <span className="text-[10px] tracking-[0.18em] text-bone-dim">
+              {isPrev ? 'Previous' : 'Next'}
+            </span>
+            <span className="truncate text-xs tracking-[0.12em] text-bone">#{id}</span>
+          </span>
+          {!isPrev && (
+            <Image
+              src={image.thumbnail}
+              alt=""
+              width={64}
+              height={64}
+              className="h-12 w-12 shrink-0 border border-ink-2 object-cover sm:h-14 sm:w-14"
+            />
+          )}
+        </>
+      ) : (
+        <span className="hidden text-[10px] tracking-[0.18em] sm:inline">Only OMB</span>
+      )}
+    </button>
+  );
+}
+
+interface CurrentTileProps {
+  image: GalleryImage;
+  currentIndex: number;
+  total: number;
+}
+
+function CurrentTile({ image, currentIndex, total }: CurrentTileProps) {
+  const id = inscriptionId(image.src);
+
+  return (
+    <div
+      className="flex h-16 min-w-0 items-center justify-center gap-2 border border-bone-dim/60 bg-ink-1 px-2 font-mono uppercase text-bone sm:h-20 sm:gap-3 sm:px-3"
+      aria-current="true"
+    >
+      <Image
+        src={image.thumbnail}
+        alt={`Current OMB #${id}`}
+        width={72}
+        height={72}
+        className="h-12 w-12 shrink-0 border border-bone-dim/40 object-cover sm:h-14 sm:w-14"
+      />
+      <span className="min-w-0 text-center sm:text-left">
+        <span className="block text-[10px] tracking-[0.18em] text-bone-dim">Current</span>
+        <span className="block truncate text-xs tracking-[0.12em]">#{id}</span>
+        <span className="block text-[10px] tracking-[0.14em] text-bone-dim tabular-nums">
+          {currentIndex + 1}/{total}
+        </span>
+      </span>
+    </div>
+  );
+}
+
 const ImageModal = memo(function ImageModal({
   onClose,
   currentImage,
@@ -73,6 +169,11 @@ const ImageModal = memo(function ImageModal({
   const favorited = isFavorite(image.src);
   const id = inscriptionId(image.src);
   const colorLabel = COLOR_LABELS[image.color] ?? image.color.toUpperCase();
+  const canNavigate = images.length > 1;
+  const previousImage = canNavigate
+    ? images[(currentImage - 1 + images.length) % images.length]
+    : null;
+  const nextImage = canNavigate ? images[(currentImage + 1) % images.length] : null;
 
   const onTouchStart = (e: React.TouchEvent) => {
     const t = e.touches[0];
@@ -172,55 +273,75 @@ const ImageModal = memo(function ImageModal({
 
       {/* Image + side nav */}
       <div
-        className="flex-1 flex items-center justify-center min-h-0 px-4 sm:px-12 relative"
+        className="flex-1 flex flex-col min-h-0 px-4 sm:px-12 relative"
         onClick={e => e.stopPropagation()}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
-        <button
-          type="button"
-          onClick={onPrev}
-          className="absolute left-1 sm:left-4 top-1/2 -translate-y-1/2 h-12 w-12 flex items-center justify-center text-bone-dim hover:text-bone font-mono text-3xl leading-none z-10 transition-colors"
-          aria-label="Previous"
-        >
-          ←
-        </button>
+        <div className="relative flex-1 min-h-0 flex items-center justify-center">
+          <button
+            type="button"
+            onClick={onPrev}
+            disabled={!canNavigate}
+            className="absolute left-[-2rem] top-1/2 -translate-y-1/2 hidden h-12 w-12 items-center justify-center text-bone-dim hover:text-bone disabled:opacity-30 disabled:hover:text-bone-dim font-mono text-3xl leading-none z-10 transition-colors sm:flex"
+            aria-label="Previous"
+          >
+            ←
+          </button>
 
-        <Image
-          src={image.src}
-          alt={image.caption || `Inscription ${id}`}
-          className="object-contain select-none"
-          width={1200}
-          height={1200}
-          style={{
-            maxWidth: 'min(92vw, 1200px)',
-            maxHeight: '100%',
-            width: 'auto',
-            height: 'auto',
-          }}
-          priority
-        />
+          <div className="flex h-full min-h-0 flex-col items-center justify-center gap-5 sm:gap-7">
+            <Image
+              src={image.src}
+              alt={image.caption || `Inscription ${id}`}
+              className="object-contain select-none"
+              width={1200}
+              height={1200}
+              style={{
+                maxWidth: 'min(92vw, 1200px)',
+                maxHeight: 'calc(100% - 4.5rem)',
+                width: 'auto',
+                height: 'auto',
+              }}
+              priority
+            />
 
-        <button
-          type="button"
-          onClick={onNext}
-          className="absolute right-1 sm:right-4 top-1/2 -translate-y-1/2 h-12 w-12 flex items-center justify-center text-bone-dim hover:text-bone font-mono text-3xl leading-none z-10 transition-colors"
-          aria-label="Next"
-        >
-          →
-        </button>
+            <div className="shrink-0 px-2 font-mono text-center text-[11px] tracking-[0.08em] leading-relaxed text-bone-dim">
+              <Tooltip content={image.caption} side="top" align="center">
+                <div
+                  className="mx-auto max-w-3xl text-bone uppercase line-clamp-2"
+                  style={{ minHeight: '2lh' }}
+                >
+                  {image.caption ? `"${image.caption}"` : ''}
+                </div>
+              </Tooltip>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onNext}
+            disabled={!canNavigate}
+            className="absolute right-[-2rem] top-1/2 -translate-y-1/2 hidden h-12 w-12 items-center justify-center text-bone-dim hover:text-bone disabled:opacity-30 disabled:hover:text-bone-dim font-mono text-3xl leading-none z-10 transition-colors sm:flex"
+            aria-label="Next"
+          >
+            →
+          </button>
+        </div>
       </div>
 
-      {/* Wall label — fixed height so the image doesn't shift between pieces */}
+      {/* Neighbor strip */}
       <div
-        className="px-4 sm:px-6 py-4 font-mono text-[11px] tracking-[0.08em] leading-relaxed text-bone-dim shrink-0"
+        className="shrink-0 border-t border-ink-2 bg-ink-0 px-2 py-2 sm:px-6 sm:py-3"
         onClick={e => e.stopPropagation()}
       >
-        <Tooltip content={image.caption} side="top" align="start">
-          <div className="text-bone uppercase max-w-3xl line-clamp-2" style={{ minHeight: '2lh' }}>
-            {image.caption ? `"${image.caption}"` : ''}
-          </div>
-        </Tooltip>
+        <nav
+          className="mx-auto grid max-w-5xl grid-cols-[minmax(0,1fr)_minmax(112px,150px)_minmax(0,1fr)] items-stretch gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(170px,210px)_minmax(0,1fr)] sm:gap-4"
+          aria-label="OMB navigation"
+        >
+          <NeighborTile direction="prev" image={previousImage} onClick={onPrev} />
+          <CurrentTile image={image} currentIndex={currentImage} total={images.length} />
+          <NeighborTile direction="next" image={nextImage} onClick={onNext} />
+        </nav>
       </div>
     </div>
   );
