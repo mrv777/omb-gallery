@@ -216,8 +216,20 @@ function sessionResponseToState(
 function walletErrorMessage(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err);
   const message = raw.trim() || 'Wallet connection failed';
+  if (
+    /wallet selection was cancelled|failed to select the provider|user may have cancelled/i.test(
+      message
+    )
+  ) {
+    return 'Wallet selection was cancelled. Choose Xverse or another Bitcoin wallet to continue.';
+  }
+  if (
+    /no bitcoin wallet|no wallet provider|no wallets detected|no wallet was found/i.test(message)
+  ) {
+    return 'No Bitcoin wallet was found. Install or enable Xverse, then try again.';
+  }
   if (/access denied|user rejected|user denied|rejected/i.test(message)) {
-    return 'Wallet connection was denied. Approve access in your wallet and try again.';
+    return 'Wallet access was blocked by the selected wallet. Unlock it or choose Xverse, then try again.';
   }
   return message;
 }
