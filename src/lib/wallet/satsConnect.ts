@@ -1,6 +1,6 @@
 'use client';
 
-import Wallet, { AddressPurpose, BitcoinNetworkType, MessageSigningProtocols } from 'sats-connect';
+import Wallet, { AddressPurpose, MessageSigningProtocols } from 'sats-connect';
 
 export type ConnectedWallet = {
   ordAddr: string;
@@ -25,38 +25,6 @@ const CONNECT_MESSAGE = 'Connect to OMB Wiki marketplace.';
 const ADDRESS_PURPOSES = [AddressPurpose.Ordinals, AddressPurpose.Payment];
 
 export async function connectSatsWallet(): Promise<ConnectedWallet> {
-  await selectWalletProvider();
-  try {
-    return await connectWithWalletConnect();
-  } catch (err) {
-    if (!isUnsupportedMethodError(err)) throw err;
-    return connectWithAccounts();
-  }
-}
-
-async function selectWalletProvider() {
-  try {
-    await Wallet.selectProvider();
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (/no wallets detected|no wallet/i.test(message)) {
-      throw new Error('No Bitcoin wallet was found. Install or enable Xverse, then try again.');
-    }
-    throw new Error('Wallet selection was cancelled.');
-  }
-}
-
-async function connectWithWalletConnect(): Promise<ConnectedWallet> {
-  const response = await Wallet.request('wallet_connect', {
-    addresses: ADDRESS_PURPOSES,
-    message: CONNECT_MESSAGE,
-    network: BitcoinNetworkType.Mainnet,
-  });
-  if (response.status === 'error') throw walletResponseError(response.error);
-  return walletFromAddresses(response.result.addresses as SatsAddress[]);
-}
-
-async function connectWithAccounts(): Promise<ConnectedWallet> {
   const response = await Wallet.request('getAccounts', {
     purposes: ADDRESS_PURPOSES,
     message: CONNECT_MESSAGE,
@@ -114,11 +82,4 @@ export function mockConnectedWallet(): ConnectedWallet {
 
 function walletResponseError(error: WalletRpcError): Error {
   return new Error(error.message || 'Wallet request failed');
-}
-
-function isUnsupportedMethodError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return /method (is )?not supported|method_not_supported|not implemented|unknown method/i.test(
-    message
-  );
 }

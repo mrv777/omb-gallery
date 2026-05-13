@@ -126,12 +126,12 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
         role="dialog"
         aria-modal="true"
         aria-label={`Buy OMB #${listing.inscription_number}`}
-        className="absolute left-1/2 top-1/2 grid w-[min(92vw,760px)] -translate-x-1/2 -translate-y-1/2 grid-cols-1 border border-ink-2 bg-ink-0 md:grid-cols-[18rem_1fr]"
+        className="absolute left-1/2 top-1/2 grid w-[min(92vw,860px)] -translate-x-1/2 -translate-y-1/2 grid-cols-1 border border-ink-2 bg-ink-0 md:grid-cols-[24rem_1fr]"
         onClick={e => e.stopPropagation()}
       >
         <Link
           href={`/inscription/${listing.inscription_number}`}
-          className="aspect-square bg-ink-2 md:aspect-auto"
+          className="aspect-square self-start bg-ink-2"
           target="_blank"
           rel="noopener noreferrer"
           aria-label={`Open OMB #${listing.inscription_number} details page`}
