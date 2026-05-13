@@ -71,7 +71,7 @@ export default function SubpageShell({ active, color = 'all', headerControls, ch
         <div className="mb-4">
           <FirehoseSubscribe />
         </div>
-        on-chain data via ord · sale data via{' '}
+        on-chain data via ord · marketplace data via{' '}
         <a
           href="https://www.satflow.com"
           target="_blank"
@@ -79,6 +79,15 @@ export default function SubpageShell({ active, color = 'all', headerControls, ch
           className="hover:text-bone transition-colors"
         >
           satflow
+        </a>{' '}
+        +{' '}
+        <a
+          href="https://ord.net"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-bone transition-colors"
+        >
+          ord.net
         </a>{' '}
         · wallet identity via{' '}
         <a

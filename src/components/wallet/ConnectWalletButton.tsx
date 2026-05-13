@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useWallet } from './WalletProvider';
 
@@ -8,6 +8,7 @@ export default function ConnectWalletButton({ compact = false }: { compact?: boo
   const { wallet, connecting, connect, disconnect, error } = useWallet();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const errorId = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -69,17 +70,29 @@ export default function ConnectWalletButton({ compact = false }: { compact?: boo
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="relative flex items-center gap-2">
       <button
         type="button"
-        onClick={() => void connect()}
+        onClick={() => {
+          void connect().catch(() => null);
+        }}
         disabled={connecting}
+        aria-describedby={error ? errorId : undefined}
         className="h-8 border border-bone-dim/60 px-2 font-mono text-[10px] uppercase tracking-[0.08em] text-bone hover:border-bone disabled:opacity-50"
       >
         {connecting ? 'connecting' : 'connect'}
       </button>
-      {error && !compact && (
-        <span className="hidden max-w-48 truncate font-mono text-[10px] uppercase tracking-[0.08em] text-accent-red sm:inline">
+      {error && (
+        <span
+          id={errorId}
+          role="status"
+          aria-live="polite"
+          className={
+            compact
+              ? 'absolute right-0 top-full z-[1300] mt-2 w-56 border border-accent-red/50 bg-ink-0 px-2 py-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-accent-red shadow-[0_0_0_1px_var(--ink-0)]'
+              : 'max-w-64 font-mono text-[10px] uppercase tracking-[0.08em] text-accent-red'
+          }
+        >
           {error}
         </span>
       )}

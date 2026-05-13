@@ -4,7 +4,7 @@ import { lookupInscription } from './inscriptionLookup';
 import { log } from './log';
 import { sendMessage, escapeHtml, type SendArgs } from './telegram';
 import { postWebhook, type DiscordEmbed } from './discord';
-import { ownerDisplay, satflowInscriptionLink, truncateAddr } from './format';
+import { marketplaceLabel, ownerDisplay, satflowInscriptionLink, truncateAddr } from './format';
 import { matricaProfilesForAddrs, type MatricaOverlay } from './matricaOverlay';
 import {
   cleanupExpiredPending,
@@ -114,6 +114,16 @@ function ordinalsUrl(inscriptionNumber: number): string {
   return `https://ordinals.com/inscription/${inscriptionNumber}`;
 }
 
+function ordnetUrl(inscriptionNumber: number): string {
+  return `https://ord.net/inscription/${inscriptionNumber}`;
+}
+
+function isOrdnetMarketplace(marketplace: string | null): boolean {
+  if (!marketplace) return false;
+  const key = marketplace.toLowerCase().trim();
+  return key === 'ord.net' || key === 'ordnet' || key === 'ord-net';
+}
+
 // Marketplace-aware link for sold/listed events. Transfers always go to
 // ordinals.com (no marketplace context). Add a branch here when a new
 // marketplace ships its sales/listings into the events table.
@@ -123,6 +133,7 @@ function eventLinkUrl(ev: EventRow): string {
       const url = satflowInscriptionLink(ev.inscription_id);
       if (url) return url;
     }
+    if (isOrdnetMarketplace(ev.marketplace)) return ordnetUrl(ev.inscription_number);
   }
   return ordinalsUrl(ev.inscription_number);
 }
@@ -137,7 +148,7 @@ function buildTelegramMessage(
   for (const ev of events) {
     const { upper, emoji } = actionLabel(ev.event_type);
     const price = formatBtc(ev.sale_price_sats);
-    const market = ev.marketplace ? ` on ${escapeHtml(ev.marketplace)}` : '';
+    const market = ev.marketplace ? ` on ${escapeHtml(marketplaceLabel(ev.marketplace))}` : '';
     // 'listed' has price but no buyer — phrase as "for X on Y" same as sold.
     // 'transferred' has neither price nor marketplace.
     const priceStr = price ? ` for <b>${escapeHtml(price)}</b>${market}` : '';
@@ -202,7 +213,7 @@ function buildDiscordEmbeds(
     const lookup = lookupInscription(ev.inscription_number);
     const { lower } = actionLabel(ev.event_type);
     const price = formatBtc(ev.sale_price_sats);
-    const market = ev.marketplace ?? '';
+    const market = marketplaceLabel(ev.marketplace);
     const internal = internalTransferUsername(ev, matrica);
     const verb = internal.isInternal ? 'internal transfer' : lower;
     const titleBits: string[] = [`OMB #${ev.inscription_number} ${verb}`];

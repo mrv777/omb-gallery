@@ -70,9 +70,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       persist(session);
       return session;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = walletErrorMessage(err);
       setError(message);
-      throw err;
+      throw new Error(message);
     } finally {
       setConnecting(false);
     }
@@ -211,4 +211,13 @@ function sessionResponseToState(
     payPubkey: session.pay_pubkey,
     acceptedTermsAt: session.accepted_terms_at,
   };
+}
+
+function walletErrorMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  const message = raw.trim() || 'Wallet connection failed';
+  if (/access denied|user rejected|user denied|rejected/i.test(message)) {
+    return 'Wallet connection was denied. Approve access in your wallet and try again.';
+  }
+  return message;
 }
