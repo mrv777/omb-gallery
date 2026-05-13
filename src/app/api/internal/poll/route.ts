@@ -27,6 +27,12 @@ import {
   type NormalizedSale,
   type NormalizedListing,
 } from '@/lib/satflow';
+import {
+  fetchOrdnetListingsPage,
+  ordnetCollectionSlugFor,
+  ordnetServiceWalletConfigured,
+  type OrdnetListing,
+} from '@/lib/ordnet';
 import { fetchWalletProfile, MatricaError } from '@/lib/matrica';
 import { runNotifyFanout } from '@/lib/notify';
 import { runLoanTick } from '@/lib/loanDetect';
@@ -119,6 +125,16 @@ type TickResult = {
   error?: string;
   done?: boolean;
 } & Record<string, unknown>;
+
+type ListingCandidate = {
+  source_id: string;
+  inscription_id: string;
+  price_sats: number;
+  seller: string | null;
+  listed_at: number;
+  marketplace: 'satflow' | 'ord.net';
+  raw_json: string;
+};
 
 export async function GET(req: NextRequest) {
   return handle(req);
@@ -1664,37 +1680,77 @@ async function runListingsTick(
 
   const idToNumber = buildIdToNumberMap();
   const startedAt = Date.now();
-  let pagesUsed = 0;
-  let totalReported = 0;
+  let satflowPages = 0;
+  let ordnetPages = 0;
+  let satflowTotalReported = 0;
+  let ordnetRawCount = 0;
   let errMsg: string | null = null;
+  const ordnetSlug = ordnetCollectionSlugFor(collection.slug);
+  let ordnetEnabled = false;
+  try {
+    ordnetEnabled = ordnetSlug != null && ordnetServiceWalletConfigured();
+  } catch (err) {
+    errMsg = errorMessage(err);
+  }
 
   // Phase 1: collect every active listing across all pages BEFORE touching
   // the DB. If any page fails, abort with the existing snapshot intact —
   // never replace good data with a partial fetch.
-  const collected: NormalizedListing[] = [];
-  for (let page = 1; page <= LISTINGS_MAX_PAGES; page++) {
-    if (Date.now() - startedAt > TICK_WALLCLOCK_BUDGET_MS) {
-      errMsg = `wallclock budget exceeded after ${pagesUsed} pages`;
-      break;
-    }
+  const collected: ListingCandidate[] = [];
+  if (!errMsg) {
+    for (let page = 1; page <= LISTINGS_MAX_PAGES; page++) {
+      if (Date.now() - startedAt > TICK_WALLCLOCK_BUDGET_MS) {
+        errMsg = `wallclock budget exceeded after ${satflowPages + ordnetPages} pages`;
+        break;
+      }
 
-    let pageRes;
-    try {
-      pageRes = await fetchListingsPage({
-        collectionSlug: collection.satflow_slug,
-        page,
-        pageSize: SATFLOW_PAGE_SIZE,
-        apiKey,
-      });
-      pagesUsed++;
-      totalReported = pageRes.total;
-    } catch (err) {
-      errMsg = errorMessage(err);
-      break;
-    }
+      let pageRes;
+      try {
+        pageRes = await fetchListingsPage({
+          collectionSlug: collection.satflow_slug,
+          page,
+          pageSize: SATFLOW_PAGE_SIZE,
+          apiKey,
+        });
+        satflowPages++;
+        satflowTotalReported = pageRes.total;
+      } catch (err) {
+        errMsg = errorMessage(err);
+        break;
+      }
 
-    collected.push(...pageRes.items);
-    if (!pageRes.hasMore) break;
+      collected.push(...pageRes.items.map(satflowListingToCandidate));
+      if (!pageRes.hasMore) break;
+    }
+  }
+
+  if (!errMsg && ordnetEnabled && ordnetSlug) {
+    let cursor: string | null = null;
+    for (let page = 1; page <= LISTINGS_MAX_PAGES; page++) {
+      if (Date.now() - startedAt > TICK_WALLCLOCK_BUDGET_MS) {
+        errMsg = `wallclock budget exceeded after ${satflowPages + ordnetPages} pages`;
+        break;
+      }
+
+      let pageRes;
+      try {
+        pageRes = await fetchOrdnetListingsPage({
+          collectionSlug: ordnetSlug,
+          cursor,
+          limit: SATFLOW_PAGE_SIZE,
+          sort: 'price',
+        });
+        ordnetPages++;
+        ordnetRawCount += pageRes.rawCount;
+      } catch (err) {
+        errMsg = errorMessage(err);
+        break;
+      }
+
+      collected.push(...pageRes.items.map(ordnetListingToCandidate));
+      cursor = pageRes.nextCursor;
+      if (!pageRes.hasMore || !cursor) break;
+    }
   }
 
   if (errMsg) {
@@ -1707,17 +1763,25 @@ async function runListingsTick(
     });
     log.warn('poll/listings', 'tick failed', {
       collection: collection.slug,
-      pages: pagesUsed,
+      satflow_pages: satflowPages,
+      ordnet_pages: ordnetPages,
       dur_ms: Date.now() - startedAt,
       error: errMsg,
     });
-    return { mode: 'listings', collection: collection.slug, pages: pagesUsed, error: errMsg };
+    return {
+      mode: 'listings',
+      collection: collection.slug,
+      pages: satflowPages + ordnetPages,
+      satflow_pages: satflowPages,
+      ordnet_pages: ordnetPages,
+      error: errMsg,
+    };
   }
 
   // Phase 2: dedupe by inscription_id (lowest price wins). Same inscription
   // can technically be listed by two different sellers; the cheaper one is
   // what a buyer would actually take, so that's the one to store.
-  const byInscriptionId = new Map<string, NormalizedListing>();
+  const byInscriptionId = new Map<string, ListingCandidate>();
   for (const item of collected) {
     const existing = byInscriptionId.get(item.inscription_id);
     if (!existing || item.price_sats < existing.price_sats) {
@@ -1726,7 +1790,7 @@ async function runListingsTick(
   }
 
   // Phase 3: resolve to inscription_number; bucket unresolved.
-  const ready: Array<NormalizedListing & { inscription_number: number }> = [];
+  const ready: Array<ListingCandidate & { inscription_number: number }> = [];
   let unresolved = 0;
   for (const item of Array.from(byInscriptionId.values())) {
     const num = idToNumber.get(item.inscription_id);
@@ -1751,8 +1815,10 @@ async function runListingsTick(
     return {
       mode: 'listings',
       collection: collection.slug,
-      pages: pagesUsed,
-      total: totalReported,
+      pages: satflowPages + ordnetPages,
+      satflow_pages: satflowPages,
+      ordnet_pages: ordnetPages,
+      total: satflowTotalReported + ordnetRawCount,
       collected: collected.length,
       unresolved,
       written: 0,
@@ -1791,51 +1857,54 @@ async function runListingsTick(
   let listedEventsEmitted = 0;
   const tx = getDb().transaction(() => {
     // Snapshot of pre-tick active listings for this collection — keyed by
-    // (inscription_number, listed_at). After the upsert+delete below, an item
-    // whose listed_at differs from the prior listed_at (or wasn't present at
-    // all) counts as "newly listed".
+    // (inscription_number, marketplace, listed_at). After the upsert+delete
+    // below, an item whose source/listed_at differs from the prior row (or
+    // wasn't present at all) counts as "newly listed".
     const priorRows = isColdStart
       ? []
       : (stmts.selectActiveListingsForCollection.all(collection.slug) as Array<{
           inscription_number: number;
+          marketplace: string;
           listed_at: number;
         }>);
-    const priorListedAt = new Map<number, number>();
-    for (const r of priorRows) priorListedAt.set(r.inscription_number, r.listed_at);
+    const priorListingKeys = new Map<number, string>();
+    for (const r of priorRows) {
+      priorListingKeys.set(r.inscription_number, `${r.marketplace}:${r.listed_at}`);
+    }
 
     for (const item of ready) {
       stmts.upsertActiveListing.run({
         inscription_number: item.inscription_number,
         inscription_id: item.inscription_id,
-        satflow_id: item.satflow_id,
+        satflow_id: item.source_id,
         price_sats: item.price_sats,
         seller: item.seller,
-        marketplace: 'satflow',
+        marketplace: item.marketplace,
         listed_at: item.listed_at,
         refreshed_at: refreshedAt,
       });
     }
     // Anything not refreshed this tick (in this collection) is no longer
-    // active on Satflow. Scoped to the current collection so other
+    // active on any configured listing source. Scoped to the current collection so other
     // collections' rows aren't affected.
     stmts.deleteStaleListings.run({ cutoff: refreshedAt, collection: collection.slug });
 
     if (!isColdStart) {
       for (const item of ready) {
         // Skip when the prior snapshot already had this exact (number,
-        // listed_at) — that's a continuously-active listing, not a fresh
-        // one. A new inscription OR a different listed_at (re-listing the
-        // poll never observed delisted) both pass the guard. The synthetic
-        // txid below provides additional dedup against accidental re-runs.
-        const prior = priorListedAt.get(item.inscription_number);
-        if (prior === item.listed_at) continue;
-        const txid = `listed:${item.inscription_number}:${item.listed_at}`;
+        // marketplace, listed_at) — that's a continuously-active listing, not
+        // a fresh one. A new inscription, source switch, or different
+        // listed_at (re-listing the poll never observed delisted) passes.
+        const listingKey = `${item.marketplace}:${item.listed_at}`;
+        const prior = priorListingKeys.get(item.inscription_number);
+        if (prior === listingKey) continue;
+        const txid = `listed:${item.marketplace}:${item.inscription_number}:${item.listed_at}`;
         const insertRes = stmts.insertListedEvent.run({
           inscription_id: item.inscription_id,
           inscription_number: item.inscription_number,
           block_timestamp: item.listed_at,
           seller: item.seller,
-          marketplace: 'satflow',
+          marketplace: item.marketplace,
           price_sats: item.price_sats,
           txid,
         });
@@ -1876,10 +1945,14 @@ async function runListingsTick(
 
   log.info('poll/listings', 'tick complete', {
     collection: collection.slug,
-    pages: pagesUsed,
+    pages: satflowPages + ordnetPages,
+    satflow_pages: satflowPages,
+    ordnet_pages: ordnetPages,
+    ordnet_enabled: ordnetEnabled,
     written: ready.length,
     unresolved,
-    total_reported: totalReported,
+    satflow_total_reported: satflowTotalReported,
+    ordnet_raw_count: ordnetRawCount,
     listed_events: listedEventsEmitted,
     cold_start: isColdStart,
     dur_ms: Date.now() - startedAt,
@@ -1888,8 +1961,11 @@ async function runListingsTick(
   return {
     mode: 'listings',
     collection: collection.slug,
-    pages: pagesUsed,
-    total: totalReported,
+    pages: satflowPages + ordnetPages,
+    satflow_pages: satflowPages,
+    ordnet_pages: ordnetPages,
+    ordnet_enabled: ordnetEnabled,
+    total: satflowTotalReported + ordnetRawCount,
     collected: collected.length,
     written: ready.length,
     deduped: collected.length - byInscriptionId.size,
@@ -1898,6 +1974,30 @@ async function runListingsTick(
     cold_start: isColdStart,
     active_in_db: writtenCount?.n ?? null,
     ...(budgetWarning ? { warning: budgetWarning } : {}),
+  };
+}
+
+function satflowListingToCandidate(item: NormalizedListing): ListingCandidate {
+  return {
+    source_id: item.satflow_id,
+    inscription_id: item.inscription_id,
+    price_sats: item.price_sats,
+    seller: item.seller,
+    listed_at: item.listed_at,
+    marketplace: 'satflow',
+    raw_json: item.raw_json,
+  };
+}
+
+function ordnetListingToCandidate(item: OrdnetListing): ListingCandidate {
+  return {
+    source_id: item.listing_id,
+    inscription_id: item.inscription_id,
+    price_sats: item.price_sats,
+    seller: item.seller,
+    listed_at: item.listed_at,
+    marketplace: 'ord.net',
+    raw_json: item.raw_json,
   };
 }
 

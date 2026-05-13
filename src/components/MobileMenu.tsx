@@ -7,13 +7,17 @@ import { HelpDialog } from './HelpButton';
 import { useColorFilter } from '@/lib/useColorFilter';
 import { appendColorParam } from '@/lib/colorFilter';
 
-type NavKey = 'gallery' | 'activity' | 'explorer';
+type NavKey = 'gallery' | 'activity' | 'explorer' | 'marketplace';
 type NavItem = { key: NavKey; label: string; href: string };
 
 const NAV: NavItem[] = [
   { key: 'gallery', label: 'gallery', href: '/' },
   { key: 'activity', label: 'activity', href: '/activity' },
   { key: 'explorer', label: 'explorer', href: '/explorer' },
+  ...(process.env.NEXT_PUBLIC_MARKETPLACE_ENABLED === 'true' ||
+  process.env.NEXT_PUBLIC_MARKETPLACE_MOCK === 'true'
+    ? ([{ key: 'marketplace', label: 'marketplace', href: '/marketplace' }] as const)
+    : []),
 ];
 
 export default function MobileMenu({ active }: { active?: NavKey } = {}) {

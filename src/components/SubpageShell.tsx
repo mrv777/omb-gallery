@@ -8,7 +8,7 @@ import type { ColorFilter } from '@/lib/types';
 import { appendColorParam } from '@/lib/colorFilter';
 
 type Props = {
-  active?: 'activity' | 'explorer';
+  active?: 'activity' | 'explorer' | 'marketplace';
   /** Pass through so cross-page nav links preserve the user's filter. */
   color?: ColorFilter;
   /** Optional content rendered in the header between nav and the help button.
@@ -17,10 +17,18 @@ type Props = {
   children: ReactNode;
 };
 
-const NAV: { key: 'gallery' | 'activity' | 'explorer'; label: string; href: string }[] = [
+const NAV: {
+  key: 'gallery' | 'activity' | 'explorer' | 'marketplace';
+  label: string;
+  href: string;
+}[] = [
   { key: 'gallery', label: 'gallery', href: '/' },
   { key: 'activity', label: 'activity', href: '/activity' },
   { key: 'explorer', label: 'explorer', href: '/explorer' },
+  ...(process.env.NEXT_PUBLIC_MARKETPLACE_ENABLED === 'true' ||
+  process.env.NEXT_PUBLIC_MARKETPLACE_MOCK === 'true'
+    ? ([{ key: 'marketplace', label: 'marketplace', href: '/marketplace' }] as const)
+    : []),
 ];
 
 export default function SubpageShell({ active, color = 'all', headerControls, children }: Props) {
@@ -29,7 +37,6 @@ export default function SubpageShell({ active, color = 'all', headerControls, ch
       <header className="sticky top-0 z-10 bg-ink-1/95 backdrop-blur border-b border-ink-2">
         <div className="flex h-12 items-center gap-3 sm:gap-6 px-3 sm:px-6 font-mono text-xs tracking-[0.08em] uppercase">
           <MobileMenu active={active} />
-          <div className="hidden md:block text-bone shrink-0">OMB</div>
           <nav className="hidden md:flex items-center gap-3 sm:gap-5">
             {NAV.map(item => {
               const isActive = item.key === active;
@@ -51,9 +58,11 @@ export default function SubpageShell({ active, color = 'all', headerControls, ch
             })}
           </nav>
           <SearchBar />
-          {headerControls}
-          <div className="ml-auto hidden md:block">
-            <HelpButton />
+          <div className="ml-auto flex shrink-0 items-center gap-3">
+            {headerControls}
+            <div className="hidden md:block">
+              <HelpButton />
+            </div>
           </div>
         </div>
       </header>

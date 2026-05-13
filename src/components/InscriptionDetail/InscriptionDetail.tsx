@@ -1,11 +1,12 @@
 import Link from 'next/link';
-import type { EventRow, InscriptionRow } from '@/lib/db';
+import type { ActiveListingRow, EventRow, InscriptionRow } from '@/lib/db';
 import type { LoanExpirationEstimate } from '@/lib/loanExpiration';
 import { lookupInscription } from '@/lib/inscriptionLookup';
 import {
   formatBtc,
   formatRelTime,
   formatTimeUntil,
+  marketplaceLabel,
   ordinalsLink,
   satflowInscriptionLink,
   truncateAddr,
@@ -40,6 +41,7 @@ type Props = {
   /** Estimated expiration of the open loan (if any). Null if no active loan
    * or no origination data to base an estimate on. */
   activeLoanEstimate?: ActiveLoanEstimate | null;
+  currentListing?: ActiveListingRow | null;
 };
 
 export default function InscriptionDetail({
@@ -49,6 +51,7 @@ export default function InscriptionDetail({
   ownerOthers,
   ownerOthersHasMore,
   activeLoanEstimate,
+  currentListing,
 }: Props) {
   const hit = lookupInscription(inscription.inscription_number);
   const tileBg = hit?.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
@@ -109,6 +112,20 @@ export default function InscriptionDetail({
             <Stat label="volume" value={formatBtc(inscription.total_volume_sats) || '—'} />
             <Stat label="highest" value={formatBtc(inscription.highest_sale_sats) || '—'} />
           </dl>
+
+          {currentListing && (
+            <div className="mb-5 flex flex-wrap items-center gap-x-2 gap-y-1 border border-ink-2 px-2 py-1.5 text-[11px] uppercase tracking-[0.08em] text-bone-dim">
+              <span>listed</span>
+              <span className="text-bone tabular-nums">{formatBtc(currentListing.price_sats)}</span>
+              <span>via {marketplaceLabel(currentListing.marketplace).toLowerCase()}</span>
+              <Link
+                href={`/marketplace?focus=${inscription.inscription_number}`}
+                className="ml-1 text-bone hover:text-accent-orange"
+              >
+                buy
+              </Link>
+            </div>
+          )}
 
           <div className="text-[11px] tracking-[0.08em] uppercase text-bone-dim space-y-1.5 mb-5">
             <div className="flex flex-wrap items-baseline gap-x-2">
@@ -326,9 +343,7 @@ function ActiveLoanCallout({ estimate }: { estimate: ActiveLoanEstimate }) {
         <span className="text-[10px] tracking-[0.12em] uppercase text-accent-orange">
           loan in progress
         </span>
-        <span className="text-[11px] uppercase tracking-[0.08em] text-bone-dim">
-          via Liquidium
-        </span>
+        <span className="text-[11px] uppercase tracking-[0.08em] text-bone-dim">via Liquidium</span>
       </div>
       <div className="mt-2 text-xs text-bone normal-case tracking-normal">
         {overdue ? (

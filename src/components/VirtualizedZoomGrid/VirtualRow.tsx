@@ -3,6 +3,7 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { GalleryImage } from '@/lib/types';
 import { useFavorites } from '@/lib/FavoritesContext';
+import type { MarketplaceLiteListing } from '@/lib/marketplace/types';
 
 // Get the appropriate thumbnail URL based on cell size
 function getThumbnailUrl(originalThumbnail: string, cellSize: number): string {
@@ -27,6 +28,7 @@ interface VirtualRowProps {
   images: GalleryImage[];
   columnCount: number;
   cellSize: number;
+  listings: Map<number, MarketplaceLiteListing>;
   onImageClick: (index: number) => void;
   style: React.CSSProperties;
 }
@@ -37,6 +39,7 @@ const VirtualRow = memo(
     images,
     columnCount,
     cellSize,
+    listings,
     onImageClick,
     style,
   }: VirtualRowProps) {
@@ -236,7 +239,9 @@ const VirtualRow = memo(
         {rowImages.map((image, colIndex) => {
           const globalIndex = startIndex + colIndex;
           const thumbnailUrl = getThumbnailUrl(image.thumbnail, cellSize);
-          const label = enableHover ? `#${inscriptionId(image.src)}` : undefined;
+          const id = inscriptionId(image.src);
+          const label = enableHover ? `#${id}` : undefined;
+          const isListed = listings.has(Number(id));
 
           const favorited = isFavorite(image.src);
           const isFlashed = flashedKey === String(globalIndex);
@@ -266,8 +271,26 @@ const VirtualRow = memo(
                 backgroundPosition: 'center',
                 cursor: 'pointer',
                 boxShadow: cellBoxShadow,
+                position: 'relative',
               }}
             >
+              {isListed && cellSize >= 24 && (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    top: 4,
+                    right: 4,
+                    width: 6,
+                    height: 6,
+                    background: 'var(--accent-green)',
+                    border: '1px solid var(--ink-0)',
+                    borderRadius: '50%',
+                    pointerEvents: 'none',
+                    zIndex: 1,
+                  }}
+                />
+              )}
               {showHeart && (
                 <button
                   type="button"
@@ -303,7 +326,8 @@ const VirtualRow = memo(
       prevProps.rowIndex === nextProps.rowIndex &&
       prevProps.columnCount === nextProps.columnCount &&
       prevProps.cellSize === nextProps.cellSize &&
-      prevProps.images === nextProps.images
+      prevProps.images === nextProps.images &&
+      prevProps.listings === nextProps.listings
     );
   }
 );

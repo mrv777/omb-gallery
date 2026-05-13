@@ -234,6 +234,45 @@ describe('active_listings schema + statements', () => {
   });
 });
 
+describe('buy_intents schema', () => {
+  it('creates buy_intents with buyer and tx indexes', () => {
+    const db = dbModule.getDb();
+    const tbl = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='buy_intents'`)
+      .get();
+    expect(tbl).toBeDefined();
+    const indexes = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='buy_intents'`)
+      .all() as Array<{ name: string }>;
+    expect(indexes.map(i => i.name)).toEqual(
+      expect.arrayContaining(['idx_buy_intents_buyer', 'idx_buy_intents_txid'])
+    );
+  });
+
+  it('records and updates a mock buy intent', async () => {
+    const row = dbModule.getDb().prepare(`SELECT * FROM inscriptions LIMIT 1`).get() as {
+      inscription_number: number;
+      inscription_id: string | null;
+    };
+    const store = await import('../src/lib/marketplace/buyIntentsStore');
+    const id = store.createBuyIntent({
+      inscription_id: row.inscription_id ?? `unknown-${row.inscription_number}`,
+      inscription_number: row.inscription_number,
+      buyer_ord_addr: 'bc1pbuyer',
+      buyer_pay_addr: 'bc1qbuyer',
+      marketplace: 'satflow',
+      price_sats: 1_000_000,
+      is_mock: true,
+    });
+
+    store.markIntentBroadcast(id, 'mock-txid');
+    const intent = store.getBuyIntent(id);
+    expect(intent?.status).toBe('broadcast');
+    expect(intent?.txid).toBe('mock-txid');
+    expect(intent?.is_mock).toBe(1);
+  });
+});
+
 describe('satflow_call_budget', () => {
   it('starts at zero and increments per bump', () => {
     const stmts = dbModule.getStmts();

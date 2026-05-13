@@ -5,6 +5,7 @@ import { FavoritesProvider } from '@/lib/FavoritesContext';
 import { TooltipProvider } from '@/components/ui/Tooltip';
 import NavigationProgress from '@/components/NavigationProgress';
 import { DEFAULT_OG_IMAGE, SITE_DESCRIPTION, SITE_NAME } from '@/lib/metadata';
+import { WalletProvider } from '@/components/wallet/WalletProvider';
 
 const sans = Inter({
   subsets: ['latin'],
@@ -64,9 +65,11 @@ export default function RootLayout({
     <html lang="en" className={`${sans.variable} ${mono.variable}`}>
       <body className="font-sans bg-ink-0 text-bone">
         <FavoritesProvider>
-          <TooltipProvider delayDuration={150} skipDelayDuration={300}>
-            <NavigationProgress>{children}</NavigationProgress>
-          </TooltipProvider>
+          <WalletProvider>
+            <TooltipProvider delayDuration={150} skipDelayDuration={300}>
+              <NavigationProgress>{children}</NavigationProgress>
+            </TooltipProvider>
+          </WalletProvider>
         </FavoritesProvider>
       </body>
     </html>

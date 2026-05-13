@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 32;
+const SCHEMA_VERSION = 34;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -164,6 +164,8 @@ function migrate(db: DB): void {
         upgradeV29ToV30(db);
         upgradeV30ToV31(db);
         upgradeV31ToV32(db);
+        upgradeV32ToV33(db);
+        upgradeV33ToV34(db);
       } else {
         initSchemaLatest(db);
       }
@@ -199,6 +201,8 @@ function migrate(db: DB): void {
       if (current < 30) upgradeV29ToV30(db);
       if (current < 31) upgradeV30ToV31(db);
       if (current < 32) upgradeV31ToV32(db);
+      if (current < 33) upgradeV32ToV33(db);
+      if (current < 34) upgradeV33ToV34(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -403,6 +407,26 @@ function initSchemaLatest(db: DB): void {
     );
     CREATE INDEX IF NOT EXISTS idx_slideshows_created_ip_at ON slideshows (creator_ip, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_slideshows_created_at    ON slideshows (created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS buy_intents (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      inscription_id     TEXT NOT NULL,
+      inscription_number INTEGER NOT NULL,
+      buyer_ord_addr     TEXT NOT NULL,
+      buyer_pay_addr     TEXT,
+      marketplace        TEXT NOT NULL,
+      listing_id         TEXT,
+      price_sats         INTEGER NOT NULL,
+      status             TEXT NOT NULL CHECK (status IN ('created','signed','broadcast','confirmed','failed')),
+      txid               TEXT,
+      fail_reason        TEXT,
+      preflight_json     TEXT,
+      is_mock            INTEGER NOT NULL DEFAULT 0,
+      created_at         INTEGER NOT NULL,
+      updated_at         INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_buy_intents_buyer ON buy_intents (buyer_ord_addr, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_buy_intents_txid  ON buy_intents (txid);
 
     -- Phase 6: notification subscriptions. One row per (channel, channel_target,
     -- kind, target_key) — UNIQUE makes "click Watch twice" a no-op. status flow:
@@ -1544,19 +1568,57 @@ function upgradeV31ToV32(db: DB): void {
   const cols = db.pragma('table_info(wallet_cluster_edges)') as Array<{ name: string }>;
   const have = new Set(cols.map(c => c.name));
   const adds: Array<[string, string]> = [
-    ['co_cons_count',   `INTEGER NOT NULL DEFAULT 0`],
+    ['co_cons_count', `INTEGER NOT NULL DEFAULT 0`],
     ['co_parent_count', `INTEGER NOT NULL DEFAULT 0`],
-    ['pmx_count',       `INTEGER NOT NULL DEFAULT 0`],
-    ['pmx_ab',          `INTEGER NOT NULL DEFAULT 0`],
-    ['pmx_ba',          `INTEGER NOT NULL DEFAULT 0`],
-    ['pmx_rt_count',    `INTEGER NOT NULL DEFAULT 0`],
-    ['pmx_rt_ab',       `INTEGER NOT NULL DEFAULT 0`],
-    ['pmx_rt_ba',       `INTEGER NOT NULL DEFAULT 0`],
+    ['pmx_count', `INTEGER NOT NULL DEFAULT 0`],
+    ['pmx_ab', `INTEGER NOT NULL DEFAULT 0`],
+    ['pmx_ba', `INTEGER NOT NULL DEFAULT 0`],
+    ['pmx_rt_count', `INTEGER NOT NULL DEFAULT 0`],
+    ['pmx_rt_ab', `INTEGER NOT NULL DEFAULT 0`],
+    ['pmx_rt_ba', `INTEGER NOT NULL DEFAULT 0`],
   ];
   for (const [name, def] of adds) {
     if (!have.has(name)) {
       db.exec(`ALTER TABLE wallet_cluster_edges ADD COLUMN ${name} ${def}`);
     }
+  }
+}
+
+function upgradeV32ToV33(db: DB): void {
+  // Marketplace v1: minimal non-custodial buy intent ledger. Mock buys are
+  // explicitly flagged so they never reconcile with real Satflow sale events.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS buy_intents (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      inscription_id     TEXT NOT NULL,
+      inscription_number INTEGER NOT NULL,
+      buyer_ord_addr     TEXT NOT NULL,
+      buyer_pay_addr     TEXT,
+      marketplace        TEXT NOT NULL,
+      listing_id         TEXT,
+      price_sats         INTEGER NOT NULL,
+      status             TEXT NOT NULL CHECK (status IN ('created','signed','broadcast','confirmed','failed')),
+      txid               TEXT,
+      fail_reason        TEXT,
+      preflight_json     TEXT,
+      is_mock            INTEGER NOT NULL DEFAULT 0,
+      created_at         INTEGER NOT NULL,
+      updated_at         INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_buy_intents_buyer ON buy_intents (buyer_ord_addr, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_buy_intents_txid  ON buy_intents (txid);
+  `);
+}
+
+function upgradeV33ToV34(db: DB): void {
+  const cols = new Set(
+    (db.prepare(`PRAGMA table_info(buy_intents)`).all() as Array<{ name: string }>).map(c => c.name)
+  );
+  if (!cols.has('listing_id')) {
+    db.exec(`ALTER TABLE buy_intents ADD COLUMN listing_id TEXT`);
+  }
+  if (!cols.has('preflight_json')) {
+    db.exec(`ALTER TABLE buy_intents ADD COLUMN preflight_json TEXT`);
   }
 }
 
@@ -2682,7 +2744,7 @@ export function getStmts(): Stmts {
     // (same inscription, different listed_at) emits a fresh notification
     // rather than being suppressed as "still active".
     selectActiveListingsForCollection: db.prepare(`
-      SELECT al.inscription_number, al.listed_at FROM active_listings al
+      SELECT al.inscription_number, al.marketplace, al.listed_at FROM active_listings al
       JOIN inscriptions i ON i.inscription_number = al.inscription_number
       WHERE i.collection_slug = ?
     `),

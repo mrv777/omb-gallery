@@ -10,6 +10,10 @@ import MobileMenu from './MobileMenu';
 import NotificationButton, { BellIcon } from './NotificationButton/NotificationButton';
 import { Tooltip } from './ui/Tooltip';
 
+const MARKETPLACE_NAV_ENABLED =
+  process.env.NEXT_PUBLIC_MARKETPLACE_ENABLED === 'true' ||
+  process.env.NEXT_PUBLIC_MARKETPLACE_MOCK === 'true';
+
 interface FilterControlsProps {
   colorFilter: ColorFilter;
   onColorFilterChange: (filter: ColorFilter) => void;
@@ -154,12 +158,10 @@ const FilterControls = memo(function FilterControls({
 
   return (
     <div className="h-full flex flex-col font-mono text-xs tracking-[0.08em] uppercase">
-      {/* Row 1: hamburger (mobile) + wordmark + nav (desktop) + filters + desktop search/zoom/help */}
+      {/* Row 1: hamburger (mobile) + nav (desktop) + filters + desktop search/zoom/help */}
       <div className="flex items-center gap-3 sm:gap-6 px-3 sm:px-6 h-11 md:h-full">
         <MobileMenu active="gallery" />
 
-        {/* Wordmark — desktop only */}
-        <div className="hidden md:block text-bone shrink-0">OMB</div>
         {/* Nav — desktop only */}
         <nav className="hidden md:flex items-center gap-3 sm:gap-5 shrink-0">
           <span className="text-bone">
@@ -177,6 +179,14 @@ const FilterControls = memo(function FilterControls({
           >
             <span className="border border-transparent px-1.5 py-0.5">explorer</span>
           </Link>
+          {MARKETPLACE_NAV_ENABLED && (
+            <Link
+              href={appendColorParam('/marketplace', colorFilter)}
+              className="text-bone-dim hover:text-bone transition-colors"
+            >
+              <span className="border border-transparent px-1.5 py-0.5">marketplace</span>
+            </Link>
+          )}
         </nav>
 
         {filtersBlock}

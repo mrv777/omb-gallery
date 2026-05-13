@@ -9,6 +9,7 @@ import { useColorFilter } from '@/lib/useColorFilter';
 import { useSearchQueryParam } from '@/lib/useSearchQueryParam';
 import { useFavoritesOnlyParam } from '@/lib/useFavoritesOnlyParam';
 import { encodeIds } from '@/lib/slideshowCodec';
+import { useListings } from '@/components/Marketplace/useListings';
 import ImageModal from '../ImageModal';
 import FilterControls from '../FilterControls';
 import ZoomGestureHandler from './ZoomGestureHandler';
@@ -52,6 +53,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
 
   // Favorites
   const { isFavorite } = useFavorites();
+  const listings = useListings();
 
   // Zoom state
   const { columnCount, maxColumnCount, handleZoomGesture, zoomIn, zoomOut, canZoomIn, canZoomOut } =
@@ -342,6 +344,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
                 images={filteredImages}
                 columnCount={columnCount}
                 cellSize={cellSize}
+                listings={listings}
                 onImageClick={handleImageClick}
                 style={{
                   position: 'absolute',
@@ -362,6 +365,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
           onClose={handleClose}
           currentImage={currentImage}
           images={filteredImages}
+          listings={listings}
           onPrev={handleMovePrev}
           onNext={handleMoveNext}
         />

@@ -6,6 +6,12 @@ export function formatBtc(sats: number | null | undefined): string {
   return `${btc.toFixed(6)} ₿`;
 }
 
+export function formatBtcCompact(sats: number | null | undefined): string {
+  const formatted = formatBtc(sats);
+  if (!formatted) return '';
+  return formatted.replace(/\.?0+\s₿$/, '₿').replace(/\s₿$/, '₿');
+}
+
 export function formatRelTime(
   unixSeconds: number | null | undefined,
   nowMs: number = Date.now()
@@ -91,6 +97,9 @@ const MARKETPLACE_LABELS: Record<string, string> = {
   gamma: 'Gamma',
   trio: 'Trio',
   osura: 'Osura',
+  'ord.net': 'ORD.NET',
+  ordnet: 'ORD.NET',
+  'ord-net': 'ORD.NET',
 };
 
 export function marketplaceLabel(key: string | null | undefined): string {

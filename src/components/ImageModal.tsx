@@ -4,6 +4,8 @@ import React, { memo, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { GalleryImage } from '@/lib/types';
 import { useFavorites } from '@/lib/FavoritesContext';
+import { formatBtcCompact } from '@/lib/format';
+import type { MarketplaceLiteListing } from '@/lib/marketplace/types';
 import NotificationButton, { BellIcon } from './NotificationButton/NotificationButton';
 import DownloadMenu from './DownloadMenu/DownloadMenu';
 import { Tooltip } from './ui/Tooltip';
@@ -12,6 +14,7 @@ interface ImageModalProps {
   onClose: () => void;
   currentImage: number;
   images: GalleryImage[];
+  listings?: Map<number, MarketplaceLiteListing>;
   onPrev: () => void;
   onNext: () => void;
 }
@@ -129,6 +132,7 @@ const ImageModal = memo(function ImageModal({
   onClose,
   currentImage,
   images,
+  listings,
   onPrev,
   onNext,
 }: ImageModalProps) {
@@ -168,6 +172,7 @@ const ImageModal = memo(function ImageModal({
   const image = images[currentImage];
   const favorited = isFavorite(image.src);
   const id = inscriptionId(image.src);
+  const listing = listings?.get(Number(id)) ?? null;
   const colorLabel = COLOR_LABELS[image.color] ?? image.color.toUpperCase();
   const canNavigate = images.length > 1;
   const previousImage = canNavigate
@@ -218,6 +223,19 @@ const ImageModal = memo(function ImageModal({
           </span>
         </div>
         <div className="flex items-center">
+          {listing && (
+            <Tooltip content="Buy on OMB marketplace">
+              <a
+                href={`/marketplace?focus=${id}`}
+                onClick={e => e.stopPropagation()}
+                className="mr-1 inline-flex h-8 items-center border border-ink-2 px-2 font-mono text-[10px] uppercase tracking-[0.08em] text-bone-dim transition-colors hover:border-bone-dim hover:text-bone"
+                aria-label={`Buy OMB #${id}`}
+              >
+                BUY
+                <span className="hidden sm:inline"> · {formatBtcCompact(listing.price_sats)}</span>
+              </a>
+            </Tooltip>
+          )}
           <Tooltip content="Open detail page">
             <a
               href={`/inscription/${id}`}
