@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 34;
+const SCHEMA_VERSION = 35;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -166,6 +166,7 @@ function migrate(db: DB): void {
         upgradeV31ToV32(db);
         upgradeV32ToV33(db);
         upgradeV33ToV34(db);
+        upgradeV34ToV35(db);
       } else {
         initSchemaLatest(db);
       }
@@ -203,6 +204,7 @@ function migrate(db: DB): void {
       if (current < 32) upgradeV31ToV32(db);
       if (current < 33) upgradeV32ToV33(db);
       if (current < 34) upgradeV33ToV34(db);
+      if (current < 35) upgradeV34ToV35(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -474,6 +476,20 @@ function initSchemaLatest(db: DB): void {
       FOREIGN KEY (event_id) REFERENCES events (id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_notify_pending_enqueued ON notify_pending (enqueued_at);
+
+    -- Per-target delivery memory for queued notification events. A row exists
+    -- only while the event is still in notify_pending; it prevents recipients
+    -- that already acknowledged an event from receiving it again while another
+    -- target is still retrying.
+    CREATE TABLE IF NOT EXISTS notify_deliveries (
+      event_id            INTEGER NOT NULL,
+      channel             TEXT NOT NULL CHECK (channel IN ('telegram','discord')),
+      channel_target_hash TEXT NOT NULL,
+      delivered_at        INTEGER NOT NULL DEFAULT (unixepoch()),
+      PRIMARY KEY (event_id, channel, channel_target_hash),
+      FOREIGN KEY (event_id) REFERENCES events (id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_notify_deliveries_event ON notify_deliveries (event_id);
 
     -- Holder roles (Phase 7). Derived from inscriptions.color counts per
     -- Matrica user. Recomputed every auto tick after loans finalize. Only
@@ -1622,6 +1638,24 @@ function upgradeV33ToV34(db: DB): void {
   }
 }
 
+function upgradeV34ToV35(db: DB): void {
+  // Notification fanout used to keep only a global queue row. If one target
+  // succeeded and another target failed, the event stayed queued and the
+  // successful target was sent the same event again on the next retry. This
+  // table records per-target success while the event remains pending.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS notify_deliveries (
+      event_id            INTEGER NOT NULL,
+      channel             TEXT NOT NULL CHECK (channel IN ('telegram','discord')),
+      channel_target_hash TEXT NOT NULL,
+      delivered_at        INTEGER NOT NULL DEFAULT (unixepoch()),
+      PRIMARY KEY (event_id, channel, channel_target_hash),
+      FOREIGN KEY (event_id) REFERENCES events (id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_notify_deliveries_event ON notify_deliveries (event_id);
+  `);
+}
+
 function upgradeV30ToV31(db: DB): void {
   // Materialize connected components at IDENTITY_FOLD_THRESHOLD so the
   // top-holders leaderboard, color leaderboards, holder distribution
@@ -2737,22 +2771,22 @@ export function getStmts(): Stmts {
       LIMIT ?
     `),
 
-    // Read (inscription_number, listed_at) for currently-active listings in
+    // Read current listing identity for currently-active listings in
     // ONE collection. Used to diff before/after the snapshot replace so we
     // know which rows are *newly* listed (and should fan out a 'listed'
-    // event). We carry listed_at — not just the number — so a re-listing
-    // (same inscription, different listed_at) emits a fresh notification
-    // rather than being suppressed as "still active".
+    // event). satflow_id is a generic source listing id despite the legacy
+    // column name; listed_at is retained as a fallback for sources without a
+    // stable listing id.
     selectActiveListingsForCollection: db.prepare(`
-      SELECT al.inscription_number, al.marketplace, al.listed_at FROM active_listings al
+      SELECT al.inscription_number, al.marketplace, al.satflow_id, al.listed_at FROM active_listings al
       JOIN inscriptions i ON i.inscription_number = al.inscription_number
       WHERE i.collection_slug = ?
     `),
 
     // Insert a 'listed' event with a synthetic txid so the existing
     // UNIQUE(inscription_id, txid) constraint dedupes re-detections of the
-    // same listing within the same `listed_at` second. Re-listings at a
-    // different `listed_at` produce a fresh row → fresh notification.
+    // same source listing. Re-listings with a new source id produce a fresh
+    // row → fresh notification; sources without ids fall back to listed_at.
     insertListedEvent: db.prepare(`
       INSERT OR IGNORE INTO events (
         inscription_id, inscription_number, event_type,

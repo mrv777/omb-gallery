@@ -1,4 +1,5 @@
 import 'server-only';
+import { createHash } from 'node:crypto';
 import { getDb, getStmts } from './db';
 import { lookupInscription } from './inscriptionLookup';
 import { log } from './log';
@@ -267,12 +268,69 @@ type FanoutResult = {
 type Bucket = {
   channel: SubscriptionRow['channel'];
   channelTarget: string;
+  targetHash: string;
   representative: SubscriptionRow;
   events: EventRow[];
-  /** Per-bucket dedupe set so a recipient watching e.g. both
-   *  collection + inscription doesn't get the same event listed twice. */
+  /** Event ids considered satisfied if this bucket's outbound message succeeds.
+   *  This can be larger than `events` when semantically duplicate listed
+   *  events are coalesced into one rendered embed. */
   eventIds: Set<number>;
+  /** Per-bucket render dedupe for marketplace listing timestamp/source wobble. */
+  eventRenderKeys: Set<string>;
 };
+
+function targetDeliveryHash(channel: SubscriptionRow['channel'], channelTarget: string): string {
+  return createHash('sha256').update(channel).update('\0').update(channelTarget).digest('hex');
+}
+
+function deliveryRecordKey(
+  eventId: number,
+  channel: SubscriptionRow['channel'],
+  targetHash: string
+): string {
+  return `${eventId}:${channel}:${targetHash}`;
+}
+
+function listedRenderKey(ev: EventRow): string | null {
+  if (ev.event_type !== 'listed') return null;
+  return [
+    ev.event_type,
+    ev.inscription_number,
+    ev.marketplace ?? '',
+    ev.sale_price_sats ?? '',
+    ev.old_owner ?? '',
+  ].join('|');
+}
+
+function loadDeliveredRecords(eventIds: number[]): Set<string> {
+  if (eventIds.length === 0) return new Set();
+  const placeholders = eventIds.map(() => '?').join(',');
+  const rows = getDb()
+    .prepare(
+      `SELECT event_id, channel, channel_target_hash
+       FROM notify_deliveries
+       WHERE event_id IN (${placeholders})`
+    )
+    .all(...eventIds) as Array<{
+    event_id: number;
+    channel: SubscriptionRow['channel'];
+    channel_target_hash: string;
+  }>;
+  return new Set(rows.map(r => deliveryRecordKey(r.event_id, r.channel, r.channel_target_hash)));
+}
+
+function recordDeliveredRecords(bucket: Bucket, eventIds: Set<number>): void {
+  if (eventIds.size === 0) return;
+  const stmt = getDb().prepare(`
+    INSERT OR IGNORE INTO notify_deliveries (
+      event_id, channel, channel_target_hash, delivered_at
+    ) VALUES (?, ?, ?, unixepoch())
+  `);
+  const tx = getDb().transaction((ids: number[]) => {
+    for (const id of ids) stmt.run(id, bucket.channel, bucket.targetHash);
+  });
+  tx(Array.from(eventIds));
+}
 
 export async function runNotifyFanout(): Promise<FanoutResult> {
   const startedAt = Date.now();
@@ -304,6 +362,7 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
   // wanting bucket confirmed delivery — capped-out events stay in the queue.
   const buckets = new Map<string, Bucket>();
   const eventToWantingBuckets = new Map<number, Set<string>>();
+  const deliveredBefore = loadDeliveredRecords(events.map(ev => ev.id));
 
   for (const ev of events) {
     const bit = eventBit(ev.event_type);
@@ -322,6 +381,10 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
     }
     const wanting = new Set<string>();
     for (const sub of matches) {
+      const targetHash = targetDeliveryHash(sub.channel, sub.channel_target);
+      if (deliveredBefore.has(deliveryRecordKey(ev.id, sub.channel, targetHash))) {
+        continue;
+      }
       const key = `${sub.channel}:${sub.channel_target}`;
       wanting.add(key);
       let b = buckets.get(key);
@@ -329,18 +392,26 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
         b = {
           channel: sub.channel,
           channelTarget: sub.channel_target,
+          targetHash,
           representative: sub,
           events: [],
           eventIds: new Set(),
+          eventRenderKeys: new Set(),
         };
         buckets.set(key, b);
       }
       // Per-bucket dedupe (overlapping watches: same target subscribes to
       // both collection + inscription, etc.).
       if (b.eventIds.has(ev.id)) continue;
+      const renderKey = listedRenderKey(ev);
+      if (renderKey && b.eventRenderKeys.has(renderKey)) {
+        b.eventIds.add(ev.id);
+        continue;
+      }
       // Cap: leftover events stay in queue → next tick → next message.
       if (b.events.length >= MAX_EVENTS_PER_BUCKET) continue;
       b.eventIds.add(ev.id);
+      if (renderKey) b.eventRenderKeys.add(renderKey);
       b.events.push(ev);
     }
     eventToWantingBuckets.set(ev.id, wanting);
@@ -434,6 +505,7 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
       const r = results[k];
       const key = `${batch[k].channel}:${batch[k].channelTarget}`;
       if (r.status === 'fulfilled' && r.value.size > 0) {
+        recordDeliveredRecords(batch[k], r.value);
         bucketDelivered.set(key, r.value);
         delivered++;
       } else {
@@ -451,8 +523,9 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
   let deferred = 0;
   for (const [eventId, wanting] of Array.from(eventToWantingBuckets.entries())) {
     if (wanting.size === 0) {
-      // No matching subs → safe to drop. Avoids growing the queue forever
-      // when events stream in but nobody is subscribed.
+      // No undelivered matching subs → safe to drop. This covers events nobody
+      // wants as well as events whose current recipients had already succeeded
+      // in an earlier retry pass.
       toDequeue.push(eventId);
       continue;
     }
@@ -476,6 +549,9 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
     // Build a parameterized DELETE for the dequeue batch. SQLite handles
     // 1000-element IN-lists comfortably; we cap at PER_TICK_LIMIT upstream.
     const placeholders = toDequeue.map(() => '?').join(',');
+    db.prepare(`DELETE FROM notify_deliveries WHERE event_id IN (${placeholders})`).run(
+      ...toDequeue
+    );
     db.prepare(`DELETE FROM notify_pending WHERE event_id IN (${placeholders})`).run(...toDequeue);
   }
 

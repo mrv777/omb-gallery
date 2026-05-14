@@ -135,6 +135,8 @@ type ListingCandidate = {
   raw_json: string;
 };
 
+type ReadyListing = ListingCandidate & { inscription_number: number };
+
 export async function GET(req: NextRequest) {
   return handle(req);
 }
@@ -1421,6 +1423,21 @@ function buildIdToNumberMap(): Map<string, number> {
   return map;
 }
 
+function listingSourceIdentity(item: Pick<ListingCandidate, 'source_id' | 'listed_at'>): string {
+  const sourceId = item.source_id.trim();
+  return sourceId ? `id:${sourceId}` : `ts:${item.listed_at}`;
+}
+
+function listingSnapshotKey(
+  item: Pick<ListingCandidate, 'marketplace' | 'source_id' | 'listed_at'>
+): string {
+  return `${item.marketplace}:${listingSourceIdentity(item)}`;
+}
+
+function listedEventTxid(item: ReadyListing): string {
+  return `listed:${item.marketplace}:${item.inscription_number}:${listingSourceIdentity(item)}`;
+}
+
 function applySalesTransaction(
   sales: NormalizedSale[],
   idToNumber: Map<string, number>,
@@ -1789,7 +1806,7 @@ async function runListingsTick(
   }
 
   // Phase 3: resolve to inscription_number; bucket unresolved.
-  const ready: Array<ListingCandidate & { inscription_number: number }> = [];
+  const ready: ReadyListing[] = [];
   let unresolved = 0;
   for (const item of Array.from(byInscriptionId.values())) {
     const num = idToNumber.get(item.inscription_id);
@@ -1855,20 +1872,28 @@ async function runListingsTick(
   const refreshedAt = nowSec;
   let listedEventsEmitted = 0;
   const tx = getDb().transaction(() => {
-    // Snapshot of pre-tick active listings for this collection — keyed by
-    // (inscription_number, marketplace, listed_at). After the upsert+delete
-    // below, an item whose source/listed_at differs from the prior row (or
-    // wasn't present at all) counts as "newly listed".
+    // Snapshot of pre-tick active listings for this collection. A stable
+    // source listing id is the primary identity; listed_at is only the
+    // fallback for sources that do not expose one. This prevents a marketplace
+    // timestamp wobble from making an unchanged active listing look fresh.
     const priorRows = isColdStart
       ? []
       : (stmts.selectActiveListingsForCollection.all(collection.slug) as Array<{
           inscription_number: number;
           marketplace: string;
+          satflow_id: string;
           listed_at: number;
         }>);
     const priorListingKeys = new Map<number, string>();
     for (const r of priorRows) {
-      priorListingKeys.set(r.inscription_number, `${r.marketplace}:${r.listed_at}`);
+      priorListingKeys.set(
+        r.inscription_number,
+        listingSnapshotKey({
+          marketplace: r.marketplace as ReadyListing['marketplace'],
+          source_id: r.satflow_id,
+          listed_at: r.listed_at,
+        })
+      );
     }
 
     for (const item of ready) {
@@ -1890,14 +1915,14 @@ async function runListingsTick(
 
     if (!isColdStart) {
       for (const item of ready) {
-        // Skip when the prior snapshot already had this exact (number,
-        // marketplace, listed_at) — that's a continuously-active listing, not
-        // a fresh one. A new inscription, source switch, or different
-        // listed_at (re-listing the poll never observed delisted) passes.
-        const listingKey = `${item.marketplace}:${item.listed_at}`;
+        // Skip when the prior snapshot already had this exact source listing
+        // identity — that's continuously active, not fresh. A new inscription
+        // or marketplace/source listing id switch passes. If a source lacks a
+        // stable id, listed_at remains the fallback identity.
+        const listingKey = listingSnapshotKey(item);
         const prior = priorListingKeys.get(item.inscription_number);
         if (prior === listingKey) continue;
-        const txid = `listed:${item.marketplace}:${item.inscription_number}:${item.listed_at}`;
+        const txid = listedEventTxid(item);
         const insertRes = stmts.insertListedEvent.run({
           inscription_id: item.inscription_id,
           inscription_number: item.inscription_number,
