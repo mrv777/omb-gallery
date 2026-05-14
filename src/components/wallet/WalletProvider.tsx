@@ -28,7 +28,7 @@ type WalletContextValue = {
 
 const WalletContext = createContext<WalletContextValue | null>(null);
 const STORAGE_KEY = 'omb_market_wallet';
-const MOCK_CLIENT = process.env.NEXT_PUBLIC_MARKETPLACE_MOCK === 'true';
+const MOCK_WALLET_CLIENT = process.env.NEXT_PUBLIC_MARKETPLACE_MOCK_WALLET === 'true';
 
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [wallet, setWallet] = useState<BuyerSessionState | null>(null);
@@ -60,10 +60,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setError(null);
       try {
         const walletModule = await import('@/lib/wallet/satsConnect');
-        const connected = MOCK_CLIENT
+        const connected = MOCK_WALLET_CLIENT
           ? walletModule.mockConnectedWallet()
           : await walletModule.connectSatsWallet(providerId);
-        const session = MOCK_CLIENT
+        const session = MOCK_WALLET_CLIENT
           ? await createMockSession(connected)
           : await createSignedSession(connected, walletModule.signBuyerMessage);
         persist(session);
@@ -81,7 +81,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const disconnect = useCallback(async () => {
     await fetch('/api/marketplace/session', { method: 'DELETE' }).catch(() => null);
-    if (!MOCK_CLIENT) {
+    if (!MOCK_WALLET_CLIENT) {
       const walletModule = await import('@/lib/wallet/satsConnect');
       await walletModule.disconnectSatsWallet().catch(() => null);
     }
@@ -109,7 +109,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signMessage = useCallback(async (address: string, message: string) => {
-    if (MOCK_CLIENT) return 'mock-signature';
+    if (MOCK_WALLET_CLIENT) return 'mock-signature';
     const { signBuyerMessage } = await import('@/lib/wallet/satsConnect');
     return signBuyerMessage(address, message);
   }, []);

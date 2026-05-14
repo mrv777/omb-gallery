@@ -6,7 +6,10 @@ import SubpageShell from '@/components/SubpageShell';
 import InscriptionDetail from '@/components/InscriptionDetail/InscriptionDetail';
 import { buildSocial } from '@/lib/metadata';
 import { estimateLoanExpiration, type LoanExpirationEstimate } from '@/lib/loanExpiration';
-import { getMarketplaceListing, marketplaceMockEnabled } from '@/lib/marketplace/listings';
+import {
+  getMarketplaceListing,
+  marketplaceFixtureListingsEnabled,
+} from '@/lib/marketplace/listings';
 import { mockListing } from '@/lib/marketplace/mock';
 
 type Params = { number: string };
@@ -47,7 +50,9 @@ export default async function InscriptionPage({ params }: { params: Promise<Para
   if (!inscription) notFound();
 
   const events = stmts.getAllInscriptionEvents.all(num) as EventRow[];
-  const currentListing = marketplaceMockEnabled() ? mockListing(num) : getMarketplaceListing(num);
+  const currentListing = marketplaceFixtureListingsEnabled()
+    ? mockListing(num)
+    : getMarketplaceListing(num);
 
   // "Other OMBs by this owner" — fetch one extra so we can show a "+N more" hint
   // without paying for a separate COUNT query.

@@ -1,16 +1,20 @@
 import { NextResponse } from 'next/server';
-import { getMarketplaceLiteListings, marketplaceMockEnabled } from '@/lib/marketplace/listings';
+import {
+  getMarketplaceLiteListings,
+  marketplaceFixtureListingsEnabled,
+  marketplaceMockEnabled,
+} from '@/lib/marketplace/listings';
 import { mockLiteListings } from '@/lib/marketplace/mock';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function GET() {
-  const mock = marketplaceMockEnabled();
+  const fixtureListings = marketplaceFixtureListingsEnabled();
   return NextResponse.json(
     {
-      listings: mock ? mockLiteListings() : getMarketplaceLiteListings(),
-      mock,
+      listings: fixtureListings ? mockLiteListings() : getMarketplaceLiteListings(),
+      mock: marketplaceMockEnabled(),
     },
     {
       headers: {

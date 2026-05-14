@@ -6,7 +6,11 @@ import {
   parseOrdnetBuyerSession,
 } from '@/lib/buyerSession';
 import { createBuyIntent, markIntentFailed } from '@/lib/marketplace/buyIntentsStore';
-import { getMarketplaceListing, marketplaceMockEnabled } from '@/lib/marketplace/listings';
+import {
+  getMarketplaceListing,
+  marketplaceFixtureListingsEnabled,
+  marketplaceMockEnabled,
+} from '@/lib/marketplace/listings';
 import { mockIntentResponse, mockListing } from '@/lib/marketplace/mock';
 import { createOrdnetPurchaseIntent, ordnetErrorResponse } from '@/lib/ordnet';
 import { createSatflowPurchaseIntent, satflowBuyErrorResponse } from '@/lib/marketplace/satflowBuy';
@@ -34,8 +38,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invalid inscription number' }, { status: 400 });
   }
 
-  const mock = marketplaceMockEnabled();
-  const listing = mock ? mockListing(inscriptionNumber) : getMarketplaceListing(inscriptionNumber);
+  const mockPurchase = marketplaceMockEnabled();
+  const listing = marketplaceFixtureListingsEnabled()
+    ? mockListing(inscriptionNumber)
+    : getMarketplaceListing(inscriptionNumber);
   if (!listing) {
     return NextResponse.json(
       { error: 'listing unavailable or already sold', code: 'listing-stale' },
@@ -43,7 +49,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (mock) {
+  if (mockPurchase) {
     const intentId = createBuyIntent({
       inscription_id: listing.inscription_id,
       inscription_number: listing.inscription_number,

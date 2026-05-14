@@ -124,7 +124,7 @@ export default function ConnectWalletButton({ compact = false }: { compact?: boo
   );
 
   async function openWalletPicker() {
-    if (process.env.NEXT_PUBLIC_MARKETPLACE_MOCK === 'true') {
+    if (process.env.NEXT_PUBLIC_MARKETPLACE_MOCK_WALLET === 'true') {
       await connect().catch(() => null);
       return;
     }

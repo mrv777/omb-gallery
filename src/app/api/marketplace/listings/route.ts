@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   getMarketplaceListings,
   getMarketplaceStats,
+  marketplaceFixtureListingsEnabled,
   marketplaceMockEnabled,
   normalizeMarketplaceSort,
 } from '@/lib/marketplace/listings';
@@ -14,14 +15,14 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const sort = normalizeMarketplaceSort(url.searchParams.get('sort'));
   const color = url.searchParams.get('color');
-  const mock = marketplaceMockEnabled();
-  const listings = mock
+  const fixtureListings = marketplaceFixtureListingsEnabled();
+  const listings = fixtureListings
     ? filterMockListings(mockListings(), color, sort)
     : getMarketplaceListings({ color, sort });
-  const stats = mock ? mockStats() : getMarketplaceStats();
+  const stats = fixtureListings ? mockStats() : getMarketplaceStats();
 
   return NextResponse.json(
-    { listings, stats, mock },
+    { listings, stats, mock: marketplaceMockEnabled() },
     {
       headers: {
         'Cache-Control': 'private, no-store',

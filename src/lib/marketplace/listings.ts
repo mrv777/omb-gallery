@@ -23,8 +23,20 @@ export function marketplaceMockEnabled(): boolean {
   return process.env.MARKETPLACE_MOCK === 'true';
 }
 
+export function marketplaceFixtureListingsEnabled(): boolean {
+  return process.env.MARKETPLACE_FIXTURE_LISTINGS === 'true';
+}
+
+export function marketplaceMockWalletEnabled(): boolean {
+  return process.env.MARKETPLACE_MOCK_WALLET === 'true';
+}
+
 export function marketplaceEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_MARKETPLACE_ENABLED === 'true' || marketplaceMockEnabled();
+  return (
+    process.env.NEXT_PUBLIC_MARKETPLACE_ENABLED === 'true' ||
+    marketplaceMockEnabled() ||
+    marketplaceFixtureListingsEnabled()
+  );
 }
 
 export function normalizeMarketplaceSort(value: string | null | undefined): MarketplaceSort {

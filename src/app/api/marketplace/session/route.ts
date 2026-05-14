@@ -13,7 +13,7 @@ import {
   signInMessage,
   verifyBuyerSignature,
 } from '@/lib/buyerSession';
-import { marketplaceMockEnabled } from '@/lib/marketplace/listings';
+import { marketplaceMockWalletEnabled } from '@/lib/marketplace/listings';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
   const payPubkey = cleanString(body.pay_pubkey);
   if (!ordAddr) return NextResponse.json({ error: 'ordinals address required' }, { status: 400 });
 
-  if (body.mock === true && marketplaceMockEnabled()) {
+  if (body.mock === true && marketplaceMockWalletEnabled()) {
     return mintAndRespond({
       ord_addr: ordAddr,
       pay_addr: payAddr,

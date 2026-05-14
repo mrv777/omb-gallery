@@ -8,7 +8,7 @@ import {
   getMarketplaceListings,
   getMarketplaceStats,
   marketplaceEnabled,
-  marketplaceMockEnabled,
+  marketplaceFixtureListingsEnabled,
 } from '@/lib/marketplace/listings';
 import { mockListings, mockStats } from '@/lib/marketplace/mock';
 
@@ -23,9 +23,9 @@ const DEFAULT_DISCORD_INVITE_URL = 'https://discord.gg/ordinalmaxibiz';
 
 export default function MarketplacePage() {
   if (!marketplaceEnabled()) notFound();
-  const mock = marketplaceMockEnabled();
-  const listings = mock ? mockListings() : getMarketplaceListings({ sort: 'price-asc' });
-  const stats = mock ? mockStats() : getMarketplaceStats();
+  const fixtureListings = marketplaceFixtureListingsEnabled();
+  const listings = fixtureListings ? mockListings() : getMarketplaceListings({ sort: 'price-asc' });
+  const stats = fixtureListings ? mockStats() : getMarketplaceStats();
 
   return (
     <SubpageShell
