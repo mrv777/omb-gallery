@@ -70,6 +70,12 @@ export async function POST(req: NextRequest) {
             buyerPayPubkey: session.pay_pubkey,
           });
     const maybePreflightJson = (intent as unknown as { preflightJson?: unknown }).preflightJson;
+    const maybePsbts = (
+      intent as unknown as {
+        psbts?: Array<{ psbt: string; sign_inputs?: Record<string, number[]>; label?: string }>;
+      }
+    ).psbts;
+    const maybeStep = (intent as unknown as { step?: unknown }).step;
     const preflightJson = typeof maybePreflightJson === 'string' ? maybePreflightJson : null;
     intentId = createBuyIntent({
       inscription_id: listing.inscription_id,
@@ -86,6 +92,8 @@ export async function POST(req: NextRequest) {
       intent_id: intentId,
       psbt: intent.psbt,
       sign_inputs: intent.signInputs,
+      psbts: toWirePsbts(maybePsbts),
+      step: typeof maybeStep === 'string' ? maybeStep : undefined,
       listing,
       mock: false,
     });
@@ -102,6 +110,12 @@ export async function POST(req: NextRequest) {
     if (intentId != null) markIntentFailed(intentId, mapped.message);
     return NextResponse.json({ error: mapped.message }, { status: mapped.status });
   }
+}
+
+function toWirePsbts(
+  psbts: Array<{ psbt: string; sign_inputs?: Record<string, number[]>; label?: string }> | undefined
+) {
+  return psbts && psbts.length > 0 ? psbts : undefined;
 }
 
 class OrdnetAuthRequiredError extends Error {
@@ -131,6 +145,7 @@ async function createOrdnetIntent(
   }
   return createOrdnetPurchaseIntent({
     listing,
+    buyerPayAddr: session.pay_addr,
     buyerPayPubkey: session.pay_pubkey,
     ordnetSession,
   });

@@ -3,10 +3,13 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useWallet } from './WalletProvider';
+import type { SatsWalletOption } from '@/lib/wallet/satsConnect';
 
 export default function ConnectWalletButton({ compact = false }: { compact?: boolean }) {
   const { wallet, connecting, connect, disconnect, error } = useWallet();
   const [open, setOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [walletOptions, setWalletOptions] = useState<SatsWalletOption[]>([]);
   const menuRef = useRef<HTMLDivElement>(null);
   const errorId = useId();
 
@@ -25,6 +28,15 @@ export default function ConnectWalletButton({ compact = false }: { compact?: boo
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPickerOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [pickerOpen]);
 
   if (wallet) {
     return (
@@ -73,9 +85,7 @@ export default function ConnectWalletButton({ compact = false }: { compact?: boo
     <div className="relative flex items-center gap-2">
       <button
         type="button"
-        onClick={() => {
-          void connect().catch(() => null);
-        }}
+        onClick={() => void openWalletPicker()}
         disabled={connecting}
         aria-describedby={error ? errorId : undefined}
         className="h-8 border border-bone-dim/60 px-2 font-mono text-[10px] uppercase tracking-[0.08em] text-bone hover:border-bone disabled:opacity-50"
@@ -96,8 +106,31 @@ export default function ConnectWalletButton({ compact = false }: { compact?: boo
           {error}
         </span>
       )}
+      {pickerOpen && (
+        <WalletPickerDialog
+          options={walletOptions}
+          connecting={connecting}
+          error={error}
+          onClose={() => setPickerOpen(false)}
+          onSelect={providerId => {
+            void connect(providerId)
+              .then(() => setPickerOpen(false))
+              .catch(() => null);
+          }}
+        />
+      )}
     </div>
   );
+
+  async function openWalletPicker() {
+    if (process.env.NEXT_PUBLIC_MARKETPLACE_MOCK === 'true') {
+      await connect().catch(() => null);
+      return;
+    }
+    const walletModule = await import('@/lib/wallet/satsConnect');
+    setWalletOptions(walletModule.getSatsWalletOptions());
+    setPickerOpen(true);
+  }
 }
 
 function shortAddress(address: string, compact: boolean): string {
@@ -105,4 +138,107 @@ function shortAddress(address: string, compact: boolean): string {
   const tail = compact ? 4 : 6;
   if (address.length <= head + tail + 3) return address;
   return `${address.slice(0, head)}...${address.slice(-tail)}`;
+}
+
+function WalletPickerDialog({
+  options,
+  connecting,
+  error,
+  onClose,
+  onSelect,
+}: {
+  options: SatsWalletOption[];
+  connecting: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSelect: (providerId: string) => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[1800] bg-ink-0/85 backdrop-blur-sm" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="wallet-picker-title"
+        className="absolute left-1/2 top-1/2 w-[min(92vw,420px)] -translate-x-1/2 -translate-y-1/2 border border-ink-2 bg-ink-0 p-4 font-mono uppercase tracking-[0.08em] shadow-[0_20px_60px_rgba(0,0,0,0.85)]"
+        onClick={event => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <h2 id="wallet-picker-title" className="text-lg text-bone">
+            connect wallet
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-8 w-8 text-bone-dim hover:text-bone"
+            aria-label="Close wallet picker"
+          >
+            x
+          </button>
+        </div>
+
+        <div className="mt-4 space-y-2">
+          {options.length === 0 && (
+            <div className="border border-ink-2 px-3 py-4 text-[10px] leading-relaxed text-bone-dim">
+              No compatible Bitcoin wallet was found. Install or enable Xverse, then try again.
+            </div>
+          )}
+          {options.map(option =>
+            option.isInstalled ? (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => onSelect(option.id)}
+                disabled={connecting}
+                className="grid h-14 w-full grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 border border-ink-2 px-3 text-left text-[11px] text-bone transition-colors hover:border-bone-dim disabled:cursor-wait disabled:opacity-50"
+              >
+                <WalletIcon option={option} />
+                <span className="truncate">{option.name}</span>
+                <span className="text-[9px] text-bone-dim">
+                  {connecting ? 'opening' : 'select'}
+                </span>
+              </button>
+            ) : (
+              <UnavailableWalletOption key={option.id} option={option} />
+            )
+          )}
+        </div>
+
+        {error && (
+          <div className="mt-4 border border-accent-red/50 px-3 py-2 text-[10px] leading-relaxed text-accent-red">
+            {error}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WalletIcon({ option, dim = false }: { option: SatsWalletOption; dim?: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`block h-8 w-8 bg-contain bg-center bg-no-repeat ${dim ? 'opacity-60' : ''}`}
+      style={{ backgroundImage: `url(${option.icon})` }}
+    />
+  );
+}
+
+function UnavailableWalletOption({ option }: { option: SatsWalletOption }) {
+  const content = (
+    <>
+      <WalletIcon option={option} dim />
+      <span className="truncate">{option.name}</span>
+      <span className="text-[9px]">{option.installUrl ? 'install' : 'missing'}</span>
+    </>
+  );
+  const className =
+    'grid h-14 w-full grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 border border-ink-2 px-3 text-left text-[11px] text-bone-dim transition-colors hover:border-bone-dim hover:text-bone';
+  if (!option.installUrl) {
+    return <div className={`${className} cursor-not-allowed opacity-60`}>{content}</div>;
+  }
+  return (
+    <a href={option.installUrl} target="_blank" rel="noopener noreferrer" className={className}>
+      {content}
+    </a>
+  );
 }

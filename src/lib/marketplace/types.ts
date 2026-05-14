@@ -58,16 +58,28 @@ export type BuyIntentRow = {
   updated_at: number;
 };
 
+export type PurchasePsbtToSign = {
+  psbt: string;
+  sign_inputs?: Record<string, number[]>;
+  label?: string;
+};
+
 export type CreateIntentResponse = {
   intent_id: number;
   psbt: string;
   sign_inputs?: Record<string, number[]>;
+  psbts?: PurchasePsbtToSign[];
+  step?: string;
   listing: MarketplaceListing;
   mock: boolean;
 };
 
 export type BroadcastResponse = {
   intent_id: number;
-  txid: string;
+  txid?: string;
+  psbt?: string;
+  sign_inputs?: Record<string, number[]>;
+  psbts?: PurchasePsbtToSign[];
+  step?: string;
   mock: boolean;
 };

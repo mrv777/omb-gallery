@@ -19,7 +19,7 @@ type WalletContextValue = {
   wallet: BuyerSessionState | null;
   connecting: boolean;
   error: string | null;
-  connect: () => Promise<BuyerSessionState>;
+  connect: (providerId?: string) => Promise<BuyerSessionState>;
   disconnect: () => Promise<void>;
   acceptTerms: () => Promise<void>;
   signMessage: (address: string, message: string) => Promise<string>;
@@ -36,15 +36,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) setWallet(JSON.parse(raw) as BuyerSessionState);
-    } catch {
-      window.localStorage.removeItem(STORAGE_KEY);
-    }
-    void refreshSession().then(next => {
-      if (next) setWallet(next);
+    let cancelled = false;
+    void initializeWallet().then(next => {
+      if (!cancelled && next) setWallet(next);
     });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const persist = useCallback((next: BuyerSessionState | null) => {
@@ -56,30 +54,37 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   }, []);
 
-  const connect = useCallback(async () => {
-    setConnecting(true);
-    setError(null);
-    try {
-      const walletModule = await import('@/lib/wallet/satsConnect');
-      const connected = MOCK_CLIENT
-        ? walletModule.mockConnectedWallet()
-        : await walletModule.connectSatsWallet();
-      const session = MOCK_CLIENT
-        ? await createMockSession(connected)
-        : await createSignedSession(connected, walletModule.signBuyerMessage);
-      persist(session);
-      return session;
-    } catch (err) {
-      const message = walletErrorMessage(err);
-      setError(message);
-      throw new Error(message);
-    } finally {
-      setConnecting(false);
-    }
-  }, [persist]);
+  const connect = useCallback(
+    async (providerId?: string) => {
+      setConnecting(true);
+      setError(null);
+      try {
+        const walletModule = await import('@/lib/wallet/satsConnect');
+        const connected = MOCK_CLIENT
+          ? walletModule.mockConnectedWallet()
+          : await walletModule.connectSatsWallet(providerId);
+        const session = MOCK_CLIENT
+          ? await createMockSession(connected)
+          : await createSignedSession(connected, walletModule.signBuyerMessage);
+        persist(session);
+        return session;
+      } catch (err) {
+        const message = walletErrorMessage(err);
+        setError(message);
+        throw new Error(message);
+      } finally {
+        setConnecting(false);
+      }
+    },
+    [persist]
+  );
 
   const disconnect = useCallback(async () => {
     await fetch('/api/marketplace/session', { method: 'DELETE' }).catch(() => null);
+    if (!MOCK_CLIENT) {
+      const walletModule = await import('@/lib/wallet/satsConnect');
+      await walletModule.disconnectSatsWallet().catch(() => null);
+    }
     persist(null);
   }, [persist]);
 
@@ -135,6 +140,22 @@ async function refreshSession(): Promise<BuyerSessionState | null> {
     // ignore
   }
   return next;
+}
+
+async function initializeWallet(): Promise<BuyerSessionState | null> {
+  const cached = readCachedWallet();
+  const refreshed = await refreshSession();
+  return refreshed ?? cached;
+}
+
+function readCachedWallet(): BuyerSessionState | null {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as BuyerSessionState) : null;
+  } catch {
+    window.localStorage.removeItem(STORAGE_KEY);
+    return null;
+  }
 }
 
 async function createMockSession(connected: ConnectedWallet): Promise<BuyerSessionState> {

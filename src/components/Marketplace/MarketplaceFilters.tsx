@@ -26,7 +26,7 @@ export default function MarketplaceFilters({
   onSortChange,
 }: Props) {
   return (
-    <div className="sticky top-12 z-40 border-y border-ink-2 bg-ink-0/98 px-3 py-2 shadow-[0_10px_24px_rgba(0,0,0,0.85)] backdrop-blur-xl sm:px-6">
+    <div className="sticky top-12 z-40 border-y border-ink-2 bg-ink-1/95 px-3 py-2 backdrop-blur sm:px-6">
       <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-[0.08em] text-bone-dim">
         <ColorSwatches color={color} onChange={onColorChange} />
         <div className="flex items-center gap-1">

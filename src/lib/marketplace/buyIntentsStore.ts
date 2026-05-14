@@ -62,6 +62,19 @@ export function markIntentSigned(id: number): void {
   setIntentStatus({ id, status: 'signed' });
 }
 
+export function updateIntentPreflightJson(id: number, preflightJson: string): void {
+  getDb()
+    .prepare(
+      `
+      UPDATE buy_intents
+      SET preflight_json = ?,
+          updated_at = unixepoch()
+      WHERE id = ?
+    `
+    )
+    .run(preflightJson, id);
+}
+
 export function markIntentBroadcast(id: number, txid: string): void {
   setIntentStatus({ id, status: 'broadcast', txid });
 }

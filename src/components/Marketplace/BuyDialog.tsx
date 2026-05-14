@@ -7,6 +7,7 @@ import type {
   BroadcastResponse,
   CreateIntentResponse,
   MarketplaceListing,
+  PurchasePsbtToSign,
 } from '@/lib/marketplace/types';
 import { useWallet } from '@/components/wallet/WalletProvider';
 import ConnectWalletButton from '@/components/wallet/ConnectWalletButton';
@@ -35,19 +36,7 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
     setError(null);
     try {
       const intentJson = await createIntentWithOrdnetRetry(listing);
-
-      const signedPsbt = await signPsbt(intentJson.psbt, intentJson.sign_inputs);
-      const broadcastRes = await fetch('/api/marketplace/broadcast', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ intent_id: intentJson.intent_id, signed_psbt: signedPsbt }),
-      });
-      const broadcastJson = (await broadcastRes.json().catch(() => null)) as
-        | (BroadcastResponse & { error?: string })
-        | null;
-      if (!broadcastRes.ok || !broadcastJson?.txid) {
-        throw new Error(broadcastJson?.error ?? 'Broadcast failed');
-      }
+      const broadcastJson = await completeSigningFlow(intentJson);
       onSuccess({
         listing: intentJson.listing,
         txid: broadcastJson.txid,
@@ -59,6 +48,52 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
     } finally {
       setBusy(false);
     }
+  }
+
+  async function completeSigningFlow(
+    intentJson: CreateIntentResponse
+  ): Promise<BroadcastResponse & { txid: string }> {
+    let step: SigningStep = intentJson;
+    for (let round = 0; round < 4; round++) {
+      const signedPsbts = await signStepPsbts(step);
+      const broadcastRes = await fetch('/api/marketplace/broadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          intent_id: intentJson.intent_id,
+          signed_psbt: signedPsbts[0],
+          signed_psbts: signedPsbts,
+        }),
+      });
+      const broadcastJson = (await broadcastRes.json().catch(() => null)) as
+        | (BroadcastResponse & { error?: string })
+        | null;
+      if (!broadcastRes.ok || !broadcastJson) {
+        throw new Error(broadcastJson?.error ?? 'Broadcast failed');
+      }
+      if (broadcastJson.txid) return { ...broadcastJson, txid: broadcastJson.txid };
+      if (broadcastJson.psbt || broadcastJson.psbts?.length) {
+        step = {
+          intent_id: intentJson.intent_id,
+          psbt: broadcastJson.psbt ?? broadcastJson.psbts?.[0]?.psbt ?? '',
+          sign_inputs: broadcastJson.sign_inputs ?? broadcastJson.psbts?.[0]?.sign_inputs,
+          psbts: broadcastJson.psbts,
+          step: broadcastJson.step,
+        };
+        continue;
+      }
+      throw new Error('Broadcast did not return a transaction or another signing step');
+    }
+    throw new Error('Purchase required too many signing rounds');
+  }
+
+  async function signStepPsbts(step: SigningStep): Promise<string[]> {
+    const psbts = normalizeStepPsbts(step);
+    const signed: string[] = [];
+    for (const item of psbts) {
+      signed.push(await signPsbt(item.psbt, item.sign_inputs));
+    }
+    return signed;
   }
 
   async function createIntentWithOrdnetRetry(
@@ -200,7 +235,9 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
 
           <div className="mt-5 space-y-3">
             {!wallet ? <ConnectWalletButton /> : <TermsCheckbox />}
-            {error && <div className="text-[11px] text-accent-red">{error}</div>}
+            {error && (
+              <div className="break-words text-[11px] leading-relaxed text-accent-red">{error}</div>
+            )}
           </div>
 
           <div className="mt-auto flex items-center justify-end gap-2 pt-6">
@@ -236,6 +273,19 @@ type OrdnetChallenge = {
   }>;
   error?: string;
 };
+
+type SigningStep = {
+  intent_id: number;
+  psbt: string;
+  sign_inputs?: Record<string, number[]>;
+  psbts?: PurchasePsbtToSign[];
+  step?: string;
+};
+
+function normalizeStepPsbts(step: SigningStep): PurchasePsbtToSign[] {
+  if (step.psbts?.length) return step.psbts;
+  return [{ psbt: step.psbt, sign_inputs: step.sign_inputs, label: step.step }];
+}
 
 function signatureToHex(signature: string): string {
   if (/^(?:[0-9a-fA-F]{2})+$/.test(signature)) return signature;

@@ -7,6 +7,10 @@ const ORDNET_API_BASE = (process.env.ORDNET_API_BASE_URL ?? 'https://ord.net/api
   /\/+$/,
   ''
 );
+const MEMPOOL_API_BASE = (process.env.MEMPOOL_API_BASE_URL ?? 'https://mempool.space/api').replace(
+  /\/+$/,
+  ''
+);
 const REQUEST_TIMEOUT_MS = 20_000;
 const MAX_RETRIES = 3;
 const SERVICE_TOKEN_REFRESH_MARGIN_MS = 2 * 60 * 1000;
@@ -100,6 +104,7 @@ type PurchasePreflightRequest = {
   walletBindingId: string;
   paymentPublicKey: string;
   listings: PurchaseRequestListing[];
+  spendableUtxos?: SpendableUtxo[];
 };
 
 type PurchasePreflightResponse = {
@@ -202,6 +207,7 @@ export async function fetchOrdnetListingsPage(
 
 export async function createOrdnetPurchaseIntent(args: {
   listing: MarketplaceListing;
+  buyerPayAddr: string | null;
   buyerPayPubkey: string | null;
   ordnetSession: {
     session_token: string;
@@ -211,7 +217,26 @@ export async function createOrdnetPurchaseIntent(args: {
   if (!args.buyerPayPubkey) {
     throw new OrdnetConfigError('ORD.NET purchases require a payment public key from the wallet.');
   }
+  if (!args.buyerPayAddr) {
+    throw new OrdnetConfigError('ORD.NET purchases require a payment address from the wallet.');
+  }
   const collectionSlug = ordnetCollectionSlugFor('omb') ?? 'omb';
+  const spendableUtxos = await fetchSpendablePaymentUtxos(args.buyerPayAddr);
+  if (spendableUtxos.length === 0) {
+    throw new OrdnetError(
+      'ORD.NET requires spendable BTC on the connected payment address, but no payment UTXOs were found.',
+      403,
+      false
+    );
+  }
+  const spendableTotal = spendableUtxos.reduce((sum, utxo) => sum + utxo.valueSats, 0);
+  if (spendableTotal < args.listing.price_sats) {
+    throw new OrdnetError(
+      'ORD.NET requires enough spendable BTC on the connected payment address for the listing price plus fees.',
+      403,
+      false
+    );
+  }
   const requestBody: PurchasePreflightRequest = {
     walletBindingId: args.ordnetSession.wallet_binding_id,
     paymentPublicKey: args.buyerPayPubkey,
@@ -221,6 +246,7 @@ export async function createOrdnetPurchaseIntent(args: {
         inscriptionId: args.listing.inscription_id,
       },
     ],
+    spendableUtxos,
   };
 
   const raw = await postJson(
@@ -275,6 +301,43 @@ export function ordnetErrorResponse(err: unknown): { message: string; status: nu
   if (err instanceof OrdnetConfigError) return { message: err.message, status: 501 };
   if (err instanceof OrdnetError) return { message: err.message, status: err.status ?? 502 };
   return { message: err instanceof Error ? err.message : String(err), status: 500 };
+}
+
+async function fetchSpendablePaymentUtxos(address: string): Promise<SpendableUtxo[]> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${MEMPOOL_API_BASE}/address/${encodeURIComponent(address)}/utxo`, {
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      throw new OrdnetError(
+        `Could not check payment-address UTXOs (${res.status} from mempool.space).`,
+        res.status,
+        res.status === 429 || res.status >= 500,
+        text.slice(0, 500)
+      );
+    }
+    const raw = text ? JSON.parse(text) : [];
+    if (!Array.isArray(raw)) {
+      throw new OrdnetError('Payment-address UTXO response was not an array.', null, false);
+    }
+    return raw
+      .map(parseMempoolUtxo)
+      .filter((utxo): utxo is SpendableUtxo => utxo != null)
+      .toSorted((a, b) => b.valueSats - a.valueSats)
+      .slice(0, 1000);
+  } catch (err) {
+    if (err instanceof OrdnetError) throw err;
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new OrdnetError('Payment-address UTXO lookup timed out.', null, true);
+    }
+    throw new OrdnetError(err instanceof Error ? err.message : String(err), null, true);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function getServiceBearerToken(): Promise<string> {
@@ -574,7 +637,7 @@ async function requestJsonOnce(
     if (!res.ok) {
       const retryable = res.status === 429 || res.status >= 500;
       throw new OrdnetError(
-        `ORD.NET request failed with HTTP ${res.status}`,
+        ordnetHttpErrorMessage(res.status, text),
         res.status,
         retryable,
         text.slice(0, 500)
@@ -640,6 +703,54 @@ function parseIsoToUnix(iso: string | null): number | null {
 function cleanPositiveInt(value: unknown): number | null {
   const n = typeof value === 'number' ? Math.trunc(value) : Number.NaN;
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function parseMempoolUtxo(raw: unknown): SpendableUtxo | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const txid = cleanString(obj.txid);
+  const vout = typeof obj.vout === 'number' ? Math.trunc(obj.vout) : Number.NaN;
+  const valueSats = typeof obj.value === 'number' ? Math.trunc(obj.value) : Number.NaN;
+  if (
+    !txid ||
+    !Number.isFinite(vout) ||
+    vout < 0 ||
+    !Number.isFinite(valueSats) ||
+    valueSats <= 0
+  ) {
+    return null;
+  }
+  return { txid, vout, valueSats };
+}
+
+function ordnetHttpErrorMessage(status: number, body: string): string {
+  const detail = responseErrorDetail(body);
+  const base = `ORD.NET request failed with HTTP ${status}`;
+  if (detail) return `${base}: ${detail}`;
+  if (status === 403) {
+    return `${base}: wallet is not allowed to perform this action. Confirm the connected payment address has at least 0.01 BTC confirmed and enough spendable BTC for the purchase.`;
+  }
+  return base;
+}
+
+function responseErrorDetail(body: string): string | null {
+  const trimmed = body.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (parsed && typeof parsed === 'object') {
+      const obj = parsed as Record<string, unknown>;
+      const value = cleanString(obj.error) ?? cleanString(obj.message) ?? cleanString(obj.detail);
+      if (value) return truncateErrorDetail(value);
+    }
+  } catch {
+    // fall through to plain-text body handling
+  }
+  return truncateErrorDetail(trimmed.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' '));
+}
+
+function truncateErrorDetail(value: string): string {
+  return value.length > 220 ? `${value.slice(0, 217)}...` : value;
 }
 
 function cleanString(value: unknown): string | null {

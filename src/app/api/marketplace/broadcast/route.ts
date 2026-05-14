@@ -10,6 +10,7 @@ import {
   markIntentBroadcast,
   markIntentFailed,
   markIntentSigned,
+  updateIntentPreflightJson,
 } from '@/lib/marketplace/buyIntentsStore';
 import { marketplaceMockEnabled } from '@/lib/marketplace/listings';
 import { mockBroadcast } from '@/lib/marketplace/mock';
@@ -22,6 +23,7 @@ export const runtime = 'nodejs';
 type Body = {
   intent_id?: unknown;
   signed_psbt?: unknown;
+  signed_psbts?: unknown;
 };
 
 export async function POST(req: NextRequest) {
@@ -31,7 +33,15 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => null)) as Body | null;
   const intentId = body && typeof body.intent_id === 'number' ? Math.trunc(body.intent_id) : NaN;
   const signedPsbt = body && typeof body.signed_psbt === 'string' ? body.signed_psbt : null;
-  if (!Number.isFinite(intentId) || intentId <= 0 || !signedPsbt) {
+  const signedPsbts =
+    body && Array.isArray(body.signed_psbts)
+      ? body.signed_psbts.filter(
+          (item): item is string => typeof item === 'string' && item.length > 0
+        )
+      : signedPsbt
+        ? [signedPsbt]
+        : [];
+  if (!Number.isFinite(intentId) || intentId <= 0 || signedPsbts.length === 0) {
     return NextResponse.json({ error: 'intent_id and signed_psbt required' }, { status: 400 });
   }
 
@@ -48,19 +58,34 @@ export async function POST(req: NextRequest) {
   }
 
   markIntentSigned(intentId);
+  const firstSignedPsbt = signedPsbts[0]!;
 
   if (marketplaceMockEnabled() && intent.is_mock === 1) {
     const result = mockBroadcast(intentId);
-    markIntentBroadcast(intentId, result.txid);
+    markIntentBroadcast(intentId, result.txid!);
     return NextResponse.json(result);
   }
 
   try {
     const marketplaceKey = intent.marketplace.toLowerCase();
-    const result =
-      marketplaceKey === 'ord.net' || marketplaceKey === 'ordnet'
-        ? await broadcastOrdnet(req, intent, signedPsbt)
-        : await broadcastSatflowPurchase(intentId, signedPsbt);
+    if (marketplaceKey === 'ord.net' || marketplaceKey === 'ordnet') {
+      const result = await broadcastOrdnet(req, intent, firstSignedPsbt);
+      markIntentBroadcast(intentId, result.txid);
+      return NextResponse.json({ intent_id: intentId, txid: result.txid, mock: false });
+    }
+
+    const result = await broadcastSatflowPurchase(intent, signedPsbts);
+    if (result.type === 'next') {
+      updateIntentPreflightJson(intentId, result.preflightJson);
+      return NextResponse.json({
+        intent_id: intentId,
+        psbt: result.psbt,
+        sign_inputs: result.signInputs,
+        psbts: result.psbts,
+        step: result.step,
+        mock: false,
+      });
+    }
     markIntentBroadcast(intentId, result.txid);
     return NextResponse.json({ intent_id: intentId, txid: result.txid, mock: false });
   } catch (err) {
