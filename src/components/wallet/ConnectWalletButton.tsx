@@ -63,7 +63,7 @@ export default function ConnectWalletButton({ compact = false }: { compact?: boo
               onClick={() => setOpen(false)}
               className="block px-3 py-2 hover:bg-ink-1 hover:text-bone"
             >
-              holder page
+              VIEW HOLDINGS
             </Link>
             <button
               type="button"
@@ -74,7 +74,7 @@ export default function ConnectWalletButton({ compact = false }: { compact?: boo
               }}
               className="block w-full px-3 py-2 text-left hover:bg-ink-1 hover:text-bone"
             >
-              disconnect
+              DISCONNECT
             </button>
           </div>
         )}
