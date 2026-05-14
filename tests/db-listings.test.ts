@@ -271,6 +271,32 @@ describe('buy_intents schema', () => {
     expect(intent?.txid).toBe('mock-txid');
     expect(intent?.is_mock).toBe(1);
   });
+
+  it('does not downgrade a broadcast intent after a late failure', async () => {
+    const row = dbModule.getDb().prepare(`SELECT * FROM inscriptions LIMIT 1`).get() as {
+      inscription_number: number;
+      inscription_id: string | null;
+    };
+    const store = await import('../src/lib/marketplace/buyIntentsStore');
+    const id = store.createBuyIntent({
+      inscription_id: row.inscription_id ?? `unknown-${row.inscription_number}`,
+      inscription_number: row.inscription_number,
+      buyer_ord_addr: 'bc1pbuyer',
+      buyer_pay_addr: 'bc1qbuyer',
+      marketplace: 'satflow',
+      price_sats: 1_000_000,
+      is_mock: false,
+    });
+
+    store.markIntentSigned(id);
+    store.markIntentBroadcast(id, 'real-txid');
+    store.markIntentFailed(id, 'late duplicate request failed');
+
+    const intent = store.getBuyIntent(id);
+    expect(intent?.status).toBe('broadcast');
+    expect(intent?.txid).toBe('real-txid');
+    expect(intent?.fail_reason).toBeNull();
+  });
 });
 
 describe('satflow_call_budget', () => {

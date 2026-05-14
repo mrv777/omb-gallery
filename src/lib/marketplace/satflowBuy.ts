@@ -122,6 +122,9 @@ export async function createSatflowPurchaseIntent(
     feeRate: parseFeeRate(DEFAULT_FEE_RATE),
     disableCompactPurchase: true,
   };
+  // Use Satflow's secure purchase path so the response can include the
+  // payment-prep -> purchase signing flow. `/purchase/broadcast` handles the
+  // final submit for secure and non-secure Satflow purchases.
   const raw = await postSatflowJson('/intent/secure-purchase', request);
   const intent = buildSigningIntent({
     request,

@@ -13,6 +13,7 @@ import {
   updateIntentPreflightJson,
 } from '@/lib/marketplace/buyIntentsStore';
 import { marketplaceMockEnabled } from '@/lib/marketplace/listings';
+import { marketplaceRateLimit, requireMarketplaceEnabled } from '@/lib/marketplace/apiGuards';
 import { mockBroadcast } from '@/lib/marketplace/mock';
 import { broadcastOrdnetPurchase, ordnetErrorResponse } from '@/lib/ordnet';
 import { broadcastSatflowPurchase, satflowBuyErrorResponse } from '@/lib/marketplace/satflowBuy';
@@ -27,8 +28,13 @@ type Body = {
 };
 
 export async function POST(req: NextRequest) {
+  const disabled = requireMarketplaceEnabled();
+  if (disabled) return disabled;
+
   const session = parseBuyerSession(req.cookies.get(BUYER_COOKIE_NAME)?.value);
   if (!session) return NextResponse.json({ error: 'connect wallet first' }, { status: 401 });
+  const limited = marketplaceRateLimit(req, 'broadcast', 20, 200);
+  if (limited) return limited;
 
   const body = (await req.json().catch(() => null)) as Body | null;
   const intentId = body && typeof body.intent_id === 'number' ? Math.trunc(body.intent_id) : NaN;

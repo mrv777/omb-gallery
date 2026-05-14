@@ -6,12 +6,16 @@ import {
   marketplaceMockEnabled,
   normalizeMarketplaceSort,
 } from '@/lib/marketplace/listings';
+import { requireMarketplaceEnabled } from '@/lib/marketplace/apiGuards';
 import { mockListings, mockStats } from '@/lib/marketplace/mock';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
+  const disabled = requireMarketplaceEnabled();
+  if (disabled) return disabled;
+
   const url = new URL(req.url);
   const sort = normalizeMarketplaceSort(url.searchParams.get('sort'));
   const color = url.searchParams.get('color');

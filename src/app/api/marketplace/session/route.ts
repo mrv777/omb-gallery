@@ -14,6 +14,7 @@ import {
   verifyBuyerSignature,
 } from '@/lib/buyerSession';
 import { marketplaceMockWalletEnabled } from '@/lib/marketplace/listings';
+import { marketplaceRateLimit, requireMarketplaceEnabled } from '@/lib/marketplace/apiGuards';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -29,10 +30,16 @@ type SessionBody = {
 };
 
 export async function GET(req: NextRequest) {
+  const disabled = requireMarketplaceEnabled();
+  if (disabled) return disabled;
+
   const url = new URL(req.url);
   const ordAddr = cleanString(url.searchParams.get('ord_addr'));
   const payAddr = cleanString(url.searchParams.get('pay_addr'));
   if (ordAddr) {
+    const limited = marketplaceRateLimit(req, 'session-challenge', 20, 200);
+    if (limited) return limited;
+
     if (!buyerSessionSecretConfigured()) {
       return NextResponse.json({ error: 'buyer session secret not configured' }, { status: 500 });
     }
@@ -54,6 +61,11 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const disabled = requireMarketplaceEnabled();
+  if (disabled) return disabled;
+  const limited = marketplaceRateLimit(req, 'session-create', 20, 200);
+  if (limited) return limited;
+
   const body = (await req.json().catch(() => null)) as SessionBody | null;
   if (!body) return NextResponse.json({ error: 'invalid json' }, { status: 400 });
   if (!buyerSessionSecretConfigured()) {
@@ -101,6 +113,11 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
+  const disabled = requireMarketplaceEnabled();
+  if (disabled) return disabled;
+  const limited = marketplaceRateLimit(req, 'session-terms', 30, 300);
+  if (limited) return limited;
+
   const body = (await req.json().catch(() => null)) as { accept_terms?: unknown } | null;
   if (!body || body.accept_terms !== true) {
     return NextResponse.json({ error: 'accept_terms required' }, { status: 400 });
@@ -118,6 +135,9 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE() {
+  const disabled = requireMarketplaceEnabled();
+  if (disabled) return disabled;
+
   const res = NextResponse.json({ ok: true });
   res.cookies.delete(BUYER_COOKIE_NAME);
   res.cookies.delete(BUYER_NONCE_COOKIE_NAME);

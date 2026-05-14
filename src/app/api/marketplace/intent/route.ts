@@ -11,6 +11,7 @@ import {
   marketplaceFixtureListingsEnabled,
   marketplaceMockEnabled,
 } from '@/lib/marketplace/listings';
+import { marketplaceRateLimit, requireMarketplaceEnabled } from '@/lib/marketplace/apiGuards';
 import { mockIntentResponse, mockListing } from '@/lib/marketplace/mock';
 import { createOrdnetPurchaseIntent, ordnetErrorResponse } from '@/lib/ordnet';
 import { createSatflowPurchaseIntent, satflowBuyErrorResponse } from '@/lib/marketplace/satflowBuy';
@@ -23,11 +24,16 @@ type Body = {
 };
 
 export async function POST(req: NextRequest) {
+  const disabled = requireMarketplaceEnabled();
+  if (disabled) return disabled;
+
   const session = parseBuyerSession(req.cookies.get(BUYER_COOKIE_NAME)?.value);
   if (!session) return NextResponse.json({ error: 'connect wallet first' }, { status: 401 });
   if (!session.accepted_terms_at) {
     return NextResponse.json({ error: 'terms acceptance required' }, { status: 428 });
   }
+  const limited = marketplaceRateLimit(req, 'intent', 6, 80);
+  if (limited) return limited;
 
   const body = (await req.json().catch(() => null)) as Body | null;
   const inscriptionNumber =

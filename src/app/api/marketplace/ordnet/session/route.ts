@@ -11,6 +11,7 @@ import {
   ordnetErrorResponse,
   verifyOrdnetAuthChallenge,
 } from '@/lib/ordnet';
+import { marketplaceRateLimit, requireMarketplaceEnabled } from '@/lib/marketplace/apiGuards';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -21,6 +22,9 @@ type VerifyBody = {
 };
 
 export async function GET(req: NextRequest) {
+  const disabled = requireMarketplaceEnabled();
+  if (disabled) return disabled;
+
   const session = parseBuyerSession(req.cookies.get(BUYER_COOKIE_NAME)?.value);
   if (!session) return NextResponse.json({ error: 'connect wallet first' }, { status: 401 });
   if (!session.pay_addr) {
@@ -29,6 +33,8 @@ export async function GET(req: NextRequest) {
       { status: 428 }
     );
   }
+  const limited = marketplaceRateLimit(req, 'ordnet-session', 10, 100);
+  if (limited) return limited;
 
   try {
     const challenge = await createOrdnetAuthChallenge({
@@ -51,6 +57,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const disabled = requireMarketplaceEnabled();
+  if (disabled) return disabled;
+
   const buyer = parseBuyerSession(req.cookies.get(BUYER_COOKIE_NAME)?.value);
   if (!buyer) return NextResponse.json({ error: 'connect wallet first' }, { status: 401 });
   if (!buyer.pay_addr) {
@@ -59,6 +68,8 @@ export async function POST(req: NextRequest) {
       { status: 428 }
     );
   }
+  const limited = marketplaceRateLimit(req, 'ordnet-session', 10, 100);
+  if (limited) return limited;
 
   const body = (await req.json().catch(() => null)) as VerifyBody | null;
   const authRequestId = cleanString(body?.auth_request_id);

@@ -1736,6 +1736,15 @@ async function runListingsTick(
       }
 
       collected.push(...pageRes.items.map(satflowListingToCandidate));
+      const satflowMayHaveMore =
+        pageRes.total > 0 ? page * pageRes.pageSize < pageRes.total : pageRes.hasMore;
+      if (page === LISTINGS_MAX_PAGES && satflowMayHaveMore) {
+        errMsg =
+          pageRes.total > 0
+            ? `listings page cap reached for satflow: fetched ${page * pageRes.pageSize} of ${pageRes.total}`
+            : `listings page cap reached for satflow after ${page} full pages`;
+        break;
+      }
       if (!pageRes.hasMore) break;
     }
   }
@@ -1765,7 +1774,15 @@ async function runListingsTick(
 
       collected.push(...pageRes.items.map(ordnetListingToCandidate));
       cursor = pageRes.nextCursor;
-      if (!pageRes.hasMore || !cursor) break;
+      if (page === LISTINGS_MAX_PAGES && pageRes.hasMore) {
+        errMsg = `listings page cap reached for ord.net after ${page} pages`;
+        break;
+      }
+      if (pageRes.hasMore && !cursor) {
+        errMsg = 'ord.net listings pagination returned hasMore without a next cursor';
+        break;
+      }
+      if (!pageRes.hasMore) break;
     }
   }
 

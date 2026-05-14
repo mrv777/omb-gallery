@@ -103,6 +103,14 @@ function setIntentStatus(args: {
   txid?: string;
   fail_reason?: string;
 }): void {
+  const allowedCurrent =
+    args.status === 'signed'
+      ? ['created', 'signed']
+      : args.status === 'broadcast'
+        ? ['created', 'signed', 'broadcast']
+        : args.status === 'failed'
+          ? ['created', 'signed', 'failed']
+          : ['created', 'signed', 'broadcast'];
   getDb()
     .prepare(
       `
@@ -112,6 +120,7 @@ function setIntentStatus(args: {
           fail_reason = @fail_reason,
           updated_at = unixepoch()
       WHERE id = @id
+        AND status IN (@allowed0, @allowed1, @allowed2)
     `
     )
     .run({
@@ -119,5 +128,8 @@ function setIntentStatus(args: {
       status: args.status,
       txid: args.txid ?? null,
       fail_reason: args.fail_reason ?? null,
+      allowed0: allowedCurrent[0],
+      allowed1: allowedCurrent[1],
+      allowed2: allowedCurrent[2] ?? allowedCurrent[1],
     });
 }
