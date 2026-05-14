@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
+import { createPortal } from 'react-dom';
 import { useWallet } from './WalletProvider';
 import type { SatsWalletOption } from '@/lib/wallet/satsConnect';
 
@@ -153,13 +154,16 @@ function WalletPickerDialog({
   onClose: () => void;
   onSelect: (providerId: string) => void;
 }) {
-  return (
-    <div className="fixed inset-0 z-[1800] bg-ink-0/85 backdrop-blur-sm" onClick={onClose}>
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[1800] grid place-items-center overflow-y-auto bg-ink-0/85 p-4 backdrop-blur-sm sm:p-6"
+      onClick={onClose}
+    >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="wallet-picker-title"
-        className="absolute left-1/2 top-1/2 w-[min(92vw,420px)] -translate-x-1/2 -translate-y-1/2 border border-ink-2 bg-ink-0 p-4 font-mono uppercase tracking-[0.08em] shadow-[0_20px_60px_rgba(0,0,0,0.85)]"
+        className="max-h-[calc(100dvh-2rem)] w-full max-w-[420px] overflow-y-auto border border-ink-2 bg-ink-0 p-4 font-mono uppercase tracking-[0.08em] shadow-[0_20px_60px_rgba(0,0,0,0.85)] sm:max-h-[calc(100dvh-3rem)]"
         onClick={event => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4">
@@ -209,7 +213,8 @@ function WalletPickerDialog({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

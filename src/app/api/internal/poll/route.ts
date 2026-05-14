@@ -82,10 +82,9 @@ const SATFLOW_INCREMENTAL_MAX_PAGES = 3;
 const SATFLOW_BACKFILL_MAX_PAGES_PER_TICK = 8;
 const SATFLOW_BACKFILL_POLITENESS_MS = 500;
 
-// Listings change frequently but the snapshot churn doesn't have to be
-// captured at sales-tick cadence. Run a refresh at most every 15 min,
-// regardless of how often the cron fires. Cuts ~67% of listing API calls.
-const LISTINGS_MIN_INTERVAL_SEC = 15 * 60;
+// Listings drive marketplace buying and visible floor state, so keep them at
+// the same cadence as the 5-minute auto cron.
+const LISTINGS_MIN_INTERVAL_SEC = 5 * 60;
 // Hard cap on pages walked per listings tick. With ~209 active OMB listings
 // at pageSize=100, 5 pages is ample headroom for growth and a defensive
 // brake if the API ever returns runaway data.
@@ -95,7 +94,7 @@ const LISTINGS_MAX_PAGES = 5;
 // long outage), we treat the entire snapshot as "already known" and skip
 // emitting `kind='listed'` events — otherwise users would get a flood of
 // hundreds of "newly listed" notifications for items that have been on the
-// market for days. 30 min is comfortably longer than the 15-min cadence.
+// market for days. 30 min is comfortably longer than the 5-min cadence.
 const LISTED_COLD_START_SEC = 30 * 60;
 // Soft alarm threshold for the monthly call budget. We don't BLOCK at this
 // threshold — that could disable the indexer silently — but we surface it in

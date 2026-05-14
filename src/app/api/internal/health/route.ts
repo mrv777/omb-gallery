@@ -5,15 +5,14 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 // Stream-specific staleness thresholds (seconds). These are 2x the natural
-// cadence: cron polls ord+satflow every 5min (=> stale > 10min), the listings
-// tick has a 15min interval (=> stale > 30min), matrica runs daily
-// (=> stale > 2 days), and notify + loans ride the 5min auto tick
+// cadence: cron polls ord+satflow/listings every 5min (ord/satflow stale
+// > 10min), matrica runs daily (=> stale > 2 days), and notify + loans ride the 5min auto tick
 // (=> stale > 15min, 3x the cron with slack — loans gets the same treatment
 // because it's chained into the auto tick after ord/satflow).
 const STALE_THRESHOLD_SEC: Record<string, number> = {
   ord: 600,
   satflow: 600,
-  satflow_listings: 1800,
+  satflow_listings: 900,
   matrica: 2 * 24 * 60 * 60,
   notify: 900,
   loans: 900,
