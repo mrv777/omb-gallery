@@ -156,17 +156,20 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
   }
 
   return (
-    <div className="fixed inset-0 z-[1600] bg-ink-0/80 backdrop-blur-sm" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[1600] grid place-items-center overflow-hidden bg-ink-0/80 p-2 pb-[calc(5rem+env(safe-area-inset-bottom))] backdrop-blur-sm sm:p-4"
+      onClick={onClose}
+    >
       <div
         role="dialog"
         aria-modal="true"
         aria-label={`Buy OMB #${listing.inscription_number}`}
-        className="absolute left-1/2 top-1/2 grid w-[min(92vw,860px)] -translate-x-1/2 -translate-y-1/2 grid-cols-1 border border-ink-2 bg-ink-0 md:grid-cols-[24rem_1fr]"
+        className="grid max-h-[calc(100svh_-_5.5rem_-_env(safe-area-inset-bottom))] w-[min(94vw,860px)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden border border-ink-2 bg-ink-0 sm:max-h-[calc(100svh_-_2rem)] md:grid-cols-[24rem_minmax(0,1fr)] md:grid-rows-1"
         onClick={e => e.stopPropagation()}
       >
         <Link
           href={`/inscription/${listing.inscription_number}`}
-          className="aspect-square self-start bg-ink-2"
+          className="h-[min(70vw,28svh,18rem)] w-full bg-ink-2 md:aspect-square md:h-auto md:self-start"
           target="_blank"
           rel="noopener noreferrer"
           aria-label={`Open OMB #${listing.inscription_number} details page`}
@@ -178,73 +181,78 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
             className="h-full w-full object-contain"
           />
         </Link>
-        <div className="flex min-h-0 flex-col p-4 font-mono uppercase tracking-[0.08em] sm:p-5">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2 text-xl text-bone">
-                <span>#{listing.inscription_number}</span>
-                <Link
-                  href={`/inscription/${listing.inscription_number}`}
-                  className="inline-flex h-7 w-7 items-center justify-center border border-ink-2 text-[13px] text-bone-dim transition-colors hover:border-bone-dim hover:text-bone"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={`Open OMB #${listing.inscription_number} details page`}
-                >
-                  ↗
-                </Link>
+        <div className="flex min-h-0 flex-col p-3 font-mono uppercase tracking-[0.08em] sm:p-5">
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-lg text-bone sm:text-xl">
+                  <span>#{listing.inscription_number}</span>
+                  <Link
+                    href={`/inscription/${listing.inscription_number}`}
+                    className="inline-flex h-7 w-7 items-center justify-center border border-ink-2 text-[13px] text-bone-dim transition-colors hover:border-bone-dim hover:text-bone"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Open OMB #${listing.inscription_number} details page`}
+                  >
+                    ↗
+                  </Link>
+                </div>
+                <div className="mt-1 flex items-center gap-2 text-[11px] text-bone-dim">
+                  <MarketplacePip marketplace={listing.marketplace} />
+                  <span>{marketplaceLabel(listing.marketplace)}</span>
+                </div>
               </div>
-              <div className="mt-1 flex items-center gap-2 text-[11px] text-bone-dim">
-                <MarketplacePip marketplace={listing.marketplace} />
-                <span>{marketplaceLabel(listing.marketplace)}</span>
-              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                className="h-8 w-8 shrink-0 text-bone-dim hover:text-bone sm:h-9 sm:w-9"
+                aria-label="Close buy dialog"
+              >
+                ✕
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="h-9 w-9 text-bone-dim hover:text-bone"
-              aria-label="Close buy dialog"
-            >
-              ✕
-            </button>
-          </div>
 
-          <div className="mt-5 border-t border-ink-2 pt-4">
             {listing.description && (
-              <p className="text-xs italic normal-case tracking-normal text-bone-dim">
-                {listing.description}
-              </p>
+              <div className="mt-3 border-t border-ink-2 pt-3 sm:mt-4 sm:pt-4">
+                <p className="max-h-20 overflow-y-auto break-words pr-1 text-xs italic leading-relaxed normal-case tracking-normal text-bone-dim sm:max-h-28 md:max-h-36">
+                  {listing.description}
+                </p>
+              </div>
             )}
-          </div>
 
-          <div className="mt-4 border-y border-ink-2 py-4">
-            <div className="text-[10px] text-bone-dim">price</div>
-            <div className="mt-1 text-2xl text-bone tabular-nums">
-              {formatBtc(listing.price_sats)}
+            <div className="mt-3 border-y border-ink-2 py-3 sm:mt-4 sm:py-4">
+              <div className="text-[10px] text-bone-dim">price</div>
+              <div className="mt-1 text-2xl text-bone tabular-nums">
+                {formatBtc(listing.price_sats)}
+              </div>
+            </div>
+
+            <div className="mt-3 text-[11px] text-bone-dim sm:mt-4">
+              {wallet ? (
+                <>
+                  receives to{' '}
+                  <span className="text-bone">{truncateAddr(wallet.ordAddr, 8, 6)}</span>
+                </>
+              ) : (
+                'connect an ordinals wallet to buy'
+              )}
+            </div>
+
+            <div className="mt-3 space-y-2 sm:mt-4 sm:space-y-3">
+              {!wallet ? <ConnectWalletButton /> : <TermsCheckbox />}
+              {error && (
+                <div className="break-words text-[11px] leading-relaxed text-accent-red">
+                  {error}
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="mt-4 text-[11px] text-bone-dim">
-            {wallet ? (
-              <>
-                receives to <span className="text-bone">{truncateAddr(wallet.ordAddr, 8, 6)}</span>
-              </>
-            ) : (
-              'connect an ordinals wallet to buy'
-            )}
-          </div>
-
-          <div className="mt-5 space-y-3">
-            {!wallet ? <ConnectWalletButton /> : <TermsCheckbox />}
-            {error && (
-              <div className="break-words text-[11px] leading-relaxed text-accent-red">{error}</div>
-            )}
-          </div>
-
-          <div className="mt-auto flex items-center justify-end gap-2 pt-6">
+          <div className="mt-3 grid shrink-0 grid-cols-2 gap-2 border-t border-ink-2 pt-3 sm:flex sm:items-center sm:justify-end">
             <button
               type="button"
               onClick={onClose}
-              className="h-9 border border-ink-2 px-3 text-[11px] text-bone-dim hover:border-bone-dim hover:text-bone"
+              className="h-10 border border-ink-2 px-3 text-[11px] text-bone-dim hover:border-bone-dim hover:text-bone sm:h-9"
             >
               cancel
             </button>
@@ -252,7 +260,7 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
               type="button"
               disabled={!canBuy}
               onClick={() => void submit()}
-              className="h-9 border border-bone px-3 text-[11px] text-bone disabled:cursor-not-allowed disabled:border-ink-2 disabled:text-bone-dim"
+              className="h-10 border border-bone px-3 text-[11px] text-bone disabled:cursor-not-allowed disabled:border-ink-2 disabled:text-bone-dim sm:h-9"
             >
               {busy ? 'signing' : 'confirm buy'}
             </button>
