@@ -26,35 +26,47 @@ export default function PostPurchaseModal({
   onClose,
 }: Props) {
   const { wallet } = useWallet();
-  const [matrica, setMatrica] = useState<MatricaState>({ status: 'loading' });
+  const [matrica, setMatrica] = useState<{ addr: string | null; state: MatricaState }>({
+    addr: null,
+    state: { status: 'loading' },
+  });
   const matricaUrl = buildMatricaUrl(matricaSignupUrl);
   const isMockTx = txid.startsWith('mock-');
+  const activeMatrica: MatricaState = wallet?.ordAddr
+    ? matrica.addr === wallet.ordAddr
+      ? matrica.state
+      : { status: 'loading' }
+    : { status: 'unknown', reason: 'wallet unavailable' };
 
   useEffect(() => {
-    if (!wallet?.ordAddr) {
-      setMatrica({ status: 'unknown', reason: 'wallet unavailable' });
-      return;
-    }
+    const addr = wallet?.ordAddr;
+    if (!addr) return;
     let cancelled = false;
-    fetch(`/api/marketplace/matrica?addr=${encodeURIComponent(wallet.ordAddr)}`)
+    fetch(`/api/marketplace/matrica?addr=${encodeURIComponent(addr)}`)
       .then(res => res.json())
       .then(json => {
         if (cancelled) return;
         if (json?.status === 'linked' && json.profile) {
           setMatrica({
-            status: 'linked',
-            username: json.profile.username,
-            placeholder: !!json.profile.placeholder,
+            addr,
+            state: {
+              status: 'linked',
+              username: json.profile.username,
+              placeholder: !!json.profile.placeholder,
+            },
           });
         } else {
           setMatrica({
-            status: json?.status === 'none' ? 'none' : 'unknown',
-            reason: json?.reason,
+            addr,
+            state: {
+              status: json?.status === 'none' ? 'none' : 'unknown',
+              reason: json?.reason,
+            },
           });
         }
       })
       .catch(() => {
-        if (!cancelled) setMatrica({ status: 'unknown' });
+        if (!cancelled) setMatrica({ addr, state: { status: 'unknown' } });
       });
     return () => {
       cancelled = true;
@@ -108,7 +120,7 @@ export default function PostPurchaseModal({
 
           <div className="my-5 border-t border-ink-2" />
           <MatricaBlock
-            state={matrica}
+            state={activeMatrica}
             matricaUrl={matricaUrl}
             discordInviteUrl={discordInviteUrl}
           />
@@ -144,48 +156,102 @@ function MatricaBlock({
   }
   if (state.status === 'linked' && !state.placeholder) {
     return (
-      <div className="flex flex-wrap items-center gap-2 text-[11px] text-bone-dim">
-        <span>
-          linked as <span className="text-bone">@{state.username}</span>
-        </span>
-        <CommunityActions matricaUrl={matricaUrl} discordUrl={discord} />
-      </div>
+      <CommunityPrompt
+        label="matrica linked"
+        message={
+          <>
+            Linked as <span className="break-all text-bone">@{state.username}</span>. Confirm
+            Discord is linked there, then join Discord.
+          </>
+        }
+        actions={[
+          { href: matricaUrl, label: 'check matrica' },
+          discord ? { href: discord, label: 'join discord', primary: true } : null,
+        ]}
+      />
     );
   }
   if (state.status === 'linked' && state.placeholder) {
     return (
-      <div className="space-y-3">
-        <div className="text-[11px] text-bone-dim">finish your matrica profile</div>
-        <CommunityActions matricaUrl={matricaUrl} discordUrl={discord} />
-      </div>
+      <CommunityPrompt
+        label="matrica profile needed"
+        message="Finish your Matrica profile and link Discord, then join Discord."
+        actions={[
+          { href: matricaUrl, label: 'finish matrica', primary: true },
+          discord ? { href: discord, label: 'join discord' } : null,
+        ]}
+      />
     );
   }
   return (
-    <div className="space-y-3">
-      <div className="text-[11px] leading-relaxed text-bone-dim">
-        link your wallet on matrica{discord ? ', then join discord' : ''}
-      </div>
-      <CommunityActions matricaUrl={matricaUrl} discordUrl={discord} />
-    </div>
+    <CommunityPrompt
+      label="matrica needed"
+      message={`Link this wallet${discord ? ' and Discord' : ''} on Matrica first, before you can join the Discord.`}
+      actions={[
+        { href: matricaUrl, label: 'link on matrica', primary: true },
+        discord ? { href: discord, label: 'join discord' } : null,
+      ]}
+    />
   );
 }
 
-function CommunityActions({ matricaUrl, discordUrl }: { matricaUrl: string; discordUrl: string }) {
+type CommunityAction = {
+  href: string;
+  label: string;
+  primary?: boolean;
+} | null;
+
+function CommunityPrompt({
+  label,
+  message,
+  actions,
+}: {
+  label: string;
+  message: ReactNode;
+  actions: CommunityAction[];
+}) {
   return (
-    <div className="flex flex-wrap gap-2">
-      <CommunityButton href={matricaUrl}>open matrica</CommunityButton>
-      {discordUrl && <CommunityButton href={discordUrl}>join discord</CommunityButton>}
+    <div className="max-w-xl space-y-3 text-[11px] leading-relaxed text-bone-dim">
+      <div>
+        <div className="mb-1 text-[10px] text-bone">{label}</div>
+        <div>{message}</div>
+      </div>
+      <div className="grid gap-2 sm:flex sm:flex-wrap">
+        {actions.map(action =>
+          action ? (
+            <CommunityButton
+              key={`${action.href}-${action.label}`}
+              href={action.href}
+              primary={action.primary}
+            >
+              {action.label}
+            </CommunityButton>
+          ) : null
+        )}
+      </div>
     </div>
   );
 }
 
-function CommunityButton({ href, children }: { href: string; children: ReactNode }) {
+function CommunityButton({
+  href,
+  primary = false,
+  children,
+}: {
+  href: string;
+  primary?: boolean;
+  children: ReactNode;
+}) {
   return (
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex h-8 items-center border border-ink-2 px-2 text-[10px] text-bone-dim transition-colors hover:border-bone-dim hover:text-bone"
+      className={`inline-flex min-h-9 items-center justify-center border px-3 text-center text-[10px] transition-colors ${
+        primary
+          ? 'border-bone text-bone hover:border-accent-orange hover:text-accent-orange'
+          : 'border-ink-2 text-bone-dim hover:border-bone-dim hover:text-bone'
+      }`}
     >
       {children}
     </a>
