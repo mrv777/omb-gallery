@@ -61,6 +61,10 @@ export default function InscriptionDetail({
   const totalEvents = events.length;
   const transferCount = inscription.transfer_count ?? 0;
   const saleCount = inscription.sale_count ?? 0;
+  // "owner" surfaces the semantic holder: while a loan is open this is the
+  // borrower (effective_owner), not the bc1p escrow address (current_owner).
+  // Fall back to current_owner for rows that pre-date effective_owner backfill.
+  const ownerDisplay = inscription.effective_owner ?? inscription.current_owner;
 
   return (
     <section className="px-4 sm:px-6 pb-16 max-w-6xl mx-auto">
@@ -127,23 +131,27 @@ export default function InscriptionDetail({
             </div>
           )}
 
+          {/* "owner" reflects the semantic holder — the borrower stays attached
+              while a loan is active (effective_owner). current_owner is the
+              on-chain output address and surfaces below as the current_output
+              row plus the active-loan callout. */}
           <div className="text-[11px] tracking-[0.08em] uppercase text-bone-dim space-y-1.5 mb-5">
             <div className="flex flex-wrap items-baseline gap-x-2">
               <span>owner</span>
-              {inscription.current_owner ? (
-                <Tooltip content={inscription.current_owner}>
+              {ownerDisplay ? (
+                <Tooltip content={ownerDisplay}>
                   <Link
-                    href={`/holder/${inscription.current_owner}`}
+                    href={`/holder/${ownerDisplay}`}
                     prefetch={false}
                     className="text-bone hover:text-accent-orange normal-case tracking-normal"
                   >
-                    {truncateAddr(inscription.current_owner, 10, 8)}
+                    {truncateAddr(ownerDisplay, 10, 8)}
                   </Link>
                 </Tooltip>
               ) : (
                 <span className="text-bone-dim">—</span>
               )}
-              {heldSince != null && inscription.current_owner && (
+              {heldSince != null && ownerDisplay && (
                 <Tooltip content={new Date(heldSince * 1000).toISOString()}>
                   <span className="text-bone-dim normal-case tracking-normal">
                     · held {formatRelTime(heldSince)}
@@ -255,17 +263,17 @@ export default function InscriptionDetail({
         )}
       </div>
 
-      {ownerOthers.length > 0 && inscription.current_owner && (
+      {ownerOthers.length > 0 && ownerDisplay && (
         <div className="mt-10">
           <div className="font-mono text-[11px] tracking-[0.08em] uppercase text-bone-dim mb-3">
             also held by{' '}
-            <Tooltip content={inscription.current_owner}>
+            <Tooltip content={ownerDisplay}>
               <Link
-                href={`/holder/${inscription.current_owner}`}
+                href={`/holder/${ownerDisplay}`}
                 prefetch={false}
                 className="text-bone hover:text-accent-orange normal-case tracking-normal"
               >
-                {truncateAddr(inscription.current_owner, 8, 6)}
+                {truncateAddr(ownerDisplay, 8, 6)}
               </Link>
             </Tooltip>
           </div>

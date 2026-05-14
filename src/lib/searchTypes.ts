@@ -3,11 +3,14 @@
 // `src/components/Search`. Keep this file free of server-only imports
 // (better-sqlite3, node:fs, etc.) so it can cross the SSR/CSR boundary.
 
+import type { EventType } from './eventDisplay';
+
 export type SearchInscription = {
   inscription_number: number;
   inscription_id: string | null;
   color: string | null;
   current_owner: string | null;
+  effective_owner: string | null;
   collection_slug: string | null;
 };
 
@@ -28,7 +31,7 @@ export type SearchEvent = {
   id: number;
   inscription_number: number;
   inscription_id: string;
-  event_type: 'inscribed' | 'transferred' | 'sold' | 'listed';
+  event_type: EventType;
   old_owner: string | null;
   new_owner: string | null;
   marketplace: string | null;

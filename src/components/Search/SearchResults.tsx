@@ -10,6 +10,7 @@ import {
 } from '@/lib/format';
 import { lookupWalletLabel } from '@/lib/walletLabels';
 import { eventLink, type SearchResults as SearchResultsType } from '@/lib/searchTypes';
+import { EVENT_DISPLAY } from '@/lib/eventDisplay';
 
 type Props = { q: string; results: SearchResultsType };
 
@@ -137,7 +138,10 @@ function InscriptionRow({ item }: { item: SearchResultsType['inscriptions'][numb
         )}
       </span>
       <span className="font-mono text-[10px] text-bone-dim tracking-[0.04em] truncate max-w-[14ch]">
-        {item.current_owner ? truncateAddr(item.current_owner, 5, 4) : ''}
+        {(() => {
+          const owner = item.effective_owner ?? item.current_owner;
+          return owner ? truncateAddr(owner, 5, 4) : '';
+        })()}
       </span>
     </div>
   );
@@ -206,14 +210,11 @@ function UserRow({ item }: { item: SearchResultsType['users'][number] }) {
 }
 
 function EventRow({ item }: { item: SearchResultsType['events'][number] }) {
+  const baseLabel = EVENT_DISPLAY[item.event_type]?.label ?? item.event_type.toUpperCase();
   const label =
     item.event_type === 'sold'
       ? `Sold ${formatBtc(item.sale_price_sats) || ''}${item.marketplace ? ` · ${marketplaceLabel(item.marketplace)}` : ''}`
-      : item.event_type === 'transferred'
-        ? 'Transfer'
-        : item.event_type === 'inscribed'
-          ? 'Inscribed'
-          : 'Listed';
+      : baseLabel;
   const link = eventLink(item);
   const cls =
     'grid grid-cols-[1fr_auto] items-center gap-3 px-4 py-2.5 hover:bg-ink-2 transition-colors';

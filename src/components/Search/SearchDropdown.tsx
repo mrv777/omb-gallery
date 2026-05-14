@@ -6,6 +6,7 @@ import { lookupInscription } from '@/lib/inscriptionLookup';
 import { looksLikeAddress, truncateAddr } from '@/lib/format';
 import { lookupWalletLabel } from '@/lib/walletLabels';
 import type { SearchResults } from '@/lib/searchTypes';
+import { EVENT_DISPLAY } from '@/lib/eventDisplay';
 
 export type FlatRow = {
   key: string;
@@ -305,7 +306,10 @@ function InscriptionRow({ item }: { item: SearchResults['inscriptions'][number] 
         )}
       </span>
       <span className="font-mono text-[10px] text-bone-dim tracking-[0.04em]">
-        {item.current_owner ? truncateAddr(item.current_owner, 4, 4) : ''}
+        {(() => {
+          const owner = item.effective_owner ?? item.current_owner;
+          return owner ? truncateAddr(owner, 4, 4) : '';
+        })()}
       </span>
     </div>
   );
@@ -344,14 +348,7 @@ function UserRow({ item }: { item: SearchResults['users'][number] }) {
 }
 
 function EventRow({ item }: { item: SearchResults['events'][number] }) {
-  const label =
-    item.event_type === 'sold'
-      ? 'Sold'
-      : item.event_type === 'transferred'
-        ? 'Transfer'
-        : item.event_type === 'inscribed'
-          ? 'Inscribed'
-          : 'Listed';
+  const label = EVENT_DISPLAY[item.event_type]?.label ?? item.event_type.toUpperCase();
   return (
     <div className="grid grid-cols-[1fr_auto] items-center gap-2.5">
       <span className="font-mono text-xs text-bone truncate">

@@ -3168,13 +3168,13 @@ export function getStmts(): Stmts {
     // so links can deep-link to /inscription/[number] (which is OMB-only) or
     // skip out for non-OMB hits in this UI release.
     searchInscriptionByNumber: db.prepare(`
-      SELECT inscription_number, inscription_id, color, current_owner, collection_slug
+      SELECT inscription_number, inscription_id, color, current_owner, effective_owner, collection_slug
       FROM inscriptions
       WHERE inscription_number = ?
     `),
 
     searchInscriptionById: db.prepare(`
-      SELECT inscription_number, inscription_id, color, current_owner, collection_slug
+      SELECT inscription_number, inscription_id, color, current_owner, effective_owner, collection_slug
       FROM inscriptions
       WHERE inscription_id = ?
     `),
@@ -3182,7 +3182,7 @@ export function getStmts(): Stmts {
     // Bare-txid input: find inscriptions whose inscription_id is `<txid>i<index>`.
     // Also matches the legitimate "user pasted the genesis txid" case.
     searchInscriptionsByIdPrefix: db.prepare(`
-      SELECT inscription_number, inscription_id, color, current_owner, collection_slug
+      SELECT inscription_number, inscription_id, color, current_owner, effective_owner, collection_slug
       FROM inscriptions
       WHERE inscription_id LIKE ? || 'i%'
       ORDER BY inscription_number ASC
@@ -3205,22 +3205,26 @@ export function getStmts(): Stmts {
       LIMIT 25
     `),
 
+    // Uses effective_owner so a borrower pasting their own address finds
+    // their loaned-out pieces too (current_owner would be the bc1p escrow).
+    // Also avoids surfacing escrow addresses as their own "holder" entries.
     searchHolderByAddress: db.prepare(`
-      SELECT current_owner AS address, COUNT(*) AS inscription_count
+      SELECT effective_owner AS address, COUNT(*) AS inscription_count
       FROM inscriptions
-      WHERE current_owner = ?
-      GROUP BY current_owner
+      WHERE effective_owner = ?
+      GROUP BY effective_owner
     `),
 
     // Suffix-style match: "I remember it ended in xyz123". LIKE '%' || ? matches
     // any address ending with the given fragment. Order by holding count so the
-    // big collectors surface first.
+    // big collectors surface first. Uses effective_owner for the same reason
+    // as searchHolderByAddress above.
     searchHoldersBySuffix: db.prepare(`
-      SELECT current_owner AS address, COUNT(*) AS inscription_count
+      SELECT effective_owner AS address, COUNT(*) AS inscription_count
       FROM inscriptions
-      WHERE current_owner IS NOT NULL
-        AND current_owner LIKE '%' || ?
-      GROUP BY current_owner
+      WHERE effective_owner IS NOT NULL
+        AND effective_owner LIKE '%' || ?
+      GROUP BY effective_owner
       ORDER BY inscription_count DESC
       LIMIT 10
     `),

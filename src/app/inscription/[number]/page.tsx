@@ -55,11 +55,14 @@ export default async function InscriptionPage({ params }: { params: Promise<Para
     : getMarketplaceListing(num);
 
   // "Other OMBs by this owner" — fetch one extra so we can show a "+N more" hint
-  // without paying for a separate COUNT query.
+  // without paying for a separate COUNT query. Key on effective_owner so the
+  // strip stays attached to the borrower while a loan is open (current_owner
+  // would be the bc1p escrow address and match nothing).
   const OWNER_OTHERS_DISPLAY = 100;
-  const rawOwnerOthers = inscription.current_owner
+  const ownerKey = inscription.effective_owner ?? inscription.current_owner;
+  const rawOwnerOthers = ownerKey
     ? (stmts.otherInscriptionsByOwner.all({
-        owner: inscription.current_owner,
+        owner: ownerKey,
         exclude: num,
         limit: OWNER_OTHERS_DISPLAY + 1,
         collection: 'omb',

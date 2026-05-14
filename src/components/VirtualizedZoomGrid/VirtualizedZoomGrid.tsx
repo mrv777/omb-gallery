@@ -125,8 +125,10 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
   const playHref = useMemo<string | null>(() => {
     if (filteredImages.length === 0) return null;
     // Cap the encoded playlist to keep the URL under browser/server limits.
-    // Matches MAX_IDS in the slideshow create API; broader filters just play
-    // the first slice in filter order.
+    // Matches MAX_IDS in the slideshow create API. The codec sorts + dedupes
+    // before delta-varint encoding (load-bearing for URL compactness), so
+    // playback is numeric-ascending across the first MAX_PLAY_IDS — not the
+    // user's current filter sort.
     const MAX_PLAY_IDS = 1500;
     const ids: string[] = [];
     for (const img of filteredImages) {

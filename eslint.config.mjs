@@ -18,6 +18,7 @@ const eslintConfig = defineConfig([
     'out/**',
     'build/**',
     'next-env.d.ts',
+    'cluster-research/**',
     'scripts/**',
     'infra/**',
     'generate-image-arrays.js',
