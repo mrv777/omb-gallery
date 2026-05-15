@@ -52,18 +52,37 @@ function firstOmb(): { inscription_number: number; inscription_id: string } {
   };
 }
 
-function enqueueListedEvent(txid: string, overrides: Partial<{ block_timestamp: number }> = {}) {
+function enqueueListedEvent(
+  sourceId: string,
+  overrides: Partial<{ block_timestamp: number; ageSec: number }> = {}
+) {
   const row = firstOmb();
+  const blockTimestamp = overrides.block_timestamp ?? 1_800_000_000;
+  const txid = `listed:satflow:${row.inscription_number}:id:${sourceId}`;
+  dbModule.getStmts().upsertActiveListing.run({
+    inscription_number: row.inscription_number,
+    inscription_id: row.inscription_id,
+    satflow_id: sourceId,
+    price_sats: 2_200_000,
+    seller: 'bc1pseller',
+    marketplace: 'satflow',
+    listed_at: blockTimestamp,
+    refreshed_at: Math.floor(Date.now() / 1000),
+  });
   const insert = dbModule.getStmts().insertListedEvent.run({
     inscription_id: row.inscription_id,
     inscription_number: row.inscription_number,
-    block_timestamp: overrides.block_timestamp ?? 1_800_000_000,
+    block_timestamp: blockTimestamp,
     seller: 'bc1pseller',
     marketplace: 'satflow',
     price_sats: 2_200_000,
     txid,
   });
   const eventId = Number(insert.lastInsertRowid);
+  dbModule
+    .getDb()
+    .prepare(`UPDATE events SET created_at = unixepoch() - ? WHERE id = ?`)
+    .run(overrides.ageSec ?? 120, eventId);
   dbModule.getStmts().enqueueNotify.run(eventId);
   return eventId;
 }
@@ -160,5 +179,99 @@ describe('runNotifyFanout delivery dedupe', () => {
     expect(result.events_dequeued).toBe(2);
     expect(posts).toHaveLength(1);
     expect(posts[0].body.embeds).toHaveLength(1);
+  });
+
+  it('defers fresh listed events during the listing notification grace window', async () => {
+    const posts: PostedWebhook[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        posts.push({
+          url: String(input),
+          body: JSON.parse(String(init?.body ?? '{}')) as PostedWebhook['body'],
+        });
+        return new Response('{}', { status: 200 });
+      })
+    );
+
+    await subscribeDiscordTargets(WEBHOOK_A);
+    enqueueListedEvent('listed:satflow:test-fresh', { ageSec: 10 });
+
+    const { runNotifyFanout } = await import('../src/lib/notify');
+    const result = await runNotifyFanout();
+
+    expect(result.events_dequeued).toBe(0);
+    expect(result.events_deferred).toBe(1);
+    expect(posts).toHaveLength(0);
+  });
+
+  it('drops stale listed events when the active listing has already changed', async () => {
+    const posts: PostedWebhook[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        posts.push({
+          url: String(input),
+          body: JSON.parse(String(init?.body ?? '{}')) as PostedWebhook['body'],
+        });
+        return new Response('{}', { status: 200 });
+      })
+    );
+
+    await subscribeDiscordTargets(WEBHOOK_A);
+    enqueueListedEvent('listed:satflow:test-stale-a');
+    const row = firstOmb();
+    dbModule.getStmts().upsertActiveListing.run({
+      inscription_number: row.inscription_number,
+      inscription_id: row.inscription_id,
+      satflow_id: 'listed:satflow:test-stale-b',
+      price_sats: 1_900_000,
+      seller: 'bc1pseller',
+      marketplace: 'satflow',
+      listed_at: 1_800_000_060,
+      refreshed_at: Math.floor(Date.now() / 1000),
+    });
+
+    const { runNotifyFanout } = await import('../src/lib/notify');
+    const result = await runNotifyFanout();
+
+    expect(result.events_dequeued).toBe(1);
+    expect(result.events_deferred).toBe(0);
+    expect(posts).toHaveLength(0);
+  });
+
+  it('skips fanout while another notify run is marked running', async () => {
+    const posts: PostedWebhook[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        posts.push({
+          url: String(input),
+          body: JSON.parse(String(init?.body ?? '{}')) as PostedWebhook['body'],
+        });
+        return new Response('{}', { status: 200 });
+      })
+    );
+
+    await subscribeDiscordTargets(WEBHOOK_A);
+    enqueueListedEvent('listed:satflow:test-running-lock');
+    dbModule
+      .getDb()
+      .prepare(
+        `UPDATE poll_state
+         SET last_status = 'running', last_run_at = unixepoch()
+         WHERE stream = 'notify' AND collection_slug = 'omb'`
+      )
+      .run();
+
+    const { runNotifyFanout } = await import('../src/lib/notify');
+    const result = await runNotifyFanout();
+
+    expect(result.skipped).toBe('concurrent');
+    expect(posts).toHaveLength(0);
+    const pending = dbModule.getDb().prepare(`SELECT COUNT(*) AS n FROM notify_pending`).get() as {
+      n: number;
+    };
+    expect(pending.n).toBe(1);
   });
 });

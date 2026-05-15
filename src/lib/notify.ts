@@ -32,6 +32,7 @@ type EventRow = {
   txid: string;
   color: string | null;
   collection_slug: string | null;
+  created_at: number;
 };
 
 const PER_TICK_LIMIT = 1000;
@@ -53,6 +54,8 @@ const MAX_EVENTS_PER_BUCKET = 10;
 // ≤4s; a tick processes ~16 buckets in the worst case before bailing out.
 const FANOUT_BUDGET_MS = 8_000;
 const FANOUT_CONCURRENCY = 8;
+const NOTIFY_LOCK_STALE_SEC = 120;
+const LISTED_NOTIFY_GRACE_SEC = 90;
 
 function siteUrl(): string {
   return (process.env.NEXT_PUBLIC_SITE_URL || 'https://ordinalmaxibiz.wiki').replace(/\/$/, '');
@@ -256,6 +259,7 @@ function buildDiscordEmbeds(
 
 type FanoutResult = {
   mode: 'notify';
+  skipped?: 'concurrent';
   events_processed: number;
   recipients: number;
   delivered: number;
@@ -279,6 +283,15 @@ type Bucket = {
   eventRenderKeys: Set<string>;
 };
 
+type ActiveListingRow = {
+  inscription_number: number;
+  satflow_id: string;
+  price_sats: number;
+  seller: string | null;
+  marketplace: string;
+  listed_at: number;
+};
+
 function targetDeliveryHash(channel: SubscriptionRow['channel'], channelTarget: string): string {
   return createHash('sha256').update(channel).update('\0').update(channelTarget).digest('hex');
 }
@@ -300,6 +313,64 @@ function listedRenderKey(ev: EventRow): string | null {
     ev.sale_price_sats ?? '',
     ev.old_owner ?? '',
   ].join('|');
+}
+
+function activeListingTxid(row: ActiveListingRow): string {
+  const sourceId = row.satflow_id.trim();
+  const sourceIdentity = sourceId ? `id:${sourceId}` : `ts:${row.listed_at}`;
+  return `listed:${row.marketplace}:${row.inscription_number}:${sourceIdentity}`;
+}
+
+function isCurrentListedEvent(ev: EventRow): boolean {
+  if (ev.event_type !== 'listed') return true;
+  const row = getStmts().getActiveListing.get(ev.inscription_number) as
+    | ActiveListingRow
+    | undefined;
+  if (!row) return false;
+  return (
+    row.marketplace === (ev.marketplace ?? '') &&
+    row.price_sats === (ev.sale_price_sats ?? 0) &&
+    (row.seller ?? null) === (ev.old_owner ?? null) &&
+    activeListingTxid(row) === ev.txid
+  );
+}
+
+function acquireNotifyLock(): boolean {
+  const r = getDb()
+    .prepare(
+      `UPDATE poll_state
+       SET last_run_at = unixepoch(), last_status = 'running'
+       WHERE stream = ? AND collection_slug = ?
+         AND (
+           last_status IS NULL
+           OR last_status != 'running'
+           OR last_run_at IS NULL
+           OR last_run_at < unixepoch() - ?
+         )`
+    )
+    .run(STREAM, COLLECTION, NOTIFY_LOCK_STALE_SEC);
+  return r.changes > 0;
+}
+
+function finishNotifyPoll(status: string, eventCount: number, cursor: number | null): void {
+  getDb()
+    .prepare(
+      `UPDATE poll_state
+       SET last_cursor = COALESCE(?, last_cursor),
+           last_run_at = unixepoch(),
+           last_status = ?,
+           last_event_count = ?
+       WHERE stream = ? AND collection_slug = ?`
+    )
+    .run(cursor != null ? String(cursor) : null, status, eventCount, STREAM, COLLECTION);
+}
+
+function deleteQueuedEventIds(eventIds: number[]): void {
+  if (eventIds.length === 0) return;
+  const placeholders = eventIds.map(() => '?').join(',');
+  const db = getDb();
+  db.prepare(`DELETE FROM notify_deliveries WHERE event_id IN (${placeholders})`).run(...eventIds);
+  db.prepare(`DELETE FROM notify_pending WHERE event_id IN (${placeholders})`).run(...eventIds);
 }
 
 function loadDeliveredRecords(eventIds: number[]): Set<string> {
@@ -334,24 +405,53 @@ function recordDeliveredRecords(bucket: Bucket, eventIds: Set<number>): void {
 
 export async function runNotifyFanout(): Promise<FanoutResult> {
   const startedAt = Date.now();
-  const db = getDb();
 
-  const events = getStmts().selectNotifyQueueBatch.all(PER_TICK_LIMIT) as EventRow[];
-
-  if (events.length === 0) {
-    db.prepare(
-      `UPDATE poll_state SET last_run_at = unixepoch(), last_status = 'ok', last_event_count = 0
-       WHERE stream = ? AND collection_slug = ?`
-    ).run(STREAM, COLLECTION);
-    cleanupExpiredPending();
+  if (!acquireNotifyLock()) {
     return {
       mode: 'notify',
+      skipped: 'concurrent',
       events_processed: 0,
       recipients: 0,
       delivered: 0,
       failed: 0,
       events_dequeued: 0,
       events_deferred: 0,
+      dur_ms: Date.now() - startedAt,
+    };
+  }
+
+  const rawEvents = getStmts().selectNotifyQueueBatch.all(PER_TICK_LIMIT) as EventRow[];
+  const nowSec = Math.floor(Date.now() / 1000);
+  const staleListedIds: number[] = [];
+  let graceDeferred = 0;
+  const events: EventRow[] = [];
+  for (const ev of rawEvents) {
+    if (ev.event_type === 'listed') {
+      if (nowSec - ev.created_at < LISTED_NOTIFY_GRACE_SEC) {
+        graceDeferred++;
+        continue;
+      }
+      if (!isCurrentListedEvent(ev)) {
+        staleListedIds.push(ev.id);
+        continue;
+      }
+    }
+    events.push(ev);
+  }
+
+  deleteQueuedEventIds(staleListedIds);
+
+  if (events.length === 0) {
+    finishNotifyPoll(graceDeferred > 0 ? 'deferred' : 'ok', 0, null);
+    cleanupExpiredPending();
+    return {
+      mode: 'notify',
+      events_processed: rawEvents.length,
+      recipients: 0,
+      delivered: 0,
+      failed: 0,
+      events_dequeued: staleListedIds.length,
+      events_deferred: graceDeferred,
       dur_ms: Date.now() - startedAt,
     };
   }
@@ -545,37 +645,25 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
     else deferred++;
   }
 
-  if (toDequeue.length > 0) {
-    // Build a parameterized DELETE for the dequeue batch. SQLite handles
-    // 1000-element IN-lists comfortably; we cap at PER_TICK_LIMIT upstream.
-    const placeholders = toDequeue.map(() => '?').join(',');
-    db.prepare(`DELETE FROM notify_deliveries WHERE event_id IN (${placeholders})`).run(
-      ...toDequeue
-    );
-    db.prepare(`DELETE FROM notify_pending WHERE event_id IN (${placeholders})`).run(...toDequeue);
-  }
+  deleteQueuedEventIds(toDequeue);
 
   const lastStatus = !allAttempted ? 'deferred' : failed > 0 ? 'partial' : 'ok';
   // Track the highest dequeued event id in last_cursor for diagnostics only;
   // the queue table is the source of truth for "what's pending".
-  const newCursor = toDequeue.length > 0 ? Math.max(...toDequeue) : null;
-  db.prepare(
-    `UPDATE poll_state
-     SET last_cursor = COALESCE(?, last_cursor),
-         last_run_at = unixepoch(),
-         last_status = ?,
-         last_event_count = ?
-     WHERE stream = ? AND collection_slug = ?`
-  ).run(newCursor != null ? String(newCursor) : null, lastStatus, delivered, STREAM, COLLECTION);
+  const dequeuedIds = [...staleListedIds, ...toDequeue];
+  const newCursor = dequeuedIds.length > 0 ? Math.max(...dequeuedIds) : null;
+  finishNotifyPoll(lastStatus, delivered, newCursor);
 
   cleanupExpiredPending();
 
   log.info('notify', 'fanout complete', {
     events: events.length,
+    stale_listed: staleListedIds.length,
+    grace_deferred: graceDeferred,
     recipients: buckets.size,
     delivered,
     failed,
-    dequeued: toDequeue.length,
+    dequeued: staleListedIds.length + toDequeue.length,
     deferred,
     attempted_all: allAttempted,
     dur_ms: Date.now() - startedAt,
@@ -583,12 +671,12 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
 
   return {
     mode: 'notify',
-    events_processed: events.length,
+    events_processed: rawEvents.length,
     recipients: buckets.size,
     delivered,
     failed,
-    events_dequeued: toDequeue.length,
-    events_deferred: deferred,
+    events_dequeued: staleListedIds.length + toDequeue.length,
+    events_deferred: graceDeferred + deferred,
     dur_ms: Date.now() - startedAt,
   };
 }

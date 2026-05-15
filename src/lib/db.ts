@@ -2762,7 +2762,7 @@ export function getStmts(): Stmts {
     selectNotifyQueueBatch: db.prepare(`
       SELECT e.id, e.event_type, e.inscription_id, e.inscription_number, e.block_timestamp,
              e.marketplace, e.sale_price_sats, e.new_owner, e.old_owner, e.txid,
-             i.color, i.collection_slug
+             i.color, i.collection_slug, e.created_at
       FROM notify_pending q
       JOIN events       e ON e.id = q.event_id
       JOIN inscriptions i ON i.inscription_number = e.inscription_number
