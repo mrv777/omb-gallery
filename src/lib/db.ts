@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 35;
+const SCHEMA_VERSION = 36;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -167,6 +167,7 @@ function migrate(db: DB): void {
         upgradeV32ToV33(db);
         upgradeV33ToV34(db);
         upgradeV34ToV35(db);
+        upgradeV35ToV36(db);
       } else {
         initSchemaLatest(db);
       }
@@ -205,6 +206,7 @@ function migrate(db: DB): void {
       if (current < 33) upgradeV32ToV33(db);
       if (current < 34) upgradeV33ToV34(db);
       if (current < 35) upgradeV34ToV35(db);
+      if (current < 36) upgradeV35ToV36(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -330,7 +332,7 @@ function initSchemaLatest(db: DB): void {
     -- one batch poll covers every inscription regardless of collection. The
     -- 'matrica' stream is also collection-agnostic — one row keyed to 'omb'.
     CREATE TABLE IF NOT EXISTS poll_state (
-      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica','notify','loans','magisat_fp','magic_eden_fp','ord_net_fp','cluster')),
+      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica','notify','loans','magisat_fp','magic_eden_fp','ord_net_fp','cluster','listing_staging')),
       collection_slug           TEXT NOT NULL REFERENCES collections (slug),
       last_cursor               TEXT,
       last_run_at               INTEGER,
@@ -351,7 +353,8 @@ function initSchemaLatest(db: DB): void {
       ('magisat_fp', 'omb'),
       ('magic_eden_fp', 'omb'),
       ('ord_net_fp', 'omb'),
-      ('cluster', 'omb');
+      ('cluster', 'omb'),
+      ('listing_staging', 'omb');
 
     -- Matrica wallet-linking (Phase 5). matrica_users holds one row per
     -- distinct Matrica user we've seen (across any wallet); wallet_links
@@ -585,6 +588,44 @@ function initSchemaLatest(db: DB): void {
       computed_at     INTEGER NOT NULL DEFAULT (unixepoch())
     );
     CREATE INDEX IF NOT EXISTS idx_cluster_anchors_anchor ON cluster_anchors (anchor_id);
+
+    -- Directed source -> seller links where a wallet repeatedly receives an
+    -- OMB shortly before listing/selling it. This signal is audited
+    -- separately from wallet_cluster_edges; only eligible_for_fold=1 rows
+    -- participate in cluster_anchors.
+    CREATE TABLE IF NOT EXISTS wallet_staging_edges (
+      source_wallet                   TEXT    NOT NULL,
+      seller_wallet                   TEXT    NOT NULL,
+      eligible_for_fold               INTEGER NOT NULL DEFAULT 0 CHECK (eligible_for_fold IN (0,1)),
+      suppression_reason              TEXT CHECK (suppression_reason IN ('blacklisted_endpoint','different_real_profile','already_known_same','insufficient_repeated_12h')),
+      evidence_count                  INTEGER NOT NULL,
+      distinct_inscriptions           INTEGER NOT NULL,
+      fast_12h_evidence_count         INTEGER NOT NULL,
+      fast_12h_distinct_inscriptions  INTEGER NOT NULL,
+      active_listing_count            INTEGER NOT NULL DEFAULT 0,
+      listed_event_count              INTEGER NOT NULL DEFAULT 0,
+      sold_count                      INTEGER NOT NULL DEFAULT 0,
+      listing_count                   INTEGER NOT NULL DEFAULT 0,
+      sale_count                      INTEGER NOT NULL DEFAULT 0,
+      min_gap_sec                     INTEGER NOT NULL,
+      median_gap_sec                  REAL    NOT NULL,
+      max_gap_sec                     INTEGER NOT NULL,
+      fast_12h_median_gap_sec         REAL,
+      validation_kind                 TEXT    NOT NULL CHECK (validation_kind IN ('same_real_profile','different_real_profile','auto_shell','unknown')),
+      existing_cluster_confidence     INTEGER,
+      evidence_json                   TEXT    NOT NULL DEFAULT '[]',
+      first_seen_at                   INTEGER NOT NULL,
+      last_seen_at                    INTEGER NOT NULL,
+      computed_at                     INTEGER NOT NULL DEFAULT (unixepoch()),
+      PRIMARY KEY (source_wallet, seller_wallet),
+      CHECK (source_wallet != seller_wallet)
+    );
+    CREATE INDEX IF NOT EXISTS idx_staging_edges_source
+      ON wallet_staging_edges (source_wallet, eligible_for_fold, last_seen_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_staging_edges_seller
+      ON wallet_staging_edges (seller_wallet, eligible_for_fold, last_seen_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_staging_edges_eligible
+      ON wallet_staging_edges (eligible_for_fold, fast_12h_distinct_inscriptions DESC);
   `);
 }
 
@@ -1653,6 +1694,66 @@ function upgradeV34ToV35(db: DB): void {
       FOREIGN KEY (event_id) REFERENCES events (id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_notify_deliveries_event ON notify_deliveries (event_id);
+  `);
+}
+
+function upgradeV35ToV36(db: DB): void {
+  // Listing-staging wallet links: directed source -> seller evidence for
+  // repeated transfer-to-list/sale behavior inside a 12h window. Stored as a
+  // separate audit table; eligible rows feed cluster_anchors during anchor
+  // recompute, but never mutate wallet_cluster_edges confidence.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS wallet_staging_edges (
+      source_wallet                   TEXT    NOT NULL,
+      seller_wallet                   TEXT    NOT NULL,
+      eligible_for_fold               INTEGER NOT NULL DEFAULT 0 CHECK (eligible_for_fold IN (0,1)),
+      suppression_reason              TEXT CHECK (suppression_reason IN ('blacklisted_endpoint','different_real_profile','already_known_same','insufficient_repeated_12h')),
+      evidence_count                  INTEGER NOT NULL,
+      distinct_inscriptions           INTEGER NOT NULL,
+      fast_12h_evidence_count         INTEGER NOT NULL,
+      fast_12h_distinct_inscriptions  INTEGER NOT NULL,
+      active_listing_count            INTEGER NOT NULL DEFAULT 0,
+      listed_event_count              INTEGER NOT NULL DEFAULT 0,
+      sold_count                      INTEGER NOT NULL DEFAULT 0,
+      listing_count                   INTEGER NOT NULL DEFAULT 0,
+      sale_count                      INTEGER NOT NULL DEFAULT 0,
+      min_gap_sec                     INTEGER NOT NULL,
+      median_gap_sec                  REAL    NOT NULL,
+      max_gap_sec                     INTEGER NOT NULL,
+      fast_12h_median_gap_sec         REAL,
+      validation_kind                 TEXT    NOT NULL CHECK (validation_kind IN ('same_real_profile','different_real_profile','auto_shell','unknown')),
+      existing_cluster_confidence     INTEGER,
+      evidence_json                   TEXT    NOT NULL DEFAULT '[]',
+      first_seen_at                   INTEGER NOT NULL,
+      last_seen_at                    INTEGER NOT NULL,
+      computed_at                     INTEGER NOT NULL DEFAULT (unixepoch()),
+      PRIMARY KEY (source_wallet, seller_wallet),
+      CHECK (source_wallet != seller_wallet)
+    );
+    CREATE INDEX IF NOT EXISTS idx_staging_edges_source
+      ON wallet_staging_edges (source_wallet, eligible_for_fold, last_seen_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_staging_edges_seller
+      ON wallet_staging_edges (seller_wallet, eligible_for_fold, last_seen_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_staging_edges_eligible
+      ON wallet_staging_edges (eligible_for_fold, fast_12h_distinct_inscriptions DESC);
+
+    CREATE TABLE poll_state_v36 (
+      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica','notify','loans','magisat_fp','magic_eden_fp','ord_net_fp','cluster','listing_staging')),
+      collection_slug           TEXT NOT NULL REFERENCES collections (slug),
+      last_cursor               TEXT,
+      last_run_at               INTEGER,
+      last_status               TEXT,
+      last_event_count          INTEGER,
+      is_backfilling            INTEGER NOT NULL DEFAULT 0,
+      last_known_height         INTEGER,
+      backfill_unresolved_seen  INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (stream, collection_slug)
+    );
+    INSERT INTO poll_state_v36 SELECT * FROM poll_state;
+    DROP TABLE poll_state;
+    ALTER TABLE poll_state_v36 RENAME TO poll_state;
+    INSERT OR IGNORE INTO poll_state (stream, collection_slug)
+      VALUES ('listing_staging', 'omb');
   `);
 }
 
@@ -3376,7 +3477,18 @@ export type HolderRow = {
 };
 
 export type PollStateRow = {
-  stream: 'ord' | 'satflow' | 'satflow_listings' | 'matrica' | 'notify' | 'loans';
+  stream:
+    | 'ord'
+    | 'satflow'
+    | 'satflow_listings'
+    | 'matrica'
+    | 'notify'
+    | 'loans'
+    | 'magisat_fp'
+    | 'magic_eden_fp'
+    | 'ord_net_fp'
+    | 'cluster'
+    | 'listing_staging';
   collection_slug: string;
   last_cursor: string | null;
   last_run_at: number | null;

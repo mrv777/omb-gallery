@@ -17,8 +17,8 @@ import {
  *
  * Two layers fold into the wallet set:
  *   1. Matrica siblings — authoritative, always included when present.
- *   2. cluster_anchors members — on-chain inferred peers at the
- *      IDENTITY_FOLD_THRESHOLD (≥99% confidence). Folded in alongside
+ *   2. cluster_anchors members — on-chain inferred peers from high-confidence
+ *      clustering or repeated listing-staging evidence. Folded in alongside
  *      Matrica siblings so OMB count, tiles, events, color spread, and
  *      bag-size all reflect the merged identity. The fold is permissive
  *      (union both sets) — never substitutive — so a Matrica-linked

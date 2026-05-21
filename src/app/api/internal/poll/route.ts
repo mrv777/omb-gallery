@@ -41,6 +41,7 @@ import { runMagicEdenFingerprintTick } from '@/lib/magicEdenFingerprintTick';
 import { runOrdNetFingerprintTick } from '@/lib/ordNetFingerprintTick';
 import { runRolesTick } from '@/lib/rolesStore';
 import { runClusterTick, runClusterRecompute } from '@/lib/clusterStore';
+import { runListingStagingRecompute } from '@/lib/listingStagingStore';
 import { log } from '@/lib/log';
 
 export const dynamic = 'force-dynamic';
@@ -223,6 +224,9 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         break;
       case 'cluster-recompute':
         result = safeClusterRecompute();
+        break;
+      case 'listing-staging-recompute':
+        result = safeListingStagingRecompute();
         break;
       case 'auto':
       default: {
@@ -448,6 +452,16 @@ function safeClusterRecompute(): TickResult {
     const msg = e instanceof Error ? e.message : String(e);
     log.error('poll/cluster-recompute', 'recompute failed', { error: msg });
     return { mode: 'cluster-recompute', error: msg };
+  }
+}
+
+function safeListingStagingRecompute(): TickResult {
+  try {
+    return runListingStagingRecompute() as TickResult;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    log.error('poll/listing-staging', 'recompute failed', { error: msg });
+    return { mode: 'listing-staging-recompute', error: msg };
   }
 }
 

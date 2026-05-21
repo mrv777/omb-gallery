@@ -10,6 +10,7 @@ import {
 } from '@/lib/db';
 import { getRolesForUser, getColorCountsForUser } from '@/lib/rolesStore';
 import { getLikelyLinkedForWallets } from '@/lib/clusterStore';
+import { getListingStagingLinksForWallets } from '@/lib/listingStagingStore';
 import { CLUSTER_THRESHOLD } from '@/lib/cluster';
 import { emptyCounts } from '@/lib/roles';
 import { truncateAddr } from '@/lib/format';
@@ -202,6 +203,14 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
   // subset (low recall, see src/lib/cluster.ts CLUSTER_THRESHOLD).
   const likelyLinked = getLikelyLinkedForWallets(wallets, CLUSTER_THRESHOLD);
 
+  const listingStagingLinks = getListingStagingLinksForWallets(wallets);
+  const stagingWalletSet = new Set<string>();
+  for (const row of listingStagingLinks) {
+    if (inferredSet.has(row.source_wallet)) stagingWalletSet.add(row.source_wallet);
+    if (inferredSet.has(row.seller_wallet)) stagingWalletSet.add(row.seller_wallet);
+  }
+  const stagingWallets = Array.from(stagingWalletSet);
+
   // Show a real 404 only when nothing in the DB references this address —
   // a wallet that emptied out (no current holdings but has past events)
   // should still render so users can see the activity. For aggregated users,
@@ -229,7 +238,9 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
         colorCounts={colorCounts}
         isMatricaUser={!!matricaUserId}
         likelyLinked={likelyLinked}
+        listingStagingLinks={listingStagingLinks}
         inferredWallets={inferredWallets}
+        stagingWallets={stagingWallets}
         ombFromInferred={ombFromInferred}
         bravoFromInferred={bravoFromInferred}
         eventsFromInferred={eventsFromInferred}

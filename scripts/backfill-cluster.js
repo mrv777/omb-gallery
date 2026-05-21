@@ -88,8 +88,7 @@ const MINT_WALLET_ADDRS = [
 ];
 
 const DB_PATH = process.env.OMB_DB_PATH ?? path.resolve(__dirname, '..', 'tmp', 'dev.db');
-const HOME =
-  process.env.HOME || process.env.USERPROFILE || path.resolve(__dirname, '..', 'tmp');
+const HOME = process.env.HOME || process.env.USERPROFILE || path.resolve(__dirname, '..', 'tmp');
 const DEFAULT_CACHE_DIR = path.join(HOME, '.cache', 'omb-cluster', 'raw-txs');
 
 const ARGS = parseArgs(process.argv.slice(2));
@@ -151,13 +150,13 @@ function confidenceFromCounts(c) {
   if (c.cih_count >= 2 && sxTotal >= 2) p = Math.max(p, 0.99);
 
   const cc = c.co_cons_count || 0;
-  if (cc >= 1) p = Math.max(p, 0.80);
+  if (cc >= 1) p = Math.max(p, 0.8);
   if (cc >= 2) p = Math.max(p, 0.95);
   if (cc >= 3) p = Math.max(p, 0.98);
   if (cc >= 5) p = Math.max(p, 0.99);
 
   const cp = c.co_parent_count || 0;
-  if (cp >= 1) p = Math.max(p, 0.80);
+  if (cp >= 1) p = Math.max(p, 0.8);
   if (cp >= 2) p = Math.max(p, 0.95);
   if (cp >= 3) p = Math.max(p, 0.98);
 
@@ -167,7 +166,7 @@ function confidenceFromCounts(c) {
   const pmxTotal = c.pmx_count || pmxAb + pmxBa;
   const pmxRt = c.pmx_rt_count || 0;
   if (pmxTotal >= 1) p = Math.max(p, 0.75);
-  if (pmxTotal >= 3) p = Math.max(p, 0.90);
+  if (pmxTotal >= 3) p = Math.max(p, 0.9);
   if (pmxBidir >= 1) p = Math.max(p, 0.95);
   if (pmxBidir >= 2 && pmxRt >= 2) p = Math.max(p, 0.99);
 
@@ -182,7 +181,7 @@ function confidenceFromCounts(c) {
 
   // B1: pmx_bidir≥2 alone reaches 0.99 only when round-trip confirms
   // consolidation. Otherwise cap at 0.95.
-  const onlyPmx = c.cih_count === 0 && (sxAb + sxBa) === 0 && cc === 0 && cp === 0;
+  const onlyPmx = c.cih_count === 0 && sxAb + sxBa === 0 && cc === 0 && cp === 0;
   if (onlyPmx && pmxBidir >= 2 && pmxRt < 2 && p >= 0.99) p = 0.95;
 
   return Math.round(p * 10000);
@@ -226,7 +225,7 @@ function hasAcpInput(tx) {
 }
 
 function appendEvidence(existing, next) {
-  const out = existing.filter((e) => !(e.type === next.type && e.txid === next.txid));
+  const out = existing.filter(e => !(e.type === next.type && e.txid === next.txid));
   out.push(next);
   if (out.length > EVIDENCE_CAP) return out.slice(out.length - EVIDENCE_CAP);
   return out;
@@ -256,7 +255,7 @@ function bumpEdge(acc, from, to, evidence) {
   if (evidence.type === 'self_xfer' && !evidence.direction) {
     stamped = { ...evidence, direction: from === x ? 'ab' : 'ba' };
   }
-  const dup = row.evidence.some((e) => e.type === stamped.type && e.txid === stamped.txid);
+  const dup = row.evidence.some(e => e.type === stamped.type && e.txid === stamped.txid);
   if (!dup) {
     if (stamped.type === 'cih') {
       row.cih_count += 1;
@@ -454,7 +453,7 @@ async function main() {
     const entry = inputsByTxid.get(txid);
     if (!entry) continue;
     const addrs = entry.addrs;
-    if (addrs.some((a) => seedBlacklist.has(a))) {
+    if (addrs.some(a => seedBlacklist.has(a))) {
       cihTxsSeedBlacklisted++;
       continue;
     }
@@ -507,10 +506,7 @@ async function main() {
       selfXferBlacklisted++;
       continue;
     }
-    if (
-      multiSourceReceivers.has(e.old_owner) ||
-      multiSourceReceivers.has(e.new_owner)
-    ) {
+    if (multiSourceReceivers.has(e.old_owner) || multiSourceReceivers.has(e.new_owner)) {
       selfXferReceiver++;
       continue;
     }
@@ -583,9 +579,7 @@ async function main() {
     // reflect the new edges immediately, without waiting for the next
     // live tick. Same logic as src/lib/clusterStore.ts:recomputeClusterAnchors.
     const anchorTableExists = db
-      .prepare(
-        `SELECT name FROM sqlite_master WHERE type='table' AND name='cluster_anchors'`
-      )
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='cluster_anchors'`)
       .get();
     if (anchorTableExists) {
       const anchorStats = recomputeAnchorsForBackfill(db);
@@ -651,27 +645,34 @@ function runV2Recompute(db) {
   // we want to evaluate this run). Mirror of loadHardBlacklist in
   // src/lib/clusterStore.ts.
   const blacklist = new Set(MINT_WALLET_ADDRS);
-  for (const r of db.prepare(
-    `SELECT address FROM cluster_blacklist WHERE reason != 'auto-high-degree'`
-  ).all()) {
+  for (const r of db
+    .prepare(`SELECT address FROM cluster_blacklist WHERE reason != 'auto-high-degree'`)
+    .all()) {
     blacklist.add(r.address);
   }
 
-  const xfer = db.prepare(
-    `SELECT id, inscription_number, old_owner, new_owner FROM events
+  const xfer = db
+    .prepare(
+      `SELECT id, inscription_number, old_owner, new_owner FROM events
       WHERE event_type='transferred' AND marketplace IS NULL
         AND old_owner IS NOT NULL AND new_owner IS NOT NULL AND old_owner != new_owner
       ORDER BY id ASC`
-  ).all();
+    )
+    .all();
 
   // Per-inscription timeline for round-trip detection.
   const inscTimeline = new Map();
-  for (const r of db.prepare(
-    `SELECT id, inscription_number, new_owner FROM events
+  for (const r of db
+    .prepare(
+      `SELECT id, inscription_number, new_owner FROM events
       WHERE new_owner IS NOT NULL ORDER BY id ASC`
-  ).all()) {
+    )
+    .all()) {
     let arr = inscTimeline.get(r.inscription_number);
-    if (!arr) { arr = []; inscTimeline.set(r.inscription_number, arr); }
+    if (!arr) {
+      arr = [];
+      inscTimeline.set(r.inscription_number, arr);
+    }
     arr.push({ id: r.id, new_owner: r.new_owner });
   }
   function isRoundTrip(insc, beforeId, who) {
@@ -689,9 +690,17 @@ function runV2Recompute(db) {
   for (const r of xfer) {
     if (blacklist.has(r.old_owner) || blacklist.has(r.new_owner)) continue;
     let s = senderRecv.get(r.old_owner);
-    if (!s) { s = new Set(); senderRecv.set(r.old_owner, s); } s.add(r.new_owner);
+    if (!s) {
+      s = new Set();
+      senderRecv.set(r.old_owner, s);
+    }
+    s.add(r.new_owner);
     let t = recvSender.get(r.new_owner);
-    if (!t) { t = new Set(); recvSender.set(r.new_owner, t); } t.add(r.old_owner);
+    if (!t) {
+      t = new Set();
+      recvSender.set(r.new_owner, t);
+    }
+    t.add(r.old_owner);
   }
   const msrSet = new Set();
   for (const [a, set] of recvSender) if (set.size >= MSR_TH) msrSet.add(a);
@@ -712,15 +721,22 @@ function runV2Recompute(db) {
     let bidir = 0;
     const out = senderRecv.get(c) || new Set();
     for (const s of senders) if (out.has(s)) bidir++;
-    if (bidir >= PERSONAL_BIDIR) { personalMsr.add(c); continue; }
+    if (bidir >= PERSONAL_BIDIR) {
+      personalMsr.add(c);
+      continue;
+    }
     const ret = retStmt.get(c, c);
     if (ret.recv_n >= 5 && ret.held_n / ret.recv_n >= PERSONAL_RETENTION) {
       personalMsr.add(c);
     }
   }
-  console.log(`[cluster-backfill] v2 recompute: msrs=${msrSet.size} personal_msrs=${personalMsr.size}`);
+  console.log(
+    `[cluster-backfill] v2 recompute: msrs=${msrSet.size} personal_msrs=${personalMsr.size}`
+  );
 
-  function canon(a, b) { return a < b ? [a, b] : [b, a]; }
+  function canon(a, b) {
+    return a < b ? [a, b] : [b, a];
+  }
   const v2 = new Map();
   function getRow(a, b) {
     if (a === b) return null;
@@ -728,14 +744,25 @@ function runV2Recompute(db) {
     const key = `${x}|${y}`;
     let r = v2.get(key);
     if (!r) {
-      r = { addr_a: x, addr_b: y, cc: new Set(), cp: new Set(),
-            pmx: 0, pmx_ab: 0, pmx_ba: 0, pmx_rt: 0, pmx_rt_ab: 0, pmx_rt_ba: 0 };
+      r = {
+        addr_a: x,
+        addr_b: y,
+        cc: new Set(),
+        cp: new Set(),
+        pmx: 0,
+        pmx_ab: 0,
+        pmx_ba: 0,
+        pmx_rt: 0,
+        pmx_rt_ab: 0,
+        pmx_rt_ba: 0,
+      };
       v2.set(key, r);
     }
     return r;
   }
 
-  let ccBumps = 0, cpBumps = 0;
+  let ccBumps = 0,
+    cpBumps = 0;
   for (const [c, senders] of recvSender) {
     if (senders.size < COCONS_MIN || blacklist.has(c)) continue;
     const monog = [];
@@ -747,10 +774,13 @@ function runV2Recompute(db) {
     if (monog.length < COCONS_MIN) continue;
     for (let i = 0; i < monog.length; i++) {
       for (let j = i + 1; j < monog.length; j++) {
-        const r = getRow(monog[i], monog[j]); if (!r) continue;
-        r.cc.add(c); ccBumps++;
+        const r = getRow(monog[i], monog[j]);
+        if (!r) continue;
+        r.cc.add(c);
+        ccBumps++;
       }
-      const r2 = getRow(monog[i], c); if (r2) r2.cc.add(c);
+      const r2 = getRow(monog[i], c);
+      if (r2) r2.cc.add(c);
     }
   }
   for (const [p, recips] of senderRecv) {
@@ -765,26 +795,36 @@ function runV2Recompute(db) {
     if (monog.length < PARENT_MIN) continue;
     for (let i = 0; i < monog.length; i++) {
       for (let j = i + 1; j < monog.length; j++) {
-        const r = getRow(monog[i], monog[j]); if (!r) continue;
-        r.cp.add(p); cpBumps++;
+        const r = getRow(monog[i], monog[j]);
+        if (!r) continue;
+        r.cp.add(p);
+        cpBumps++;
       }
     }
   }
 
-  let pmxN = 0, pmxRtN = 0;
+  let pmxN = 0,
+    pmxRtN = 0;
   for (const e of xfer) {
     if (blacklist.has(e.old_owner) || blacklist.has(e.new_owner)) continue;
     if (!personalMsr.has(e.old_owner) && !personalMsr.has(e.new_owner)) continue;
-    const r = getRow(e.old_owner, e.new_owner); if (!r) continue;
-    r.pmx += 1; pmxN++;
+    const r = getRow(e.old_owner, e.new_owner);
+    if (!r) continue;
+    r.pmx += 1;
+    pmxN++;
     const isAb = e.old_owner === r.addr_a;
-    if (isAb) r.pmx_ab += 1; else r.pmx_ba += 1;
+    if (isAb) r.pmx_ab += 1;
+    else r.pmx_ba += 1;
     if (isRoundTrip(e.inscription_number, e.id, e.new_owner)) {
-      r.pmx_rt += 1; pmxRtN++;
-      if (isAb) r.pmx_rt_ab += 1; else r.pmx_rt_ba += 1;
+      r.pmx_rt += 1;
+      pmxRtN++;
+      if (isAb) r.pmx_rt_ab += 1;
+      else r.pmx_rt_ba += 1;
     }
   }
-  console.log(`[cluster-backfill] v2 recompute: cc=${ccBumps} cp=${cpBumps} pmx=${pmxN} pmx_rt=${pmxRtN}`);
+  console.log(
+    `[cluster-backfill] v2 recompute: cc=${ccBumps} cp=${cpBumps} pmx=${pmxN} pmx_rt=${pmxRtN}`
+  );
 
   // Reset v2 columns + recompute confidence for ALL existing rows
   // (zeroes any stale v2 evidence so this is fully idempotent).
@@ -798,10 +838,12 @@ function runV2Recompute(db) {
     `UPDATE wallet_cluster_edges SET confidence=? WHERE addr_a=? AND addr_b=?`
   );
   db.transaction(() => {
-    for (const row of db.prepare(
-      `SELECT addr_a, addr_b, cih_count, self_xfer_count, self_xfer_ab, self_xfer_ba
+    for (const row of db
+      .prepare(
+        `SELECT addr_a, addr_b, cih_count, self_xfer_count, self_xfer_ab, self_xfer_ba
          FROM wallet_cluster_edges`
-    ).all()) {
+      )
+      .all()) {
       recompConf.run(confidenceFromCounts(row), row.addr_a, row.addr_b);
     }
   })();
@@ -850,10 +892,17 @@ function runV2Recompute(db) {
         pmx_rt_ba: r.pmx_rt_ba,
       });
       upsertV2.run({
-        addr_a: r.addr_a, addr_b: r.addr_b, confidence: conf,
-        cc: r.cc.size, cp: r.cp.size,
-        pmx: r.pmx, pmx_ab: r.pmx_ab, pmx_ba: r.pmx_ba,
-        pmx_rt: r.pmx_rt, pmx_rt_ab: r.pmx_rt_ab, pmx_rt_ba: r.pmx_rt_ba,
+        addr_a: r.addr_a,
+        addr_b: r.addr_b,
+        confidence: conf,
+        cc: r.cc.size,
+        cp: r.cp.size,
+        pmx: r.pmx,
+        pmx_ab: r.pmx_ab,
+        pmx_ba: r.pmx_ba,
+        pmx_rt: r.pmx_rt,
+        pmx_rt_ab: r.pmx_rt_ab,
+        pmx_rt_ba: r.pmx_rt_ba,
       });
       written++;
     }
@@ -861,9 +910,13 @@ function runV2Recompute(db) {
   console.log(`[cluster-backfill] v2 recompute: edges_written=${written} ms=${Date.now() - t0}`);
 
   // Re-run cluster_anchors so the fold reflects the new confidence.
-  if (db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='cluster_anchors'`).get()) {
+  if (
+    db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='cluster_anchors'`).get()
+  ) {
     const stats = recomputeAnchorsForBackfill(db);
-    console.log(`[cluster-backfill] cluster_anchors after v2: ${stats.components} components, ${stats.members} members, ${stats.skipped_split_clusters} split skipped`);
+    console.log(
+      `[cluster-backfill] cluster_anchors after v2: ${stats.components} components, ${stats.members} members, ${stats.skipped_split_clusters} split skipped`
+    );
   }
 }
 
@@ -1015,9 +1068,7 @@ function runValidation(db, acc) {
   // whether the "two distinct users" might actually be one human with
   // multiple Matrica accounts. Common giveaways: same/similar usernames,
   // same avatar URL, same display name.
-  const muRows = db
-    .prepare(`SELECT user_id, username, avatar_url FROM matrica_users`)
-    .all();
+  const muRows = db.prepare(`SELECT user_id, username, avatar_url FROM matrica_users`).all();
   const userInfo = new Map();
   for (const r of muRows) userInfo.set(r.user_id, r);
 
@@ -1051,15 +1102,12 @@ function runValidation(db, acc) {
         const nameA = uA.username || '(no username)';
         const nameB = uB.username || '(no username)';
         const sameAvatar =
-          uA.avatar_url && uB.avatar_url && uA.avatar_url === uB.avatar_url
-            ? ' AVATAR=SAME'
+          uA.avatar_url && uB.avatar_url && uA.avatar_url === uB.avatar_url ? ' AVATAR=SAME' : '';
+        const shellMark = autoShellUsers.has(fp.ua)
+          ? ' [A=shell]'
+          : autoShellUsers.has(fp.ub)
+            ? ' [B=shell]'
             : '';
-        const shellMark =
-          autoShellUsers.has(fp.ua)
-            ? ' [A=shell]'
-            : autoShellUsers.has(fp.ub)
-              ? ' [B=shell]'
-              : '';
         console.log(
           `    conf=${fp.conf} cih=${fp.row.cih_count} sx=${fp.row.self_xfer_ab}/${fp.row.self_xfer_ba}` +
             `   A: "${nameA.slice(0, 24)}" (${fp.row.addr_a.slice(0, 18)}…)` +
@@ -1074,21 +1122,31 @@ function runValidation(db, acc) {
 
 /**
  * Rebuild cluster_anchors from wallet_cluster_edges at IDENTITY_FOLD_THRESHOLD
- * (9900 — keep in sync with src/lib/cluster.ts). Mirror of
+ * (9900 — keep in sync with src/lib/cluster.ts) plus eligible listing-staging
+ * edges when the v36 table exists. Mirror of
  * src/lib/clusterStore.ts:recomputeClusterAnchors so the script is
  * self-contained (CLI runs against prod without needing the Next.js
  * build artifacts).
  */
 function recomputeAnchorsForBackfill(db) {
   const IDENTITY_FOLD = 9900;
+  const hasStaging = !!db
+    .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='wallet_staging_edges'`)
+    .get();
   const edges = db
     .prepare(
-      `SELECT addr_a, addr_b FROM wallet_cluster_edges WHERE confidence >= ?`
+      hasStaging
+        ? `SELECT addr_a, addr_b FROM wallet_cluster_edges WHERE confidence >= ?
+           UNION ALL
+           SELECT source_wallet AS addr_a, seller_wallet AS addr_b
+             FROM wallet_staging_edges
+            WHERE eligible_for_fold = 1`
+        : `SELECT addr_a, addr_b FROM wallet_cluster_edges WHERE confidence >= ?`
     )
     .all(IDENTITY_FOLD);
 
   const parent = new Map();
-  const findRoot = (x) => {
+  const findRoot = x => {
     let p = parent.get(x);
     if (p === undefined) {
       parent.set(x, x);
@@ -1169,7 +1227,7 @@ function recomputeAnchorsForBackfill(db) {
   };
 }
 
-main().catch((err) => {
+main().catch(err => {
   console.error('[cluster-backfill] fatal:', err && err.stack ? err.stack : err);
   process.exit(1);
 });

@@ -6,6 +6,8 @@ import { lookupWalletLabel } from '@/lib/walletLabels';
 import { WalletsList } from './WalletsList';
 import LikelyLinkedWallets from './LikelyLinkedWallets';
 import type { LikelyLinkedRow } from '@/lib/clusterStore';
+import ListingStagingWallets from './ListingStagingWallets';
+import type { ListingStagingLinkRow } from '@/lib/listingStagingStore';
 import SafeImg from '@/components/SafeImg';
 import ColorPortfolioBar from '@/components/Charts/ColorPortfolioBar';
 import BagSizeOverTime from '@/components/Charts/BagSizeOverTime';
@@ -53,9 +55,14 @@ type Props = {
   /** On-chain-inferred peers not already in `wallets`. Empty when the
    * cluster pipeline hasn't run or no edges meet the public threshold. */
   likelyLinked: LikelyLinkedRow[];
+  /** Repeated source -> seller staging links that are folded into the
+   * current identity. Displayed as an audit trail for count changes. */
+  listingStagingLinks: ListingStagingLinkRow[];
   /** Subset of `wallets` that came from cluster_anchors (not Matrica).
    * Drives the "+N inferred" hint and per-row tag in the wallets list. */
   inferredWallets: string[];
+  /** Subset of inferredWallets specifically folded by listing-staging evidence. */
+  stagingWallets: string[];
   /** How many of `ombHoldings` sit in an inferred wallet — drives the
    * subtle dot on the OMB stat card when nonzero. */
   ombFromInferred: number;
@@ -82,7 +89,9 @@ export default function HolderProfile({
   colorCounts,
   isMatricaUser,
   likelyLinked,
+  listingStagingLinks,
   inferredWallets,
+  stagingWallets,
   ombFromInferred,
   bravoFromInferred,
   eventsFromInferred,
@@ -174,7 +183,11 @@ export default function HolderProfile({
                 singular="event"
               />
             </dl>
-            <WalletsList wallets={wallets} inferredWallets={inferredWallets} />
+            <WalletsList
+              wallets={wallets}
+              inferredWallets={inferredWallets}
+              stagingWallets={stagingWallets}
+            />
             {isMatricaUser && <RoleLadder earned={roleIds} counts={colorCounts} />}
           </>
         ) : (
@@ -225,7 +238,11 @@ export default function HolderProfile({
               </a>
             </div>
             {wallets.length > 1 ? (
-              <WalletsList wallets={wallets} inferredWallets={inferredWallets} />
+              <WalletsList
+                wallets={wallets}
+                inferredWallets={inferredWallets}
+                stagingWallets={stagingWallets}
+              />
             ) : null}
           </>
         )}
@@ -313,6 +330,7 @@ export default function HolderProfile({
       {/* Inferred-links — heuristic only, surfaced separately from
           Matrica-confirmed wallets. Renders nothing if no peers cleared
           the public threshold (CLUSTER_THRESHOLD in cluster.ts). */}
+      <ListingStagingWallets rows={listingStagingLinks} />
       <LikelyLinkedWallets rows={likelyLinked} />
 
       {/* Activity timeline — events involving this address (or any sibling
@@ -345,10 +363,9 @@ function Stat({
   singular?: string;
 }) {
   const inferred = inferredCount > 0;
-  const noun =
-    inferredCount === 1 && singular ? singular : `${singular ?? label.toLowerCase()}s`;
+  const noun = inferredCount === 1 && singular ? singular : `${singular ?? label.toLowerCase()}s`;
   const tooltip = inferred
-    ? `${inferredCount} ${noun} from on-chain-inferred wallet${inferredCount === 1 ? '' : 's'} (≥99% confidence, not Matrica-confirmed)`
+    ? `${inferredCount} ${noun} from on-chain-inferred wallet${inferredCount === 1 ? '' : 's'} (cluster or listing-staging evidence, not Matrica-confirmed)`
     : undefined;
   return (
     <div>
@@ -391,7 +408,7 @@ function RoleLadder({ earned, counts }: { earned: string[]; counts: ColorCounts 
         <span className="text-bone-dim group-open:rotate-90 transition-transform">›</span>
       </summary>
       <ul className="mt-3 space-y-1.5">
-        {ROLES.map((role) => {
+        {ROLES.map(role => {
           const has = earnedSet.has(role.id);
           const shortfall = has ? [] : shortfallFor(role, counts);
           return (
@@ -400,13 +417,15 @@ function RoleLadder({ earned, counts }: { earned: string[]; counts: ColorCounts 
               className={`flex flex-wrap items-center gap-2 text-[12px] ${has ? 'text-bone' : 'text-bone-dim'}`}
             >
               <span className="w-3 inline-block tabular-nums">{has ? '✓' : '·'}</span>
-              <span className={`leading-none ${role.combo ? 'border border-bone-dim/30 rounded-full px-1.5 py-0.5' : ''}`}>
+              <span
+                className={`leading-none ${role.combo ? 'border border-bone-dim/30 rounded-full px-1.5 py-0.5' : ''}`}
+              >
                 {role.emoji.join('')}
               </span>
               <span className="flex-1 min-w-0">{role.label}</span>
               {!has && shortfall.length > 0 && (
                 <span className="text-[10px] tracking-[0.08em] uppercase text-bone-dim shrink-0">
-                  need {shortfall.map((s) => `${COLOR_EMOJI[s.color]}×${s.need}`).join(' ')}
+                  need {shortfall.map(s => `${COLOR_EMOJI[s.color]}×${s.need}`).join(' ')}
                 </span>
               )}
             </li>

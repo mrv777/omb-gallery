@@ -11,7 +11,8 @@ Two production surfaces depend on it:
 1. **Identity fold** (`cluster_anchors` at `IDENTITY_FOLD_THRESHOLD = 9900`).
    Folds heuristically-linked wallets into a Matrica user's identity for
    the leaderboard, holder profile aggregation, and the activity feed
-   `@username` overlay. **Components containing 2+ distinct Matrica
+   `@username` overlay. The fold is built from high-confidence cluster
+   edges plus eligible listing-staging edges. **Components containing 2+ distinct Matrica
    users are skipped** — Matrica trumps the heuristic and the system
    never silently re-keys authoritative linkage. Roles stay Matrica-
    only by design (preventing a heuristic match from gaming the catalog).
@@ -46,15 +47,21 @@ authoritative there.
   - Plus the readers (`getInferredLinksForAddress`,
     `getLikelyLinkedForWallets`, `getClusterAnchorForAddress`,
     `recomputeClusterAnchors`).
+- `src/lib/listingStagingStore.ts` — daily recompute for directed
+  source -> seller links where a wallet repeatedly receives an OMB and
+  lists/sells it within 12 hours. Eligible rows are stored in
+  `wallet_staging_edges` and feed `cluster_anchors`; the evidence stays
+  separate from `wallet_cluster_edges` confidence.
 - `scripts/backfill-cluster.js` — host-side one-shot CIH backfill from
   cached raw txs (`scripts/fetch-raw-txs.js`) + identical v2 recompute
   logic. Run once after a deploy or when bitcoind drifts.
 - `cluster-research/` — the calibration scripts that produced the
   current formula. Useful when you want to test a new signal against
   Matrica ground truth without modifying production code.
-- DB schema in `src/lib/db.ts` (table `wallet_cluster_edges`,
-  `cluster_blacklist`, `cluster_anchors`); `user_version = 32` added
-  the v2 columns.
+- DB schema in `src/lib/db.ts` (tables `wallet_cluster_edges`,
+  `wallet_staging_edges`, `cluster_blacklist`, `cluster_anchors`);
+  `user_version = 32` added the v2 cluster columns and v36 added
+  listing-staging edges.
 
 ## Signals
 
@@ -62,13 +69,13 @@ Five distinct mechanisms feed the per-edge confidence. Counts are
 stored separately from the derived score so threshold tuning doesn't
 require recomputing edges.
 
-| signal | what it observes | who computes it | suppressed when |
-|--------|------------------|-----------------|-----------------|
-| `cih_count` | distinct txs where addr_a and addr_b co-input | live tick | tx is ACP-PSBT, has blacklisted input, has >20 inputs, or new_owner appears in inputs |
-| `self_xfer_*` | direct A↔B transferred events with marketplace=NULL | live tick | either endpoint blacklisted; either endpoint is a multi-source receiver |
-| `co_cons_count` | # of distinct destinations bridging two monogamous senders (≤2 lifetime OMB recipients each) | recompute | bridge is a blacklisted address |
-| `co_parent_count` | # of distinct non-MSR parents distributing to two monogamous receivers | recompute | parent is itself an MSR but not personal-MSR (excludes exchange withdrawal addresses) |
-| `pmx_*` (with `pmx_rt_*` subset) | direct A↔B transfers where one endpoint is a personal-MSR | recompute | either endpoint is on the hard blacklist (mints/marketplace fee/Liquidium/manual) |
+| signal                           | what it observes                                                                             | who computes it | suppressed when                                                                       |
+| -------------------------------- | -------------------------------------------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------- |
+| `cih_count`                      | distinct txs where addr_a and addr_b co-input                                                | live tick       | tx is ACP-PSBT, has blacklisted input, has >20 inputs, or new_owner appears in inputs |
+| `self_xfer_*`                    | direct A↔B transferred events with marketplace=NULL                                          | live tick       | either endpoint blacklisted; either endpoint is a multi-source receiver               |
+| `co_cons_count`                  | # of distinct destinations bridging two monogamous senders (≤2 lifetime OMB recipients each) | recompute       | bridge is a blacklisted address                                                       |
+| `co_parent_count`                | # of distinct non-MSR parents distributing to two monogamous receivers                       | recompute       | parent is itself an MSR but not personal-MSR (excludes exchange withdrawal addresses) |
+| `pmx_*` (with `pmx_rt_*` subset) | direct A↔B transfers where one endpoint is a personal-MSR                                    | recompute       | either endpoint is on the hard blacklist (mints/marketplace fee/Liquidium/manual)     |
 
 The `pmx_rt_count` is the subset of `pmx` events where the receiver
 **previously owned that inscription** — the round-trip indicator.
@@ -85,22 +92,46 @@ transferred events) that meets at least one of:
 Tunables live in `cluster.ts` (exported constants). Don't change them
 without re-running the calibration scripts in `cluster-research/`.
 
+## Listing-Staging Fold
+
+Listing-staging is intentionally not a confidence score. It is a
+separate directed audit table (`wallet_staging_edges`) for the pattern:
+source wallet transfers an OMB to a seller wallet, then that seller
+lists or sells the same OMB within 12 hours.
+
+An edge is eligible for identity fold only when all of these hold:
+
+- at least 2 distinct inscriptions have fast (`<=12h`) evidence
+- previous event is `transferred`, `marketplace IS NULL`
+- previous `new_owner` equals the seller, and previous `old_owner`
+  differs from the seller
+- neither endpoint is blacklisted or manually excluded
+- endpoints do not map to two different real Matrica profiles
+- the pair is not already known-same by Matrica or an existing
+  cluster edge at `>=9500`
+
+Eligible rows are unioned into `recomputeClusterAnchors()`, so the fold
+is site-wide after the daily recompute. The holder page shows the
+source -> seller evidence trail; activity rows and leaderboards do not
+show an explicit staging badge in v1, though their grouping can change
+through `cluster_anchors`.
+
 ## Confidence formula
 
 `confidenceFromCounts(c) → integer in [0, 10000]` (readers divide by
 10000 if they want a [0, 1] probability).
 
-Per-signal ladders (each takes the *max* of all firing tiers):
+Per-signal ladders (each takes the _max_ of all firing tiers):
 
-| signal | tier 1 | tier 2 | tier 3 | tier 4 |
-|--------|--------|--------|--------|--------|
-| cih | 1 → 0.80 | 2 → 0.95 | 3 → 0.98 | 5 → 0.99 |
-| sx total | 1 → 0.50 | 3 → 0.80 | — | — |
-| sx bidir = min(ab, ba) | 1 → 0.92 | 2 → 0.99 | — | — |
-| cc | 1 → 0.80 | 2 → 0.95 | 3 → 0.98 | 5 → 0.99 |
-| cp | 1 → 0.80 | 2 → 0.95 | 3 → 0.98 | — |
-| pmx total | 1 → 0.75 | 3 → 0.90 | — | — |
-| pmx bidir | 1 → 0.95 | 2 + pmx_rt ≥ 2 → 0.99 | — | — |
+| signal                 | tier 1   | tier 2                | tier 3   | tier 4   |
+| ---------------------- | -------- | --------------------- | -------- | -------- |
+| cih                    | 1 → 0.80 | 2 → 0.95              | 3 → 0.98 | 5 → 0.99 |
+| sx total               | 1 → 0.50 | 3 → 0.80              | —        | —        |
+| sx bidir = min(ab, ba) | 1 → 0.92 | 2 → 0.99              | —        | —        |
+| cc                     | 1 → 0.80 | 2 → 0.95              | 3 → 0.98 | 5 → 0.99 |
+| cp                     | 1 → 0.80 | 2 → 0.95              | 3 → 0.98 | —        |
+| pmx total              | 1 → 0.75 | 3 → 0.90              | —        | —        |
+| pmx bidir              | 1 → 0.95 | 2 + pmx_rt ≥ 2 → 0.99 | —        | —        |
 
 Cross-mechanism bonuses:
 
@@ -139,13 +170,13 @@ and the edges are still there.
 
 ## Live tick vs recompute
 
-| | live tick (`cluster`) | recompute (`cluster-recompute`) |
-|--|--|--|
-| schedule | every 5min in `auto` | hourly own cron |
-| signals | cih + sx (incremental) | cc, cp, pmx, pmx_rt (global) |
-| inputs | new events past poll cursor + bitcoind raw-tx fetch | full events table |
-| wallclock | ~5s typical | ~5–8s on May 2026 snapshot |
-| writes | cih_count / self_xfer_*; preserves cc/cp/pmx columns | cc/cp/pmx columns; recomputes confidence using merged counts; refreshes cluster_anchors and cluster_blacklist (auto-high-degree) |
+|           | live tick (`cluster`)                                 | recompute (`cluster-recompute`)                                                                                                  |
+| --------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| schedule  | every 5min in `auto`                                  | hourly own cron                                                                                                                  |
+| signals   | cih + sx (incremental)                                | cc, cp, pmx, pmx_rt (global)                                                                                                     |
+| inputs    | new events past poll cursor + bitcoind raw-tx fetch   | full events table                                                                                                                |
+| wallclock | ~5s typical                                           | ~5–8s on May 2026 snapshot                                                                                                       |
+| writes    | `cih_count` / `self_xfer_*`; preserves cc/cp/pmx columns | cc/cp/pmx columns; recomputes confidence using merged counts; refreshes cluster_anchors and cluster_blacklist (auto-high-degree) |
 
 Why the split: the v2 signals depend on whole-corpus fan-out maps
 (monogamy classification of every wallet, MSR classification, personal-
@@ -166,23 +197,23 @@ existing cc/cp/pmx values from the row first and passes them to
 Against Matrica ground truth (5,601 linked wallets across 2,728 users,
 of which 700 are multi-wallet → 41,481 same-user pairs):
 
-| | v1 (pre-this-branch) | v2 (current) |
-|--|----------------------|--------------|
-| 9500 precision | 88.89% | **93.88%** |
-| 9500 recall | 0.02% (8/41,481) | **39.70%** (16,467/41,481) |
-| 9700 precision | 88.89% | **94.46%** |
-| 9700 recall | 0.02% | **27.96%** |
-| 9900 precision (identity fold) | 88.89% | **88.10%** |
-| 9900 recall | 0.02% | **0.15%** |
+|                                | v1 (pre-this-branch) | v2 (current)               |
+| ------------------------------ | -------------------- | -------------------------- |
+| 9500 precision                 | 88.89%               | **93.88%**                 |
+| 9500 recall                    | 0.02% (8/41,481)     | **39.70%** (16,467/41,481) |
+| 9700 precision                 | 88.89%               | **94.46%**                 |
+| 9700 recall                    | 0.02%                | **27.96%**                 |
+| 9900 precision (identity fold) | 88.89%               | **88.10%**                 |
+| 9900 recall                    | 0.02%                | **0.15%**                  |
 
 Production fold impact at 9900:
 
-| | v1 | v2 |
-|--|----|----|
-| extra wallets folded into Matrica clusters | 95 | 150 |
-| unlinked-only on-chain components | 84 | 85 |
-| Matrica users with ≥1 on-chain peer suggestion at 9500 | 367 | ~900 |
-| total peer suggestions across all users at 9500 | 536 | ~5,000 |
+|                                                        | v1  | v2     |
+| ------------------------------------------------------ | --- | ------ |
+| extra wallets folded into Matrica clusters             | 95  | 150    |
+| unlinked-only on-chain components                      | 84  | 85     |
+| Matrica users with ≥1 on-chain peer suggestion at 9500 | 367 | ~900   |
+| total peer suggestions across all users at 9500        | 536 | ~5,000 |
 
 Per-user examples: JJL (197 wallets) went from 0/19,306 pairs recovered
 to 78.5%; IOBbiz (33 wallets) from 0% to 100%; NoNam3 from 0 extra
@@ -257,10 +288,13 @@ formula change.
   ```
   17 * * * *  curl -fsS -m 60 -H "Authorization: Bearer $INTERNAL_POLL_SECRET" \
                 http://localhost:3000/api/internal/poll?mode=cluster-recompute
+
+  41 3 * * *  curl -fsS -m 60 -H "Authorization: Bearer $INTERNAL_POLL_SECRET" \
+                http://localhost:3000/api/internal/poll?mode=listing-staging-recompute
   ```
 
-  Offset by 17min so it doesn't collide with the */5 `auto` tick or
-  the top-of-hour matrica run.
+  Offset the recomputes so they don't collide with the \*/5 `auto` tick,
+  the top-of-hour matrica run, or the daily database backup.
 
 - **Idempotence**: the recompute zeroes cc/cp/pmx columns on all
   edges before reapplying — re-running gives the same result.

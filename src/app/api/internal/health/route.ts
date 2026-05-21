@@ -19,6 +19,8 @@ const STALE_THRESHOLD_SEC: Record<string, number> = {
   magisat_fp: 900,
   magic_eden_fp: 900,
   ord_net_fp: 900,
+  cluster: 900,
+  listing_staging: 2 * 24 * 60 * 60,
 };
 const DEFAULT_STALE_SEC = 600;
 

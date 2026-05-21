@@ -315,12 +315,7 @@ export async function runClusterTick(): Promise<TickResult> {
   type TxGated = {
     addrs: string[];
     /** Reason this tx is suppressed for CIH+self_xfer; null = eligible. */
-    suppress:
-      | null
-      | 'rpc-fail'
-      | 'blacklisted-input'
-      | 'acp-settlement'
-      | 'high-fanin';
+    suppress: null | 'rpc-fail' | 'blacklisted-input' | 'acp-settlement' | 'high-fanin';
   };
   const inputsByTxid = new Map<string, TxGated>();
   let rpcFailures = 0;
@@ -360,9 +355,7 @@ export async function runClusterTick(): Promise<TickResult> {
       }
     }
   }
-  await Promise.all(
-    Array.from({ length: RPC_CONCURRENCY }, () => worker())
-  );
+  await Promise.all(Array.from({ length: RPC_CONCURRENCY }, () => worker()));
 
   // Build per-tick edge accumulator from CIH + self-xfer signals.
   const acc: EdgeAcc = new Map();
@@ -376,9 +369,7 @@ export async function runClusterTick(): Promise<TickResult> {
     // settlement (rarer than ACP, but happens — older or hand-rolled
     // PSBTs). Suppress both CIH and self-xfer signals on those.
     const newOwnerInInputs =
-      c.event_type === 'transferred' &&
-      c.new_owner != null &&
-      entry.addrs.includes(c.new_owner);
+      c.event_type === 'transferred' && c.new_owner != null && entry.addrs.includes(c.new_owner);
     const suppressed = entry.suppress != null || newOwnerInInputs;
 
     if (!suppressed && entry.addrs.length >= 2) {
@@ -443,9 +434,14 @@ export async function runClusterTick(): Promise<TickResult> {
       // cc/cp/pmx are recompute-owned. Read from existing if present
       // (preserved through the UPSERT) so the confidence formula sees
       // the full picture; the live tick never increments them.
-      let cc = 0, cp = 0;
-      let pmx = 0, pmxAb = 0, pmxBa = 0;
-      let pmxRt = 0, pmxRtAb = 0, pmxRtBa = 0;
+      let cc = 0,
+        cp = 0;
+      let pmx = 0,
+        pmxAb = 0,
+        pmxBa = 0;
+      let pmxRt = 0,
+        pmxRtAb = 0,
+        pmxRtBa = 0;
       let evidence: EvidenceItem[] = [];
       let firstSeen = row.first_seen_at;
       let lastSeen = row.last_seen_at;
@@ -610,13 +606,15 @@ export function runClusterRecompute(): RecomputeResult {
   // Pull every marketplace=NULL transferred event in id order so the
   // round-trip lookup (was the receiver an earlier owner?) is a
   // straight prefix scan over inscEvents[insc].
-  const xferRows = db.prepare(
-    `SELECT id, inscription_number, old_owner, new_owner, txid, block_timestamp
+  const xferRows = db
+    .prepare(
+      `SELECT id, inscription_number, old_owner, new_owner, txid, block_timestamp
        FROM events
       WHERE event_type='transferred' AND marketplace IS NULL
         AND old_owner IS NOT NULL AND new_owner IS NOT NULL AND old_owner != new_owner
       ORDER BY id ASC`
-  ).all() as Array<{
+    )
+    .all() as Array<{
     id: number;
     inscription_number: number;
     old_owner: string;
@@ -631,12 +629,17 @@ export function runClusterRecompute(): RecomputeResult {
   // so a "did B previously own this" check is O(timeline-length) but
   // each chain is short (median ~3, max ~30).
   const inscTimeline = new Map<number, Array<{ id: number; new_owner: string }>>();
-  for (const r of db.prepare(
-    `SELECT id, inscription_number, new_owner FROM events
+  for (const r of db
+    .prepare(
+      `SELECT id, inscription_number, new_owner FROM events
       WHERE new_owner IS NOT NULL ORDER BY id ASC`
-  ).all() as Array<{ id: number; inscription_number: number; new_owner: string }>) {
+    )
+    .all() as Array<{ id: number; inscription_number: number; new_owner: string }>) {
     let arr = inscTimeline.get(r.inscription_number);
-    if (!arr) { arr = []; inscTimeline.set(r.inscription_number, arr); }
+    if (!arr) {
+      arr = [];
+      inscTimeline.set(r.inscription_number, arr);
+    }
     arr.push({ id: r.id, new_owner: r.new_owner });
   }
 
@@ -656,10 +659,16 @@ export function runClusterRecompute(): RecomputeResult {
   for (const r of xferRows) {
     if (blacklist.has(r.old_owner) || blacklist.has(r.new_owner)) continue;
     let s = senderRecv.get(r.old_owner);
-    if (!s) { s = new Set(); senderRecv.set(r.old_owner, s); }
+    if (!s) {
+      s = new Set();
+      senderRecv.set(r.old_owner, s);
+    }
     s.add(r.new_owner);
     let t = recvSender.get(r.new_owner);
-    if (!t) { t = new Set(); recvSender.set(r.new_owner, t); }
+    if (!t) {
+      t = new Set();
+      recvSender.set(r.new_owner, t);
+    }
     t.add(r.old_owner);
   }
   const msrSet = new Set<string>();
@@ -684,8 +693,13 @@ export function runClusterRecompute(): RecomputeResult {
     const senders = recvSender.get(c) ?? new Set<string>();
     let bidir = 0;
     const myRecips = senderRecv.get(c) ?? new Set<string>();
-    Array.from(senders).forEach(s => { if (myRecips.has(s)) bidir++; });
-    if (bidir >= PERSONAL_MSR_BIDIR_MIN) { personalMsr.add(c); return; }
+    Array.from(senders).forEach(s => {
+      if (myRecips.has(s)) bidir++;
+    });
+    if (bidir >= PERSONAL_MSR_BIDIR_MIN) {
+      personalMsr.add(c);
+      return;
+    }
     const ret = retentionStmt.get(c, c) as { recv_n: number; held_n: number };
     if (ret.recv_n >= 5 && ret.held_n / ret.recv_n >= PERSONAL_MSR_RETENTION_MIN) {
       personalMsr.add(c);
@@ -716,10 +730,16 @@ export function runClusterRecompute(): RecomputeResult {
     let r = v2.get(key);
     if (!r) {
       r = {
-        addr_a: x, addr_b: y,
-        cc: new Set(), cp: new Set(),
-        pmx: 0, pmx_ab: 0, pmx_ba: 0,
-        pmx_rt: 0, pmx_rt_ab: 0, pmx_rt_ba: 0,
+        addr_a: x,
+        addr_b: y,
+        cc: new Set(),
+        cp: new Set(),
+        pmx: 0,
+        pmx_ab: 0,
+        pmx_ba: 0,
+        pmx_rt: 0,
+        pmx_rt_ab: 0,
+        pmx_rt_ba: 0,
       };
       v2.set(key, r);
     }
@@ -782,10 +802,12 @@ export function runClusterRecompute(): RecomputeResult {
     if (!r) continue;
     r.pmx += 1;
     const isAb = e.old_owner === r.addr_a;
-    if (isAb) r.pmx_ab += 1; else r.pmx_ba += 1;
+    if (isAb) r.pmx_ab += 1;
+    else r.pmx_ba += 1;
     if (isRoundTrip(e.inscription_number, e.id, e.new_owner)) {
       r.pmx_rt += 1;
-      if (isAb) r.pmx_rt_ab += 1; else r.pmx_rt_ba += 1;
+      if (isAb) r.pmx_rt_ab += 1;
+      else r.pmx_rt_ba += 1;
       result.pmx_rt_events += 1;
     }
     result.pmx_events += 1;
@@ -831,13 +853,18 @@ export function runClusterRecompute(): RecomputeResult {
   // v1 fields only — otherwise rows whose only signal was a v2 one
   // would still carry stale high confidence until their (a,b) pair
   // appears in v2. Iterate existing rows once and update.
-  const allExisting = db.prepare(
-    `SELECT addr_a, addr_b, cih_count, self_xfer_count, self_xfer_ab, self_xfer_ba
+  const allExisting = db
+    .prepare(
+      `SELECT addr_a, addr_b, cih_count, self_xfer_count, self_xfer_ab, self_xfer_ba
        FROM wallet_cluster_edges`
-  ).all() as Array<{
-    addr_a: string; addr_b: string;
-    cih_count: number; self_xfer_count: number;
-    self_xfer_ab: number; self_xfer_ba: number;
+    )
+    .all() as Array<{
+    addr_a: string;
+    addr_b: string;
+    cih_count: number;
+    self_xfer_count: number;
+    self_xfer_ab: number;
+    self_xfer_ba: number;
   }>;
   const updateConfOnly = db.prepare(
     `UPDATE wallet_cluster_edges SET confidence = ? WHERE addr_a = ? AND addr_b = ?`
@@ -938,18 +965,19 @@ let _msrCache: { set: Set<string>; loadedAt: number } | null = null;
 const MSR_CACHE_TTL_MS = 60_000;
 function loadMsrSet(): Set<string> {
   const now = Date.now();
-  if (_msrCache && (now - _msrCache.loadedAt) < MSR_CACHE_TTL_MS) return _msrCache.set;
-  const rows = getDb().prepare(
-    `SELECT address FROM cluster_blacklist WHERE reason = 'auto-high-degree'`
-  ).all() as Array<{ address: string }>;
+  if (_msrCache && now - _msrCache.loadedAt < MSR_CACHE_TTL_MS) return _msrCache.set;
+  const rows = getDb()
+    .prepare(`SELECT address FROM cluster_blacklist WHERE reason = 'auto-high-degree'`)
+    .all() as Array<{ address: string }>;
   const set = new Set(rows.map(r => r.address));
   _msrCache = { set, loadedAt: now };
   return set;
 }
 
 /**
- * Rebuild the `cluster_anchors` materialized view from
- * `wallet_cluster_edges` at IDENTITY_FOLD_THRESHOLD.
+ * Rebuild the `cluster_anchors` materialized view from strong identity
+ * evidence: `wallet_cluster_edges` at IDENTITY_FOLD_THRESHOLD plus eligible
+ * repeated listing-staging edges.
  *
  * Picks an anchor per connected component:
  *   - If the component contains exactly one Matrica user, anchor =
@@ -973,7 +1001,11 @@ export function recomputeClusterAnchors(): {
     .prepare(
       `SELECT addr_a, addr_b
          FROM wallet_cluster_edges
-        WHERE confidence >= ?`
+        WHERE confidence >= ?
+       UNION ALL
+       SELECT source_wallet AS addr_a, seller_wallet AS addr_b
+         FROM wallet_staging_edges
+        WHERE eligible_for_fold = 1`
     )
     .all(IDENTITY_FOLD_THRESHOLD) as Array<{ addr_a: string; addr_b: string }>;
 
@@ -1334,9 +1366,7 @@ export function getLikelyLinkedForWallets(
         existing.last_seen_at = Math.max(existing.last_seen_at, r.last_seen_at);
         // Append evidence items, capped — preserve most recent across folds.
         for (const e of evidence) {
-          const dup = existing.evidence.some(
-            x => x.type === e.type && x.txid === e.txid
-          );
+          const dup = existing.evidence.some(x => x.type === e.type && x.txid === e.txid);
           if (!dup) existing.evidence.push(e);
         }
         if (existing.evidence.length > 10) {
