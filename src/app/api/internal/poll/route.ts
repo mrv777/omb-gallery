@@ -1825,21 +1825,17 @@ async function runListingsTick(
     };
   }
 
-  // Phase 2: dedupe by inscription_id (lowest price wins). Same inscription
-  // can technically be listed by two different sellers; the cheaper one is
-  // what a buyer would actually take, so that's the one to store.
-  const byInscriptionId = new Map<string, ListingCandidate>();
+  // Phase 2: dedupe exact source listings only. The same inscription can be
+  // active on multiple marketplaces, and readers group those rows later.
+  const bySourceListing = new Map<string, ListingCandidate>();
   for (const item of collected) {
-    const existing = byInscriptionId.get(item.inscription_id);
-    if (!existing || item.price_sats < existing.price_sats) {
-      byInscriptionId.set(item.inscription_id, item);
-    }
+    bySourceListing.set(listingSnapshotKey(item), item);
   }
 
   // Phase 3: resolve to inscription_number; bucket unresolved.
   const ready: ReadyListing[] = [];
   let unresolved = 0;
-  for (const item of Array.from(byInscriptionId.values())) {
+  for (const item of Array.from(bySourceListing.values())) {
     const num = idToNumber.get(item.inscription_id);
     if (num == null) {
       unresolved++;
@@ -1915,10 +1911,9 @@ async function runListingsTick(
           satflow_id: string;
           listed_at: number;
         }>);
-    const priorListingKeys = new Map<number, string>();
+    const priorListingKeys = new Set<string>();
     for (const r of priorRows) {
-      priorListingKeys.set(
-        r.inscription_number,
+      priorListingKeys.add(
         listingSnapshotKey({
           marketplace: r.marketplace as ReadyListing['marketplace'],
           source_id: r.satflow_id,
@@ -1951,8 +1946,11 @@ async function runListingsTick(
         // or marketplace/source listing id switch passes. If a source lacks a
         // stable id, listed_at remains the fallback identity.
         const listingKey = listingSnapshotKey(item);
-        const prior = priorListingKeys.get(item.inscription_number);
-        if (prior === listingKey) continue;
+        if (priorListingKeys.has(listingKey)) continue;
+        // A source newly added to our ingestion can reveal listings that were
+        // already old at the previous successful poll. Store them in
+        // active_listings, but do not notify subscribers retroactively.
+        if (priorState?.last_run_at && item.listed_at <= priorState.last_run_at) continue;
         const txid = listedEventTxid(item);
         const insertRes = stmts.insertListedEvent.run({
           inscription_id: item.inscription_id,
@@ -2023,7 +2021,7 @@ async function runListingsTick(
     total: satflowTotalReported + ordnetRawCount,
     collected: collected.length,
     written: ready.length,
-    deduped: collected.length - byInscriptionId.size,
+    deduped: collected.length - bySourceListing.size,
     unresolved,
     listed_events: listedEventsEmitted,
     cold_start: isColdStart,
@@ -2034,7 +2032,7 @@ async function runListingsTick(
 
 function satflowListingToCandidate(item: NormalizedListing): ListingCandidate {
   return {
-    source_id: item.satflow_id,
+    source_id: item.satflow_id || `satflow:${item.inscription_id}:${item.listed_at}`,
     inscription_id: item.inscription_id,
     price_sats: item.price_sats,
     seller: item.seller,

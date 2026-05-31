@@ -224,7 +224,7 @@ describe('runNotifyFanout delivery dedupe', () => {
     dbModule.getStmts().upsertActiveListing.run({
       inscription_number: row.inscription_number,
       inscription_id: row.inscription_id,
-      satflow_id: 'listed:satflow:test-stale-b',
+      satflow_id: 'listed:satflow:test-stale-a',
       price_sats: 1_900_000,
       seller: 'bc1pseller',
       marketplace: 'satflow',

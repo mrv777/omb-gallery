@@ -33,8 +33,13 @@ export default function MarketplaceCard({ listing, focused, onBuy }: Props) {
           className="h-full w-full object-cover"
           loading="lazy"
         />
-        <div className="absolute bottom-2 left-2">
-          <MarketplacePip marketplace={listing.marketplace} />
+        <div className="absolute bottom-2 left-2 flex gap-1">
+          {listing.options.map(option => (
+            <MarketplacePip
+              key={`${option.marketplace}:${option.listing_id}`}
+              marketplace={option.marketplace}
+            />
+          ))}
         </div>
       </div>
       <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 border-t border-ink-2 px-2 py-2 font-mono uppercase tracking-[0.08em]">

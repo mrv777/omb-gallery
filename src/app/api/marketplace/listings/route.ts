@@ -8,6 +8,7 @@ import {
 } from '@/lib/marketplace/listings';
 import { requireMarketplaceEnabled } from '@/lib/marketplace/apiGuards';
 import { mockListings, mockStats } from '@/lib/marketplace/mock';
+import { compareMarketplaceListings } from '@/lib/marketplace/sort';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -42,11 +43,5 @@ function filterMockListings(
 ) {
   const filtered =
     color && color !== 'all' ? listings.filter(listing => listing.color === color) : listings;
-  return filtered.toSorted((a, b) => {
-    if (sort === 'price-desc')
-      return b.price_sats - a.price_sats || a.inscription_number - b.inscription_number;
-    if (sort === 'recent')
-      return b.listed_at - a.listed_at || a.inscription_number - b.inscription_number;
-    return a.price_sats - b.price_sats || a.inscription_number - b.inscription_number;
-  });
+  return filtered.toSorted((a, b) => compareMarketplaceListings(a, b, sort));
 }

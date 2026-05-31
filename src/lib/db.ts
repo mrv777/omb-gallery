@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 36;
+const SCHEMA_VERSION = 37;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -168,6 +168,7 @@ function migrate(db: DB): void {
         upgradeV33ToV34(db);
         upgradeV34ToV35(db);
         upgradeV35ToV36(db);
+        upgradeV36ToV37(db);
       } else {
         initSchemaLatest(db);
       }
@@ -207,6 +208,7 @@ function migrate(db: DB): void {
       if (current < 34) upgradeV33ToV34(db);
       if (current < 35) upgradeV34ToV35(db);
       if (current < 36) upgradeV35ToV36(db);
+      if (current < 37) upgradeV36ToV37(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -376,12 +378,12 @@ function initSchemaLatest(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_wallet_links_user
       ON wallet_links(matrica_user_id) WHERE matrica_user_id IS NOT NULL;
 
-    -- Snapshot of currently-active listings on Satflow. Refreshed atomically
-    -- every listings tick (DELETE + bulk INSERT in a transaction). One row per
-    -- inscription; if multiple marketplaces ever list the same one, the lowest
-    -- price wins (write-time conflict resolution via INSERT … ON CONFLICT).
+    -- Snapshot of currently-active source listings. Refreshed atomically
+    -- every listings tick (bulk upsert + stale delete in a transaction). One
+    -- inscription can have multiple active source listings across marketplaces;
+    -- readers group by inscription and pick a default option.
     CREATE TABLE IF NOT EXISTS active_listings (
-      inscription_number INTEGER PRIMARY KEY,
+      inscription_number INTEGER NOT NULL,
       inscription_id     TEXT    NOT NULL,
       satflow_id         TEXT    NOT NULL,
       price_sats         INTEGER NOT NULL,
@@ -389,9 +391,11 @@ function initSchemaLatest(db: DB): void {
       marketplace        TEXT    NOT NULL DEFAULT 'satflow',
       listed_at          INTEGER NOT NULL,
       refreshed_at       INTEGER NOT NULL DEFAULT (unixepoch()),
-      FOREIGN KEY (inscription_number) REFERENCES inscriptions (inscription_number) ON DELETE CASCADE
+      FOREIGN KEY (inscription_number) REFERENCES inscriptions (inscription_number) ON DELETE CASCADE,
+      PRIMARY KEY (marketplace, satflow_id)
     );
     CREATE INDEX IF NOT EXISTS idx_listings_price ON active_listings (price_sats);
+    CREATE INDEX IF NOT EXISTS idx_listings_inscription ON active_listings (inscription_number);
 
     -- Rolling counter for Satflow API call quota visibility. Single row.
     CREATE TABLE IF NOT EXISTS satflow_call_budget (
@@ -1757,6 +1761,43 @@ function upgradeV35ToV36(db: DB): void {
   `);
 }
 
+function upgradeV36ToV37(db: DB): void {
+  // Multi-market listings: allow one active row per marketplace source
+  // listing instead of one active row per inscription. The legacy `satflow_id`
+  // column now means "source listing id" for every marketplace.
+  db.exec(`
+    CREATE TABLE active_listings_v37 (
+      inscription_number INTEGER NOT NULL,
+      inscription_id     TEXT    NOT NULL,
+      satflow_id         TEXT    NOT NULL,
+      price_sats         INTEGER NOT NULL,
+      seller             TEXT,
+      marketplace        TEXT    NOT NULL DEFAULT 'satflow',
+      listed_at          INTEGER NOT NULL,
+      refreshed_at       INTEGER NOT NULL DEFAULT (unixepoch()),
+      FOREIGN KEY (inscription_number) REFERENCES inscriptions (inscription_number) ON DELETE CASCADE,
+      PRIMARY KEY (marketplace, satflow_id)
+    );
+    INSERT OR IGNORE INTO active_listings_v37 (
+      inscription_number, inscription_id, satflow_id, price_sats,
+      seller, marketplace, listed_at, refreshed_at
+    )
+    SELECT inscription_number,
+           inscription_id,
+           COALESCE(NULLIF(satflow_id, ''), 'legacy:' || marketplace || ':' || inscription_number || ':' || listed_at),
+           price_sats,
+           seller,
+           marketplace,
+           listed_at,
+           refreshed_at
+      FROM active_listings;
+    DROP TABLE active_listings;
+    ALTER TABLE active_listings_v37 RENAME TO active_listings;
+    CREATE INDEX IF NOT EXISTS idx_listings_price ON active_listings (price_sats);
+    CREATE INDEX IF NOT EXISTS idx_listings_inscription ON active_listings (inscription_number);
+  `);
+}
+
 function upgradeV30ToV31(db: DB): void {
   // Materialize connected components at IDENTITY_FOLD_THRESHOLD so the
   // top-holders leaderboard, color leaderboards, holder distribution
@@ -2001,6 +2042,7 @@ type Stmts = {
   deleteStaleListings: ReturnType<DB['prepare']>;
   truncateActiveListings: ReturnType<DB['prepare']>;
   getActiveListing: ReturnType<DB['prepare']>;
+  getActiveListings: ReturnType<DB['prepare']>;
   countActiveListings: ReturnType<DB['prepare']>;
   // satflow call budget
   bumpSatflowCallCount: ReturnType<DB['prepare']>;
@@ -2803,12 +2845,11 @@ export function getStmts(): Stmts {
         @inscription_number, @inscription_id, @satflow_id, @price_sats,
         @seller, @marketplace, @listed_at, @refreshed_at
       )
-      ON CONFLICT(inscription_number) DO UPDATE SET
+      ON CONFLICT(marketplace, satflow_id) DO UPDATE SET
+        inscription_number = excluded.inscription_number,
         inscription_id = excluded.inscription_id,
-        satflow_id     = excluded.satflow_id,
         price_sats     = excluded.price_sats,
         seller         = excluded.seller,
-        marketplace    = excluded.marketplace,
         listed_at      = excluded.listed_at,
         refreshed_at   = excluded.refreshed_at
     `),
@@ -2827,7 +2868,32 @@ export function getStmts(): Stmts {
     truncateActiveListings: db.prepare(`DELETE FROM active_listings`),
 
     getActiveListing: db.prepare(`
-      SELECT * FROM active_listings WHERE inscription_number = ?
+      SELECT * FROM active_listings
+      WHERE inscription_number = ?
+      ORDER BY price_sats ASC,
+               CASE marketplace
+                 WHEN 'ord.net' THEN 0
+                 WHEN 'ordnet' THEN 0
+                 WHEN 'satflow' THEN 1
+                 ELSE 2
+               END ASC,
+               listed_at DESC,
+               satflow_id ASC
+      LIMIT 1
+    `),
+
+    getActiveListings: db.prepare(`
+      SELECT * FROM active_listings
+      WHERE inscription_number = ?
+      ORDER BY price_sats ASC,
+               CASE marketplace
+                 WHEN 'ord.net' THEN 0
+                 WHEN 'ordnet' THEN 0
+                 WHEN 'satflow' THEN 1
+                 ELSE 2
+               END ASC,
+               listed_at DESC,
+               satflow_id ASC
     `),
 
     countActiveListings: db.prepare(`SELECT COUNT(*) AS n FROM active_listings`),

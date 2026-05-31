@@ -232,7 +232,11 @@ const ImageModal = memo(function ImageModal({
                 aria-label={`Buy OMB #${id}`}
               >
                 BUY
-                <span className="hidden sm:inline"> · {formatBtcCompact(listing.price_sats)}</span>
+                <span className="hidden sm:inline">
+                  {' '}
+                  · {formatBtcCompact(listing.price_sats)}
+                  {listing.listing_count > 1 ? ` · ${listing.listing_count} markets` : ''}
+                </span>
               </a>
             </Tooltip>
           )}

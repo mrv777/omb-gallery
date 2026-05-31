@@ -21,6 +21,8 @@ export const runtime = 'nodejs';
 
 type Body = {
   inscription_number?: unknown;
+  marketplace?: unknown;
+  listing_id?: unknown;
 };
 
 export async function POST(req: NextRequest) {
@@ -43,11 +45,20 @@ export async function POST(req: NextRequest) {
   if (!Number.isFinite(inscriptionNumber)) {
     return NextResponse.json({ error: 'invalid inscription number' }, { status: 400 });
   }
+  const marketplace = typeof body?.marketplace === 'string' ? body.marketplace : null;
+  const listingId = typeof body?.listing_id === 'string' ? body.listing_id : null;
+  if ((marketplace && !listingId) || (!marketplace && listingId)) {
+    return NextResponse.json(
+      { error: 'marketplace and listing_id must be provided together' },
+      { status: 400 }
+    );
+  }
+  const requestedSource = marketplace && listingId ? { marketplace, listingId } : undefined;
 
   const mockPurchase = marketplaceMockEnabled();
   const listing = marketplaceFixtureListingsEnabled()
     ? mockListing(inscriptionNumber)
-    : getMarketplaceListing(inscriptionNumber);
+    : getMarketplaceListing(inscriptionNumber, requestedSource);
   if (!listing) {
     return NextResponse.json(
       { error: 'listing unavailable or already sold', code: 'listing-stale' },

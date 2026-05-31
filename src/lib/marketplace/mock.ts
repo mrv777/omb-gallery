@@ -33,9 +33,7 @@ export function mockListings(): MarketplaceListing[] {
     if (!hit || hit.kind !== 'omb') continue;
     const marketplace = i % 5 === 0 ? 'ord.net' : 'satflow';
     const listingId = `mock-${marketplace === 'ord.net' ? 'on' : 'sf'}-${num}`;
-    listings.push({
-      inscription_number: num,
-      inscription_id: hit.inscriptionId ?? `mock-${num}`,
+    const option = {
       listing_id: listingId,
       satflow_id: listingId,
       price_sats: MOCK_PRICES[i % MOCK_PRICES.length],
@@ -43,10 +41,16 @@ export function mockListings(): MarketplaceListing[] {
       marketplace,
       listed_at: now - i * 3_900,
       refreshed_at: now - 45,
+    };
+    listings.push({
+      inscription_number: num,
+      inscription_id: hit.inscriptionId ?? `mock-${num}`,
+      ...option,
       color: normalizeColor(hit.color),
       thumbnail: hit.thumbnail,
       full: hit.full,
       description: hit.description,
+      options: [option],
     });
   }
   return listings;
@@ -57,6 +61,8 @@ export function mockLiteListings(): MarketplaceLiteListing[] {
     inscription_number: listing.inscription_number,
     price_sats: listing.price_sats,
     marketplace: listing.marketplace,
+    marketplaces: listing.options.map(option => option.marketplace),
+    listing_count: listing.options.length,
     refreshed_at: listing.refreshed_at,
   }));
 }

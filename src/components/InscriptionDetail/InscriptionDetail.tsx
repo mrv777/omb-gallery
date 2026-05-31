@@ -1,6 +1,7 @@
 import Link from 'next/link';
-import type { ActiveListingRow, EventRow, InscriptionRow } from '@/lib/db';
+import type { EventRow, InscriptionRow } from '@/lib/db';
 import type { LoanExpirationEstimate } from '@/lib/loanExpiration';
+import type { MarketplaceListing } from '@/lib/marketplace/types';
 import { lookupInscription } from '@/lib/inscriptionLookup';
 import {
   formatBtc,
@@ -41,7 +42,7 @@ type Props = {
   /** Estimated expiration of the open loan (if any). Null if no active loan
    * or no origination data to base an estimate on. */
   activeLoanEstimate?: ActiveLoanEstimate | null;
-  currentListing?: ActiveListingRow | null;
+  currentListing?: MarketplaceListing | null;
 };
 
 export default function InscriptionDetail({
@@ -121,7 +122,12 @@ export default function InscriptionDetail({
             <div className="mb-5 flex flex-wrap items-center gap-x-2 gap-y-1 border border-ink-2 px-2 py-1.5 text-[11px] uppercase tracking-[0.08em] text-bone-dim">
               <span>listed</span>
               <span className="text-bone tabular-nums">{formatBtc(currentListing.price_sats)}</span>
-              <span>via {marketplaceLabel(currentListing.marketplace).toLowerCase()}</span>
+              <span>
+                via{' '}
+                {currentListing.options
+                  .map(option => marketplaceLabel(option.marketplace).toLowerCase())
+                  .join(' + ')}
+              </span>
               <Link
                 href={`/marketplace?focus=${inscription.inscription_number}`}
                 className="ml-1 text-bone hover:text-accent-orange"

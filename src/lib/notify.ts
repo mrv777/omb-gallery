@@ -323,15 +323,13 @@ function activeListingTxid(row: ActiveListingRow): string {
 
 function isCurrentListedEvent(ev: EventRow): boolean {
   if (ev.event_type !== 'listed') return true;
-  const row = getStmts().getActiveListing.get(ev.inscription_number) as
-    | ActiveListingRow
-    | undefined;
-  if (!row) return false;
-  return (
-    row.marketplace === (ev.marketplace ?? '') &&
-    row.price_sats === (ev.sale_price_sats ?? 0) &&
-    (row.seller ?? null) === (ev.old_owner ?? null) &&
-    activeListingTxid(row) === ev.txid
+  const rows = getStmts().getActiveListings.all(ev.inscription_number) as ActiveListingRow[];
+  return rows.some(
+    row =>
+      row.marketplace === (ev.marketplace ?? '') &&
+      row.price_sats === (ev.sale_price_sats ?? 0) &&
+      (row.seller ?? null) === (ev.old_owner ?? null) &&
+      activeListingTxid(row) === ev.txid
   );
 }
 

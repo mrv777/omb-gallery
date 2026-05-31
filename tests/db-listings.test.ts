@@ -1,6 +1,6 @@
 /**
  * Integration tests for the active_listings table — the snapshot-replace
- * pattern, dedupe by inscription_number, and FK cascade behavior.
+ * pattern, source-listing identity, and FK cascade behavior.
  *
  * Each test gets a fresh SQLite file and a fresh module load (via
  * vi.resetModules) because db.ts caches the connection at module level.
@@ -155,7 +155,7 @@ describe('active_listings schema + statements', () => {
     expect(tbl).toBeDefined();
   });
 
-  it('upserts and replaces by inscription_number PK', () => {
+  it('upserts by source listing identity and allows multiple markets per inscription', () => {
     const db = dbModule.getDb();
     const stmts = dbModule.getStmts();
     const row = db.prepare(`SELECT inscription_number FROM inscriptions LIMIT 1`).get() as {
@@ -183,6 +183,23 @@ describe('active_listings schema + statements', () => {
     expect(row2.price_sats).toBe(2_000_000);
     expect(row2.refreshed_at).toBe(1700000200);
     expect((stmts.countActiveListings.get([]) as { n: number }).n).toBe(1);
+
+    stmts.upsertActiveListing.run({
+      ...base,
+      satflow_id: 'ord-1',
+      marketplace: 'ord.net',
+      price_sats: 1_900_000,
+      refreshed_at: 1700000300,
+    });
+    const rows = stmts.getActiveListings.all(row.inscription_number) as Array<{
+      marketplace: string;
+      price_sats: number;
+    }>;
+    expect(rows.map(r => [r.marketplace, r.price_sats])).toEqual([
+      ['ord.net', 1_900_000],
+      ['satflow', 2_000_000],
+    ]);
+    expect((stmts.countActiveListings.get([]) as { n: number }).n).toBe(2);
   });
 
   it('deleteStaleListings removes rows older than the cutoff', () => {
@@ -231,6 +248,171 @@ describe('active_listings schema + statements', () => {
 
     db.prepare(`DELETE FROM inscriptions WHERE inscription_number = ?`).run(row.inscription_number);
     expect((stmts.countActiveListings.get([]) as { n: number }).n).toBe(0);
+  });
+});
+
+describe('marketplace listing read model', () => {
+  it('groups multi-market rows into one listing with sorted options', async () => {
+    const db = dbModule.getDb();
+    const stmts = dbModule.getStmts();
+    const row = db
+      .prepare(`SELECT inscription_number FROM inscriptions WHERE collection_slug = 'omb' LIMIT 1`)
+      .get() as { inscription_number: number };
+
+    const base = {
+      inscription_number: row.inscription_number,
+      inscription_id: 'c'.repeat(64) + 'i0',
+      price_sats: 1_900_000,
+      seller: 'bc1pseller',
+      listed_at: 1700000000,
+      refreshed_at: 1700000100,
+    };
+    stmts.upsertActiveListing.run({
+      ...base,
+      satflow_id: 'sf-1',
+      marketplace: 'satflow',
+    });
+    stmts.upsertActiveListing.run({
+      ...base,
+      satflow_id: 'on-1',
+      marketplace: 'ord.net',
+      listed_at: 1700000050,
+    });
+
+    const readModel = await import('../src/lib/marketplace/listings');
+    const listing = readModel.getMarketplaceListing(row.inscription_number);
+    expect(listing?.inscription_number).toBe(row.inscription_number);
+    expect(listing?.marketplace).toBe('ord.net');
+    expect(listing?.listing_id).toBe('on-1');
+    expect(listing?.options.map(option => [option.marketplace, option.listing_id])).toEqual([
+      ['ord.net', 'on-1'],
+      ['satflow', 'sf-1'],
+    ]);
+
+    const satflow = readModel.getMarketplaceListing(row.inscription_number, {
+      marketplace: 'satflow',
+      listingId: 'sf-1',
+    });
+    expect(satflow?.marketplace).toBe('satflow');
+    expect(satflow?.listing_id).toBe('sf-1');
+    expect(
+      readModel.getMarketplaceListing(row.inscription_number, {
+        marketplace: 'satflow',
+        listingId: 'missing',
+      })
+    ).toBeNull();
+  });
+
+  it('counts floor/listed stats by inscription and lite rows by grouped listing', async () => {
+    const db = dbModule.getDb();
+    const stmts = dbModule.getStmts();
+    const rows = db
+      .prepare(`SELECT inscription_number FROM inscriptions WHERE collection_slug = 'omb' LIMIT 2`)
+      .all() as Array<{ inscription_number: number }>;
+    const [first, second] = rows;
+    if (!first || !second) throw new Error('expected seeded inscriptions');
+
+    stmts.upsertActiveListing.run({
+      inscription_number: first.inscription_number,
+      inscription_id: 'd'.repeat(64) + 'i0',
+      satflow_id: 'sf-first',
+      price_sats: 2_000_000,
+      seller: null,
+      marketplace: 'satflow',
+      listed_at: 1700000000,
+      refreshed_at: 1700000100,
+    });
+    stmts.upsertActiveListing.run({
+      inscription_number: first.inscription_number,
+      inscription_id: 'd'.repeat(64) + 'i0',
+      satflow_id: 'on-first',
+      price_sats: 1_900_000,
+      seller: null,
+      marketplace: 'ord.net',
+      listed_at: 1700000001,
+      refreshed_at: 1700000200,
+    });
+    stmts.upsertActiveListing.run({
+      inscription_number: second.inscription_number,
+      inscription_id: 'e'.repeat(64) + 'i0',
+      satflow_id: 'sf-second',
+      price_sats: 2_200_000,
+      seller: null,
+      marketplace: 'satflow',
+      listed_at: 1700000002,
+      refreshed_at: 1700000300,
+    });
+
+    const readModel = await import('../src/lib/marketplace/listings');
+    expect(readModel.getMarketplaceStats()).toMatchObject({
+      floor_sats: 1_900_000,
+      listed_count: 2,
+      refreshed_at: 1700000300,
+    });
+    const lite = readModel.getMarketplaceLiteListings();
+    const firstLite = lite.find(item => item.inscription_number === first.inscription_number);
+    expect(firstLite).toMatchObject({
+      price_sats: 1_900_000,
+      marketplace: 'ord.net',
+      marketplaces: ['ord.net', 'satflow'],
+      listing_count: 2,
+      refreshed_at: 1700000200,
+    });
+    expect(lite.filter(item => item.inscription_number === first.inscription_number)).toHaveLength(
+      1
+    );
+  });
+});
+
+describe('marketplace intent source validation', () => {
+  it('rejects a requested marketplace/listing_id that is not active', async () => {
+    process.env.NEXT_PUBLIC_MARKETPLACE_ENABLED = 'true';
+    const db = dbModule.getDb();
+    const stmts = dbModule.getStmts();
+    const row = db
+      .prepare(`SELECT inscription_number FROM inscriptions WHERE collection_slug = 'omb' LIMIT 1`)
+      .get() as { inscription_number: number };
+    stmts.upsertActiveListing.run({
+      inscription_number: row.inscription_number,
+      inscription_id: 'f'.repeat(64) + 'i0',
+      satflow_id: 'sf-active',
+      price_sats: 2_000_000,
+      seller: null,
+      marketplace: 'satflow',
+      listed_at: 1700000000,
+      refreshed_at: 1700000100,
+    });
+
+    const { BUYER_COOKIE_NAME, mintBuyerSession } = await import('../src/lib/buyerSession');
+    const { POST } = await import('../src/app/api/marketplace/intent/route');
+    const cookie = mintBuyerSession({
+      ord_addr: 'bc1pordbuyer',
+      pay_addr: 'bc1qpaybuyer',
+      ord_pubkey: '02'.padEnd(66, '0'),
+      pay_pubkey: '03'.padEnd(66, '0'),
+      accepted_terms_at: 1700000200,
+    });
+    if (!cookie) throw new Error('expected buyer session cookie');
+
+    const { NextRequest } = await import('next/server');
+    const req = new NextRequest('http://localhost/api/marketplace/intent', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: `${BUYER_COOKIE_NAME}=${cookie}`,
+      },
+      body: JSON.stringify({
+        inscription_number: row.inscription_number,
+        marketplace: 'ord.net',
+        listing_id: 'missing-ord-source',
+      }),
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({
+      code: 'listing-stale',
+    });
   });
 });
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { formatBtc, marketplaceLabel, truncateAddr } from '@/lib/format';
 import type {
@@ -25,17 +25,28 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
   const { wallet, signMessage, signPsbt } = useWallet();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedOptionKey, setSelectedOptionKey] = useState<string | null>(null);
+
+  const options = useMemo(() => listing?.options ?? [], [listing]);
+  const selectedOption = useMemo(() => {
+    if (options.length === 0) return null;
+    return (
+      options.find(
+        option => optionKey(option.marketplace, option.listing_id) === selectedOptionKey
+      ) ?? options[0]
+    );
+  }, [options, selectedOptionKey]);
 
   if (!open || !listing) return null;
 
-  const canBuy = !!wallet?.acceptedTermsAt && !busy;
+  const canBuy = !!wallet?.acceptedTermsAt && !busy && !!selectedOption;
 
   async function submit() {
-    if (!listing) return;
+    if (!listing || !selectedOption) return;
     setBusy(true);
     setError(null);
     try {
-      const intentJson = await createIntentWithOrdnetRetry(listing);
+      const intentJson = await createIntentWithOrdnetRetry(listing, selectedOption);
       const broadcastJson = await completeSigningFlow(intentJson);
       onSuccess({
         listing: intentJson.listing,
@@ -97,12 +108,13 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
   }
 
   async function createIntentWithOrdnetRetry(
-    listing: MarketplaceListing
+    listing: MarketplaceListing,
+    option: MarketplaceListing['options'][number]
   ): Promise<CreateIntentResponse> {
-    let intent = await requestIntent(listing.inscription_number);
+    let intent = await requestIntent(listing.inscription_number, option);
     if (!intent.ok && intent.code === 'ordnet-auth-required') {
       await authorizeOrdnet();
-      intent = await requestIntent(listing.inscription_number);
+      intent = await requestIntent(listing.inscription_number, option);
     }
     if (!intent.ok || !intent.body?.psbt) {
       throw new Error(intent.body?.error ?? 'Purchase failed');
@@ -110,7 +122,10 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
     return intent.body;
   }
 
-  async function requestIntent(inscriptionNumber: number): Promise<{
+  async function requestIntent(
+    inscriptionNumber: number,
+    option: MarketplaceListing['options'][number]
+  ): Promise<{
     ok: boolean;
     code?: string;
     body: (CreateIntentResponse & { error?: string; code?: string }) | null;
@@ -118,7 +133,11 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
     const res = await fetch('/api/marketplace/intent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ inscription_number: inscriptionNumber }),
+      body: JSON.stringify({
+        inscription_number: inscriptionNumber,
+        marketplace: option.marketplace,
+        listing_id: option.listing_id,
+      }),
     });
     const body = (await res.json().catch(() => null)) as
       | (CreateIntentResponse & { error?: string; code?: string })
@@ -198,8 +217,10 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
                   </Link>
                 </div>
                 <div className="mt-1 flex items-center gap-2 text-[11px] text-bone-dim">
-                  <MarketplacePip marketplace={listing.marketplace} />
-                  <span>{marketplaceLabel(listing.marketplace)}</span>
+                  {selectedOption && <MarketplacePip marketplace={selectedOption.marketplace} />}
+                  <span>
+                    {marketplaceLabel(selectedOption?.marketplace ?? listing.marketplace)}
+                  </span>
                 </div>
               </div>
               <button
@@ -223,9 +244,42 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
             <div className="mt-3 border-y border-ink-2 py-3 sm:mt-4 sm:py-4">
               <div className="text-[10px] text-bone-dim">price</div>
               <div className="mt-1 text-2xl text-bone tabular-nums">
-                {formatBtc(listing.price_sats)}
+                {formatBtc(selectedOption?.price_sats ?? listing.price_sats)}
               </div>
             </div>
+
+            {options.length > 1 && (
+              <div className="mt-3 border-b border-ink-2 pb-3 sm:mt-4 sm:pb-4">
+                <div className="text-[10px] text-bone-dim">marketplace</div>
+                <div className="mt-2 grid gap-2">
+                  {options.map(option => {
+                    const key = optionKey(option.marketplace, option.listing_id);
+                    const active =
+                      key === optionKey(selectedOption?.marketplace, selectedOption?.listing_id);
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setSelectedOptionKey(key)}
+                        className={`flex h-10 items-center justify-between gap-3 border px-2 text-left text-[11px] transition-colors ${
+                          active
+                            ? 'border-bone text-bone'
+                            : 'border-ink-2 text-bone-dim hover:border-bone-dim hover:text-bone'
+                        }`}
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <MarketplacePip marketplace={option.marketplace} />
+                          <span className="truncate">{marketplaceLabel(option.marketplace)}</span>
+                        </span>
+                        <span className="shrink-0 tabular-nums">
+                          {formatBtc(option.price_sats)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="mt-3 text-[11px] text-bone-dim sm:mt-4">
               {wallet ? (
@@ -303,4 +357,11 @@ function signatureToHex(signature: string): string {
     out += raw.charCodeAt(i).toString(16).padStart(2, '0');
   }
   return out;
+}
+
+function optionKey(
+  marketplace: string | null | undefined,
+  listingId: string | null | undefined
+): string {
+  return `${marketplace ?? ''}:${listingId ?? ''}`;
 }

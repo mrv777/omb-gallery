@@ -2,6 +2,16 @@ import type { ColorFilter } from '@/lib/types';
 
 export type MarketplaceSort = 'price-asc' | 'price-desc' | 'recent';
 
+export type MarketplaceListingOption = {
+  listing_id: string;
+  satflow_id: string;
+  price_sats: number;
+  seller: string | null;
+  marketplace: string;
+  listed_at: number;
+  refreshed_at: number;
+};
+
 export type MarketplaceListing = {
   inscription_number: number;
   inscription_id: string;
@@ -16,6 +26,7 @@ export type MarketplaceListing = {
   thumbnail: string;
   full: string;
   description: string;
+  options: MarketplaceListingOption[];
 };
 
 export type MarketplaceStats = {
@@ -35,6 +46,8 @@ export type MarketplaceLiteListing = {
   inscription_number: number;
   price_sats: number;
   marketplace: string;
+  marketplaces: string[];
+  listing_count: number;
   refreshed_at: number;
 };
 

@@ -9,6 +9,7 @@ import type {
   MarketplaceStats,
 } from '@/lib/marketplace/types';
 import type { ColorFilter } from '@/lib/types';
+import { compareMarketplaceListings } from '@/lib/marketplace/sort';
 import MarketplaceCard from './MarketplaceCard';
 import MarketplaceFilters from './MarketplaceFilters';
 import BuyDialog from './BuyDialog';
@@ -101,13 +102,7 @@ export default function MarketplaceGrid({
       color === 'all'
         ? initialListings
         : initialListings.filter(listing => listing.color === color);
-    return filtered.toSorted((a, b) => {
-      if (sort === 'price-desc')
-        return b.price_sats - a.price_sats || a.inscription_number - b.inscription_number;
-      if (sort === 'recent')
-        return b.listed_at - a.listed_at || a.inscription_number - b.inscription_number;
-      return a.price_sats - b.price_sats || a.inscription_number - b.inscription_number;
-    });
+    return filtered.toSorted((a, b) => compareMarketplaceListings(a, b, sort));
   }, [color, initialListings, sort]);
 
   const refreshedLabel = initialStats.refreshed_at
@@ -166,9 +161,13 @@ export default function MarketplaceGrid({
       </section>
 
       <BuyDialog
+        key={selected?.inscription_number ?? 'empty'}
         listing={selected}
         open={buyOpen}
-        onClose={() => setBuyOpen(false)}
+        onClose={() => {
+          setBuyOpen(false);
+          setSelected(null);
+        }}
         onSuccess={({ listing, txid }) => setReceipt({ listing, txid })}
       />
       {receipt && (
