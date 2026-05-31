@@ -4,7 +4,7 @@ import React, { memo, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { GalleryImage } from '@/lib/types';
 import { useFavorites } from '@/lib/FavoritesContext';
-import { formatBtcCompact } from '@/lib/format';
+import { formatBtcCompact, formatBtcPreciseCompact } from '@/lib/format';
 import type { MarketplaceLiteListing } from '@/lib/marketplace/types';
 import NotificationButton, { BellIcon } from './NotificationButton/NotificationButton';
 import DownloadMenu from './DownloadMenu/DownloadMenu';
@@ -234,7 +234,8 @@ const ImageModal = memo(function ImageModal({
                 BUY
                 <span className="hidden sm:inline">
                   {' '}
-                  · {formatBtcCompact(listing.price_sats)}
+                  · {formatBtcCompact(listing.price_sats)} · est{' '}
+                  {formatBtcPreciseCompact(listing.estimated_buyer_total_sats)} + net
                   {listing.listing_count > 1 ? ` · ${listing.listing_count} markets` : ''}
                 </span>
               </a>

@@ -5,6 +5,7 @@ import type { MarketplaceListing } from '@/lib/marketplace/types';
 import { lookupInscription } from '@/lib/inscriptionLookup';
 import {
   formatBtc,
+  formatBtcPreciseCompact,
   formatRelTime,
   formatTimeUntil,
   marketplaceLabel,
@@ -122,6 +123,9 @@ export default function InscriptionDetail({
             <div className="mb-5 flex flex-wrap items-center gap-x-2 gap-y-1 border border-ink-2 px-2 py-1.5 text-[11px] uppercase tracking-[0.08em] text-bone-dim">
               <span>listed</span>
               <span className="text-bone tabular-nums">{formatBtc(currentListing.price_sats)}</span>
+              <span className="text-bone tabular-nums">
+                est buy {formatBtcPreciseCompact(currentListing.estimated_buyer_total_sats)} + net
+              </span>
               <span>
                 via{' '}
                 {currentListing.options

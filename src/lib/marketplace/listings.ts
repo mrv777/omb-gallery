@@ -2,6 +2,8 @@ import 'server-only';
 
 import { getDb, type ActiveListingRow } from '@/lib/db';
 import { lookupInscription } from '@/lib/inscriptionLookup';
+import { estimateMarketplaceBuyerCost } from './fees';
+import { compareMarketplaceListings } from './sort';
 import type {
   MarketplaceListing,
   MarketplaceListingOption,
@@ -17,17 +19,6 @@ type ListingDbRow = ActiveListingRow & {
 type ListingSourceSelector = {
   marketplace?: string | null;
   listingId?: string | null;
-};
-
-const GROUP_SORT_SQL: Record<MarketplaceSort, string> = {
-  'price-asc': 'primary_price ASC, al.inscription_number ASC',
-  'price-desc': 'primary_price DESC, al.inscription_number ASC',
-  recent: 'latest_listed_at DESC, al.inscription_number ASC',
-};
-const OUTER_GROUP_SORT_SQL: Record<MarketplaceSort, string> = {
-  'price-asc': 'g.primary_price ASC, g.inscription_number ASC',
-  'price-desc': 'g.primary_price DESC, g.inscription_number ASC',
-  recent: 'g.latest_listed_at DESC, g.inscription_number ASC',
 };
 
 export function marketplaceMockEnabled(): boolean {
@@ -66,32 +57,23 @@ export function getMarketplaceListings(options?: {
   const rows = getDb()
     .prepare(
       `
-      WITH grouped AS (
-        SELECT al.inscription_number,
-               MIN(al.price_sats) AS primary_price,
-               MAX(al.listed_at)  AS latest_listed_at
-        FROM active_listings al
-        JOIN inscriptions i ON i.inscription_number = al.inscription_number
-        WHERE i.collection_slug = 'omb'
-          AND (@color IS NULL OR i.color = @color)
-        GROUP BY al.inscription_number
-        ORDER BY ${GROUP_SORT_SQL[sort]}
-        LIMIT @limit
-      )
       SELECT al.*, i.color
-      FROM grouped g
-      JOIN active_listings al ON al.inscription_number = g.inscription_number
+      FROM active_listings al
       JOIN inscriptions i ON i.inscription_number = al.inscription_number
-      ORDER BY ${OUTER_GROUP_SORT_SQL[sort]},
+      WHERE i.collection_slug = 'omb'
+        AND (@color IS NULL OR i.color = @color)
+      ORDER BY al.inscription_number ASC,
                al.price_sats ASC,
                ${marketplacePrioritySql('al.marketplace')} ASC,
                al.listed_at DESC,
                al.satflow_id ASC
     `
     )
-    .all({ color, limit }) as ListingDbRow[];
+    .all({ color }) as ListingDbRow[];
 
-  return groupedListingsFromRows(rows);
+  return groupedListingsFromRows(rows)
+    .toSorted((a, b) => compareMarketplaceListings(a, b, sort))
+    .slice(0, limit);
 }
 
 export function getMarketplaceLiteListings(): MarketplaceLiteListing[] {
@@ -120,6 +102,11 @@ export function getMarketplaceLiteListings(): MarketplaceLiteListing[] {
     marketplaces: listing.options.map(option => option.marketplace),
     listing_count: listing.options.length,
     refreshed_at: Math.max(...listing.options.map(option => option.refreshed_at)),
+    estimated_buyer_fee_sats: listing.estimated_buyer_fee_sats,
+    estimated_buyer_total_sats: listing.estimated_buyer_total_sats,
+    buyer_fee_bps: listing.buyer_fee_bps,
+    buyer_fee_label: listing.buyer_fee_label,
+    buyer_total_label: listing.buyer_total_label,
   }));
 }
 
@@ -242,6 +229,11 @@ function listingFromDbRows(
     marketplace: primary.marketplace,
     listed_at: primary.listed_at,
     refreshed_at: primary.refreshed_at,
+    estimated_buyer_fee_sats: primary.estimated_buyer_fee_sats,
+    estimated_buyer_total_sats: primary.estimated_buyer_total_sats,
+    buyer_fee_bps: primary.buyer_fee_bps,
+    buyer_fee_label: primary.buyer_fee_label,
+    buyer_total_label: primary.buyer_total_label,
     color: normalizeColor(first.color),
     thumbnail: hit.thumbnail,
     full: hit.full,
@@ -251,6 +243,7 @@ function listingFromDbRows(
 }
 
 function optionFromDbRow(row: ListingDbRow): MarketplaceListingOption {
+  const estimate = estimateMarketplaceBuyerCost(row.marketplace, row.price_sats);
   return {
     listing_id: row.satflow_id,
     satflow_id: row.satflow_id,
@@ -259,11 +252,13 @@ function optionFromDbRow(row: ListingDbRow): MarketplaceListingOption {
     marketplace: row.marketplace,
     listed_at: row.listed_at,
     refreshed_at: row.refreshed_at,
+    ...estimate,
   };
 }
 
 function compareOptions(a: MarketplaceListingOption, b: MarketplaceListingOption): number {
   return (
+    a.estimated_buyer_total_sats - b.estimated_buyer_total_sats ||
     a.price_sats - b.price_sats ||
     marketplacePriority(a.marketplace) - marketplacePriority(b.marketplace) ||
     b.listed_at - a.listed_at ||

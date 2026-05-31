@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { formatBtc, marketplaceLabel, truncateAddr } from '@/lib/format';
+import { formatBtc, formatBtcPreciseCompact, marketplaceLabel, truncateAddr } from '@/lib/format';
 import type {
   BroadcastResponse,
   CreateIntentResponse,
@@ -117,7 +117,7 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
       intent = await requestIntent(listing.inscription_number, option);
     }
     if (!intent.ok || !intent.body?.psbt) {
-      throw new Error(intent.body?.error ?? 'Purchase failed');
+      throw new Error(intentErrorMessage(intent.body));
     }
     return intent.body;
   }
@@ -242,10 +242,26 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
             )}
 
             <div className="mt-3 border-y border-ink-2 py-3 sm:mt-4 sm:py-4">
-              <div className="text-[10px] text-bone-dim">price</div>
+              <div className="text-[10px] text-bone-dim">list price</div>
               <div className="mt-1 text-2xl text-bone tabular-nums">
                 {formatBtc(selectedOption?.price_sats ?? listing.price_sats)}
               </div>
+              {selectedOption && (
+                <div className="mt-3 grid gap-1 text-[10px] text-bone-dim sm:grid-cols-2">
+                  <div className="flex items-center justify-between gap-3 border border-ink-2 px-2 py-1.5">
+                    <span>{selectedOption.buyer_fee_label}</span>
+                    <span className="shrink-0 text-bone tabular-nums">
+                      {formatBtc(selectedOption.estimated_buyer_fee_sats)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 border border-ink-2 px-2 py-1.5">
+                    <span>{selectedOption.buyer_total_label}</span>
+                    <span className="shrink-0 text-bone tabular-nums">
+                      {formatBtcPreciseCompact(selectedOption.estimated_buyer_total_sats)} + net
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {options.length > 1 && (
@@ -261,7 +277,7 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
                         key={key}
                         type="button"
                         onClick={() => setSelectedOptionKey(key)}
-                        className={`flex h-10 items-center justify-between gap-3 border px-2 text-left text-[11px] transition-colors ${
+                        className={`flex min-h-16 items-center justify-between gap-3 border px-2 py-2 text-left text-[11px] transition-colors ${
                           active
                             ? 'border-bone text-bone'
                             : 'border-ink-2 text-bone-dim hover:border-bone-dim hover:text-bone'
@@ -269,10 +285,20 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
                       >
                         <span className="flex min-w-0 items-center gap-2">
                           <MarketplacePip marketplace={option.marketplace} />
-                          <span className="truncate">{marketplaceLabel(option.marketplace)}</span>
+                          <span className="min-w-0">
+                            <span className="block truncate">
+                              {marketplaceLabel(option.marketplace)}
+                            </span>
+                            <span className="block truncate text-[9px] text-bone-dim">
+                              fee {formatBtc(option.estimated_buyer_fee_sats)}
+                            </span>
+                          </span>
                         </span>
-                        <span className="shrink-0 tabular-nums">
-                          {formatBtc(option.price_sats)}
+                        <span className="shrink-0 text-right tabular-nums">
+                          <span className="block">{formatBtc(option.price_sats)}</span>
+                          <span className="block text-[9px] text-bone-dim">
+                            est {formatBtcPreciseCompact(option.estimated_buyer_total_sats)} + net
+                          </span>
                         </span>
                       </button>
                     );
@@ -344,9 +370,22 @@ type SigningStep = {
   step?: string;
 };
 
+type IntentErrorBody = (CreateIntentResponse & { error?: string; code?: string }) | null;
+
 function normalizeStepPsbts(step: SigningStep): PurchasePsbtToSign[] {
   if (step.psbts?.length) return step.psbts;
   return [{ psbt: step.psbt, sign_inputs: step.sign_inputs, label: step.step }];
+}
+
+function intentErrorMessage(body: IntentErrorBody): string {
+  const base = body?.error ?? 'Purchase failed';
+  const quote = body?.quote;
+  if (!quote?.total_required_sats) return base;
+  const parts = [`requires ${formatBtcPreciseCompact(quote.total_required_sats)}`];
+  if (quote.network_fee_sats) {
+    parts.push(`network ${formatBtcPreciseCompact(quote.network_fee_sats)}`);
+  }
+  return `${base}. API quote: ${parts.join(', ')}.`;
 }
 
 function signatureToHex(signature: string): string {

@@ -25,6 +25,9 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
+  delete process.env.NEXT_PUBLIC_MARKETPLACE_ENABLED;
+  delete process.env.SATFLOW_API_KEY;
   try {
     if (fs.existsSync(tempDir)) {
       fs.rmSync(tempDir, { recursive: true, force: true });
@@ -276,6 +279,7 @@ describe('marketplace listing read model', () => {
       ...base,
       satflow_id: 'on-1',
       marketplace: 'ord.net',
+      price_sats: 1_915_000,
       listed_at: 1700000050,
     });
 
@@ -294,6 +298,8 @@ describe('marketplace listing read model', () => {
     expect(listing?.inscription_number).toBe(row.inscription_number);
     expect(listing?.marketplace).toBe('ord.net');
     expect(listing?.listing_id).toBe('on-1');
+    expect(listing?.price_sats).toBe(1_915_000);
+    expect(listing?.estimated_buyer_total_sats).toBe(1_943_725);
     expect(listing?.options.map(option => [option.marketplace, option.listing_id])).toEqual([
       ['ord.net', 'on-1'],
       ['satflow', 'sf-1'],
@@ -305,6 +311,7 @@ describe('marketplace listing read model', () => {
     });
     expect(satflow?.marketplace).toBe('satflow');
     expect(satflow?.listing_id).toBe('sf-1');
+    expect(satflow?.estimated_buyer_total_sats).toBe(1_947_500);
     expect(
       readModel.getMarketplaceListing(row.inscription_number, {
         marketplace: 'satflow',
@@ -367,10 +374,52 @@ describe('marketplace listing read model', () => {
       marketplaces: ['ord.net', 'satflow'],
       listing_count: 2,
       refreshed_at: 1700000200,
+      estimated_buyer_fee_sats: 28_500,
+      estimated_buyer_total_sats: 1_928_500,
+      buyer_fee_bps: 150,
     });
     expect(lite.filter(item => item.inscription_number === first.inscription_number)).toHaveLength(
       1
     );
+  });
+
+  it('sorts grouped listings by estimated buyer total', async () => {
+    const db = dbModule.getDb();
+    const stmts = dbModule.getStmts();
+    const rows = db
+      .prepare(`SELECT inscription_number FROM inscriptions WHERE collection_slug = 'omb' LIMIT 2`)
+      .all() as Array<{ inscription_number: number }>;
+    const [satflowRawLow, ordnetRawHigh] = rows;
+    if (!satflowRawLow || !ordnetRawHigh) throw new Error('expected seeded inscriptions');
+
+    stmts.upsertActiveListing.run({
+      inscription_number: satflowRawLow.inscription_number,
+      inscription_id: 'a'.repeat(64) + 'i0',
+      satflow_id: 'sf-raw-low',
+      price_sats: 1_000_000,
+      seller: null,
+      marketplace: 'satflow',
+      listed_at: 1700000000,
+      refreshed_at: 1700000100,
+    });
+    stmts.upsertActiveListing.run({
+      inscription_number: ordnetRawHigh.inscription_number,
+      inscription_id: 'b'.repeat(64) + 'i0',
+      satflow_id: 'on-raw-high',
+      price_sats: 1_005_000,
+      seller: null,
+      marketplace: 'ord.net',
+      listed_at: 1700000001,
+      refreshed_at: 1700000100,
+    });
+
+    const readModel = await import('../src/lib/marketplace/listings');
+    expect(
+      readModel.getMarketplaceListings({ sort: 'price-asc' }).map(row => row.inscription_number)
+    ).toEqual([ordnetRawHigh.inscription_number, satflowRawLow.inscription_number]);
+    expect(
+      readModel.getMarketplaceListings({ sort: 'price-desc' }).map(row => row.inscription_number)
+    ).toEqual([satflowRawLow.inscription_number, ordnetRawHigh.inscription_number]);
   });
 });
 
@@ -422,6 +471,76 @@ describe('marketplace intent source validation', () => {
     expect(res.status).toBe(409);
     await expect(res.json()).resolves.toMatchObject({
       code: 'listing-stale',
+    });
+  });
+
+  it('returns exact Satflow quote fields when the buy API exposes them in an error', async () => {
+    process.env.NEXT_PUBLIC_MARKETPLACE_ENABLED = 'true';
+    process.env.SATFLOW_API_KEY = 'test-key';
+    const db = dbModule.getDb();
+    const stmts = dbModule.getStmts();
+    const row = db
+      .prepare(`SELECT inscription_number FROM inscriptions WHERE collection_slug = 'omb' LIMIT 1`)
+      .get() as { inscription_number: number };
+    stmts.upsertActiveListing.run({
+      inscription_number: row.inscription_number,
+      inscription_id: 'a'.repeat(64) + 'i0',
+      satflow_id: 'sf-active',
+      price_sats: 1_750_000,
+      seller: null,
+      marketplace: 'satflow',
+      listed_at: 1700000000,
+      refreshed_at: 1700000100,
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error:
+              'Not enough spendable funds.\n\nSpendable funds: 0.01187687 BTC\nNetwork fees: 0.00000428 BTC\nTotal required: 0.01796465 BTC',
+          }),
+          { status: 400, headers: { 'content-type': 'application/json' } }
+        );
+      })
+    );
+
+    const { BUYER_COOKIE_NAME, mintBuyerSession } = await import('../src/lib/buyerSession');
+    const { POST } = await import('../src/app/api/marketplace/intent/route');
+    const cookie = mintBuyerSession({
+      ord_addr: 'bc1pordbuyer',
+      pay_addr: 'bc1qpaybuyer',
+      ord_pubkey: '02'.padEnd(66, '0'),
+      pay_pubkey: '03'.padEnd(66, '0'),
+      accepted_terms_at: 1700000200,
+    });
+    if (!cookie) throw new Error('expected buyer session cookie');
+
+    const { NextRequest } = await import('next/server');
+    const req = new NextRequest('http://localhost/api/marketplace/intent', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: `${BUYER_COOKIE_NAME}=${cookie}`,
+      },
+      body: JSON.stringify({
+        inscription_number: row.inscription_number,
+        marketplace: 'satflow',
+        listing_id: 'sf-active',
+      }),
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      quote: {
+        marketplace: 'satflow',
+        spendable_funds_sats: 1_187_687,
+        network_fee_sats: 428,
+        total_required_sats: 1_796_465,
+      },
     });
   });
 });

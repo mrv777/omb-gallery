@@ -1,4 +1,5 @@
 import type { MarketplaceListing, MarketplaceSort } from './types';
+import { cheapestBuyerCostOption, highestBuyerCostOption } from './fees';
 
 export function listingRecentAt(
   listing: Pick<MarketplaceListing, 'listed_at' | 'options'>
@@ -16,10 +17,18 @@ export function compareMarketplaceListings(
   sort: MarketplaceSort
 ): number {
   if (sort === 'price-desc') {
-    return b.price_sats - a.price_sats || a.inscription_number - b.inscription_number;
+    return (
+      highestBuyerCostOption(b.options).estimated_buyer_total_sats -
+        highestBuyerCostOption(a.options).estimated_buyer_total_sats ||
+      a.inscription_number - b.inscription_number
+    );
   }
   if (sort === 'recent') {
     return listingRecentAt(b) - listingRecentAt(a) || a.inscription_number - b.inscription_number;
   }
-  return a.price_sats - b.price_sats || a.inscription_number - b.inscription_number;
+  return (
+    cheapestBuyerCostOption(a.options).estimated_buyer_total_sats -
+      cheapestBuyerCostOption(b.options).estimated_buyer_total_sats ||
+    a.inscription_number - b.inscription_number
+  );
 }

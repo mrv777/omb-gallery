@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { getInscriptionLookup, lookupInscription } from '@/lib/inscriptionLookup';
+import { estimateMarketplaceBuyerCost } from './fees';
 import type {
   BroadcastResponse,
   CreateIntentResponse,
@@ -33,14 +34,16 @@ export function mockListings(): MarketplaceListing[] {
     if (!hit || hit.kind !== 'omb') continue;
     const marketplace = i % 5 === 0 ? 'ord.net' : 'satflow';
     const listingId = `mock-${marketplace === 'ord.net' ? 'on' : 'sf'}-${num}`;
+    const priceSats = MOCK_PRICES[i % MOCK_PRICES.length];
     const option = {
       listing_id: listingId,
       satflow_id: listingId,
-      price_sats: MOCK_PRICES[i % MOCK_PRICES.length],
+      price_sats: priceSats,
       seller: SELLERS[i % SELLERS.length],
       marketplace,
       listed_at: now - i * 3_900,
       refreshed_at: now - 45,
+      ...estimateMarketplaceBuyerCost(marketplace, priceSats),
     };
     listings.push({
       inscription_number: num,
@@ -64,6 +67,11 @@ export function mockLiteListings(): MarketplaceLiteListing[] {
     marketplaces: listing.options.map(option => option.marketplace),
     listing_count: listing.options.length,
     refreshed_at: listing.refreshed_at,
+    estimated_buyer_fee_sats: listing.estimated_buyer_fee_sats,
+    estimated_buyer_total_sats: listing.estimated_buyer_total_sats,
+    buyer_fee_bps: listing.buyer_fee_bps,
+    buyer_fee_label: listing.buyer_fee_label,
+    buyer_total_label: listing.buyer_total_label,
   }));
 }
 

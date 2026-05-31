@@ -1,8 +1,9 @@
 import type { ColorFilter } from '@/lib/types';
+import type { MarketplaceBuyerCostEstimate } from './fees';
 
 export type MarketplaceSort = 'price-asc' | 'price-desc' | 'recent';
 
-export type MarketplaceListingOption = {
+export type MarketplaceListingOption = MarketplaceBuyerCostEstimate & {
   listing_id: string;
   satflow_id: string;
   price_sats: number;
@@ -12,7 +13,7 @@ export type MarketplaceListingOption = {
   refreshed_at: number;
 };
 
-export type MarketplaceListing = {
+export type MarketplaceListing = MarketplaceBuyerCostEstimate & {
   inscription_number: number;
   inscription_id: string;
   listing_id: string;
@@ -49,6 +50,13 @@ export type MarketplaceLiteListing = {
   marketplaces: string[];
   listing_count: number;
   refreshed_at: number;
+} & MarketplaceBuyerCostEstimate;
+
+export type MarketplaceIntentQuote = {
+  marketplace: string;
+  total_required_sats: number | null;
+  network_fee_sats: number | null;
+  spendable_funds_sats: number | null;
 };
 
 export type BuyIntentStatus = 'created' | 'signed' | 'broadcast' | 'confirmed' | 'failed';
@@ -83,6 +91,7 @@ export type CreateIntentResponse = {
   sign_inputs?: Record<string, number[]>;
   psbts?: PurchasePsbtToSign[];
   step?: string;
+  quote?: MarketplaceIntentQuote;
   listing: MarketplaceListing;
   mock: boolean;
 };

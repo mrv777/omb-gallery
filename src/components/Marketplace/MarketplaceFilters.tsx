@@ -12,10 +12,10 @@ type Props = {
   onSortChange: (sort: MarketplaceSort) => void;
 };
 
-const SORTS: Array<{ value: MarketplaceSort; label: string }> = [
-  { value: 'price-asc', label: 'low' },
-  { value: 'price-desc', label: 'high' },
-  { value: 'recent', label: 'new' },
+const SORTS: Array<{ value: MarketplaceSort; label: string; title: string }> = [
+  { value: 'price-asc', label: 'low', title: 'Lowest estimated buyer total' },
+  { value: 'price-desc', label: 'high', title: 'Highest estimated buyer total' },
+  { value: 'recent', label: 'new', title: 'Newest listing' },
 ];
 
 export default function MarketplaceFilters({
@@ -36,6 +36,8 @@ export default function MarketplaceFilters({
               key={item.value}
               type="button"
               onClick={() => onSortChange(item.value)}
+              title={item.title}
+              aria-label={item.title}
               className={`border px-2 py-1 transition-colors ${
                 sort === item.value
                   ? 'border-bone text-bone'

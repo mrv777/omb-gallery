@@ -131,7 +131,11 @@ export async function POST(req: NextRequest) {
       ? ordnetErrorResponse(err)
       : satflowBuyErrorResponse(err);
     if (intentId != null) markIntentFailed(intentId, mapped.message);
-    return NextResponse.json({ error: mapped.message }, { status: mapped.status });
+    const quote = 'quote' in mapped ? mapped.quote : undefined;
+    return NextResponse.json(
+      { error: mapped.message, ...(quote ? { quote } : {}) },
+      { status: mapped.status }
+    );
   }
 }
 

@@ -12,6 +12,12 @@ export function formatBtcCompact(sats: number | null | undefined): string {
   return formatted.replace(/\.?0+\s₿$/, '₿').replace(/\s₿$/, '₿');
 }
 
+export function formatBtcPreciseCompact(sats: number | null | undefined): string {
+  if (sats == null || !Number.isFinite(sats) || sats <= 0) return '';
+  const btc = sats / 1e8;
+  return `${btc.toFixed(8).replace(/\.?0+$/, '')}₿`;
+}
+
 export function formatRelTime(
   unixSeconds: number | null | undefined,
   nowMs: number = Date.now()

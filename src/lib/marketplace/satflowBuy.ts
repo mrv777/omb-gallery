@@ -1,7 +1,12 @@
 import 'server-only';
 
 import { SatflowError } from '@/lib/satflow';
-import type { BuyIntentRow, MarketplaceListing, PurchasePsbtToSign } from './types';
+import type {
+  BuyIntentRow,
+  MarketplaceIntentQuote,
+  MarketplaceListing,
+  PurchasePsbtToSign,
+} from './types';
 
 const SATFLOW_BASE = (
   process.env.SATFLOW_BUY_BASE_URL ??
@@ -187,15 +192,27 @@ export async function broadcastSatflowPurchase(
   return { type: 'broadcast', txid, raw };
 }
 
-export function satflowBuyErrorResponse(err: unknown): { message: string; status: number } {
+export function satflowBuyErrorResponse(err: unknown): {
+  message: string;
+  status: number;
+  quote?: MarketplaceIntentQuote;
+} {
   if (err instanceof SatflowBuyConfigError) {
     return { message: err.message, status: 501 };
   }
   if (err instanceof SatflowBuyResponseError) {
-    return { message: err.message, status: err.status ?? 502 };
+    return {
+      message: err.message,
+      status: err.status ?? 502,
+      ...quoteProp(parseSatflowQuoteFromBody(err.bodyExcerpt)),
+    };
   }
   if (err instanceof SatflowError) {
-    return { message: satflowErrorMessage(err), status: err.status ?? 502 };
+    return {
+      message: satflowErrorMessage(err),
+      status: err.status ?? 502,
+      ...quoteProp(parseSatflowQuoteFromBody(err.bodyExcerpt)),
+    };
   }
   return { message: err instanceof Error ? err.message : String(err), status: 500 };
 }
@@ -510,17 +527,59 @@ function satflowErrorMessage(err: SatflowError): string {
 }
 
 function responseErrorDetail(body: string): string | null {
-  const trimmed = body.trim();
+  const value = responseErrorDetailRaw(body);
+  return value ? truncateErrorDetail(value) : null;
+}
+
+function responseErrorDetailRaw(body: string | null | undefined): string | null {
+  const trimmed = body?.trim();
   if (!trimmed) return null;
   try {
     const parsed = JSON.parse(trimmed) as unknown;
     const obj = objectRecord(parsed);
     const value = cleanString(obj?.error) ?? cleanString(obj?.message) ?? cleanString(obj?.detail);
-    if (value) return truncateErrorDetail(value);
+    if (value) return value;
   } catch {
     // fall through to plain text handling
   }
-  return truncateErrorDetail(trimmed.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' '));
+  return trimmed.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+}
+
+export function parseSatflowQuoteFromBody(
+  body: string | null | undefined
+): MarketplaceIntentQuote | null {
+  const detail = responseErrorDetailRaw(body);
+  if (!detail) return null;
+  const totalRequired = btcLineToSats(detail, /Total required:\s*([0-9.,]+)\s*BTC/i);
+  const networkFee = btcLineToSats(detail, /Network fees?:\s*([0-9.,]+)\s*BTC/i);
+  const spendable = btcLineToSats(detail, /Spendable funds:\s*([0-9.,]+)\s*BTC/i);
+  if (totalRequired == null && networkFee == null && spendable == null) return null;
+  return {
+    marketplace: 'satflow',
+    total_required_sats: totalRequired,
+    network_fee_sats: networkFee,
+    spendable_funds_sats: spendable,
+  };
+}
+
+function btcLineToSats(text: string, pattern: RegExp): number | null {
+  const match = pattern.exec(text);
+  if (!match?.[1]) return null;
+  return btcStringToSats(match[1]);
+}
+
+function btcStringToSats(raw: string): number | null {
+  const clean = raw.replace(/,/g, '').trim();
+  if (!/^\d+(?:\.\d+)?$/.test(clean)) return null;
+  const [wholeRaw, fracRaw = ''] = clean.split('.');
+  const whole = Number(wholeRaw);
+  if (!Number.isSafeInteger(whole)) return null;
+  const frac = `${fracRaw}00000000`.slice(0, 8);
+  return whole * 100_000_000 + Number(frac);
+}
+
+function quoteProp(quote: MarketplaceIntentQuote | null): { quote?: MarketplaceIntentQuote } {
+  return quote ? { quote } : {};
 }
 
 function objectRecord(value: unknown): Record<string, unknown> | null {

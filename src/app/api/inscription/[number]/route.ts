@@ -87,5 +87,10 @@ function listingOptionToApiRow(
     marketplace: option.marketplace,
     listed_at: option.listed_at,
     refreshed_at: option.refreshed_at,
+    estimated_buyer_fee_sats: option.estimated_buyer_fee_sats,
+    estimated_buyer_total_sats: option.estimated_buyer_total_sats,
+    buyer_fee_bps: option.buyer_fee_bps,
+    buyer_fee_label: option.buyer_fee_label,
+    buyer_total_label: option.buyer_total_label,
   };
 }
