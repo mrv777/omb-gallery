@@ -56,7 +56,7 @@ export default function MarketplaceCard({ listing, focused, onBuy }: Props) {
           {formatBtcPreciseCompact(cheapestCost.estimated_buyer_total_sats)}
         </div>
         <div className="col-span-2 mt-1 min-w-0 truncate text-[9px] text-bone-dim tabular-nums">
-          est buy + net
+          est buy + network
         </div>
       </div>
     </article>

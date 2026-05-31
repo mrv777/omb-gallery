@@ -124,7 +124,8 @@ export default function InscriptionDetail({
               <span>listed</span>
               <span className="text-bone tabular-nums">{formatBtc(currentListing.price_sats)}</span>
               <span className="text-bone tabular-nums">
-                est buy {formatBtcPreciseCompact(currentListing.estimated_buyer_total_sats)} + net
+                est buy {formatBtcPreciseCompact(currentListing.estimated_buyer_total_sats)} +
+                network
               </span>
               <span>
                 via{' '}

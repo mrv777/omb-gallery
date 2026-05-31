@@ -250,7 +250,7 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
                 <div className="mt-2 text-[10px] text-bone-dim tabular-nums">
                   est buy{' '}
                   <span className="text-bone">
-                    {formatBtcPreciseCompact(selectedOption.estimated_buyer_total_sats)} + net
+                    {formatBtcPreciseCompact(selectedOption.estimated_buyer_total_sats)} + network
                   </span>
                 </div>
               )}
@@ -290,7 +290,7 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
                           <span className="block">
                             {formatBtcPreciseCompact(option.estimated_buyer_total_sats)}
                           </span>
-                          <span className="block text-[9px] text-bone-dim">+ net</span>
+                          <span className="block text-[9px] text-bone-dim">+ network</span>
                         </span>
                       </button>
                     );

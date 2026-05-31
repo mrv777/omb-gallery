@@ -235,7 +235,7 @@ const ImageModal = memo(function ImageModal({
                 <span className="hidden sm:inline">
                   {' '}
                   · {formatBtcCompact(listing.price_sats)} · est{' '}
-                  {formatBtcPreciseCompact(listing.estimated_buyer_total_sats)} + net
+                  {formatBtcPreciseCompact(listing.estimated_buyer_total_sats)} + network
                   {listing.listing_count > 1 ? ` · ${listing.listing_count} markets` : ''}
                 </span>
               </a>
