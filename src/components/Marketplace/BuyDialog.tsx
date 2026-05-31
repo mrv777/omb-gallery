@@ -246,20 +246,12 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
               <div className="mt-1 text-2xl text-bone tabular-nums">
                 {formatBtc(selectedOption?.price_sats ?? listing.price_sats)}
               </div>
-              {selectedOption && (
-                <div className="mt-3 grid gap-1 text-[10px] text-bone-dim sm:grid-cols-2">
-                  <div className="flex items-center justify-between gap-3 border border-ink-2 px-2 py-1.5">
-                    <span>{selectedOption.buyer_fee_label}</span>
-                    <span className="shrink-0 text-bone tabular-nums">
-                      {formatBtc(selectedOption.estimated_buyer_fee_sats)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3 border border-ink-2 px-2 py-1.5">
-                    <span>{selectedOption.buyer_total_label}</span>
-                    <span className="shrink-0 text-bone tabular-nums">
-                      {formatBtcPreciseCompact(selectedOption.estimated_buyer_total_sats)} + net
-                    </span>
-                  </div>
+              {selectedOption && options.length <= 1 && (
+                <div className="mt-2 text-[10px] text-bone-dim tabular-nums">
+                  est buy{' '}
+                  <span className="text-bone">
+                    {formatBtcPreciseCompact(selectedOption.estimated_buyer_total_sats)} + net
+                  </span>
                 </div>
               )}
             </div>
@@ -295,10 +287,10 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
                           </span>
                         </span>
                         <span className="shrink-0 text-right tabular-nums">
-                          <span className="block">{formatBtc(option.price_sats)}</span>
-                          <span className="block text-[9px] text-bone-dim">
-                            est {formatBtcPreciseCompact(option.estimated_buyer_total_sats)} + net
+                          <span className="block">
+                            {formatBtcPreciseCompact(option.estimated_buyer_total_sats)}
                           </span>
+                          <span className="block text-[9px] text-bone-dim">+ net</span>
                         </span>
                       </button>
                     );

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { cheapestBuyerCostOption } from '@/lib/marketplace/fees';
-import { formatBtcCompact, formatBtcPreciseCompact } from '@/lib/format';
+import { formatBtcPreciseCompact } from '@/lib/format';
 import type { MarketplaceListing } from '@/lib/marketplace/types';
 import MarketplacePip from './MarketplacePip';
 
@@ -52,11 +52,11 @@ export default function MarketplaceCard({ listing, focused, onBuy }: Props) {
         >
           #{listing.inscription_number}
         </Link>
-        <div className="shrink-0 text-[11px] text-bone tabular-nums">
-          {formatBtcCompact(listing.price_sats)}
+        <div className="shrink-0 text-[10px] text-bone tabular-nums">
+          {formatBtcPreciseCompact(cheapestCost.estimated_buyer_total_sats)}
         </div>
         <div className="col-span-2 mt-1 min-w-0 truncate text-[9px] text-bone-dim tabular-nums">
-          est buy {formatBtcPreciseCompact(cheapestCost.estimated_buyer_total_sats)} + net
+          est buy + net
         </div>
       </div>
     </article>
