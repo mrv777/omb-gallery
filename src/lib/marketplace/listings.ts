@@ -20,9 +20,9 @@ type ListingSourceSelector = {
 };
 
 const GROUP_SORT_SQL: Record<MarketplaceSort, string> = {
-  'price-asc': 'primary_price ASC, inscription_number ASC',
-  'price-desc': 'primary_price DESC, inscription_number ASC',
-  recent: 'latest_listed_at DESC, inscription_number ASC',
+  'price-asc': 'primary_price ASC, al.inscription_number ASC',
+  'price-desc': 'primary_price DESC, al.inscription_number ASC',
+  recent: 'latest_listed_at DESC, al.inscription_number ASC',
 };
 const OUTER_GROUP_SORT_SQL: Record<MarketplaceSort, string> = {
   'price-asc': 'g.primary_price ASC, g.inscription_number ASC',

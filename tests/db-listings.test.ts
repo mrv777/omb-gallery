@@ -280,6 +280,16 @@ describe('marketplace listing read model', () => {
     });
 
     const readModel = await import('../src/lib/marketplace/listings');
+    for (const sort of ['price-asc', 'price-desc', 'recent'] as const) {
+      const list = readModel.getMarketplaceListings({ sort });
+      expect(list.filter(item => item.inscription_number === row.inscription_number)).toHaveLength(
+        1
+      );
+      expect(
+        list.find(item => item.inscription_number === row.inscription_number)?.options
+      ).toHaveLength(2);
+    }
+
     const listing = readModel.getMarketplaceListing(row.inscription_number);
     expect(listing?.inscription_number).toBe(row.inscription_number);
     expect(listing?.marketplace).toBe('ord.net');
