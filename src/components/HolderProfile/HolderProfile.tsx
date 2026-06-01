@@ -1,9 +1,15 @@
 import Link from 'next/link';
 import type { EventRow, InscriptionRow, OwnershipDeltaRow } from '@/lib/db';
 import type { HolderColorHighlight } from '@/lib/holderEvents';
-import { addressLink, ordNetWalletLink, truncateAddr } from '@/lib/format';
+import {
+  ordNetWalletLink,
+  ordiscanWalletLink,
+  satflowWalletLink,
+  truncateAddr,
+} from '@/lib/format';
 import { lookupWalletLabel } from '@/lib/walletLabels';
 import { WalletsList } from './WalletsList';
+import CopyAddressButton from './CopyAddressButton';
 import LikelyLinkedWallets from './LikelyLinkedWallets';
 import type { LikelyLinkedRow } from '@/lib/clusterStore';
 import ListingStagingWallets from './ListingStagingWallets';
@@ -196,8 +202,11 @@ export default function HolderProfile({
             <h1 className="tabular-nums text-bone text-lg sm:text-xl mb-2">
               {truncateAddr(address, 10, 8)}
             </h1>
-            <div className="text-[10px] tracking-normal text-bone-dim break-all mb-4 normal-case select-all">
-              {address}
+            <div className="mb-4 flex items-start gap-2">
+              <div className="min-w-0 text-[10px] tracking-normal text-bone-dim break-all normal-case select-all">
+                {address}
+              </div>
+              <CopyAddressButton address={address} className="mt-[-0.125rem]" />
             </div>
             <dl className="grid grid-cols-3 gap-x-4 text-[11px] tracking-[0.08em] uppercase text-bone-dim mb-4">
               <Stat
@@ -229,12 +238,20 @@ export default function HolderProfile({
                 ord.net ↗
               </a>
               <a
-                href={addressLink(address)}
+                href={satflowWalletLink(address)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
               >
-                ord.io ↗
+                satflow ↗
+              </a>
+              <a
+                href={ordiscanWalletLink(address)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
+              >
+                ordiscan ↗
               </a>
             </div>
             {wallets.length > 1 ? (

@@ -9,6 +9,7 @@ import {
   formatRelTime,
   formatTimeUntil,
   marketplaceLabel,
+  ordNetInscriptionLink,
   ordinalsLink,
   satflowInscriptionLink,
   truncateAddr,
@@ -58,6 +59,7 @@ export default function InscriptionDetail({
   const hit = lookupInscription(inscription.inscription_number);
   const tileBg = hit?.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
   const ordLink = ordinalsLink(inscription.inscription_id, inscription.inscription_number);
+  const ordNetLink = ordNetInscriptionLink(inscription.inscription_number);
   const satflowLink = satflowInscriptionLink(inscription.inscription_id);
   const currentTxid = inscription.current_output ? inscription.current_output.split(':')[0] : null;
   const totalEvents = events.length;
@@ -195,6 +197,14 @@ export default function InscriptionDetail({
               className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
             >
               ordinals.com ↗
+            </a>
+            <a
+              href={ordNetLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
+            >
+              ord.net ↗
             </a>
             {satflowLink && (
               <a

@@ -2,8 +2,14 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { addressLink, ordNetWalletLink, truncateAddr } from '@/lib/format';
+import {
+  ordNetWalletLink,
+  ordiscanWalletLink,
+  satflowWalletLink,
+  truncateAddr,
+} from '@/lib/format';
 import { Tooltip } from '../ui/Tooltip';
+import CopyAddressButton from './CopyAddressButton';
 
 const COLLAPSE_THRESHOLD = 3;
 
@@ -61,7 +67,7 @@ export function WalletsList({ wallets, inferredWallets = [], stagingWallets = []
           const inferred = inferredSet.has(w);
           const staging = stagingSet.has(w);
           return (
-            <li key={w} className="flex items-center gap-2 sm:gap-3 px-3 py-2">
+            <li key={w} className="flex flex-wrap items-center gap-2 sm:gap-3 px-3 py-2">
               <Tooltip content={w}>
                 <Link
                   href={`/holder/${w}`}
@@ -71,6 +77,7 @@ export function WalletsList({ wallets, inferredWallets = [], stagingWallets = []
                   {truncateAddr(w, 10, 8)}
                 </Link>
               </Tooltip>
+              <CopyAddressButton address={w} compact />
               {staging ? (
                 <span
                   className="text-[9px] tracking-[0.12em] uppercase text-accent-orange border border-accent-orange/50 px-1.5 py-0.5 leading-none shrink-0"
@@ -86,7 +93,7 @@ export function WalletsList({ wallets, inferredWallets = [], stagingWallets = []
                   inferred
                 </span>
               ) : null}
-              <span className="ml-auto flex items-center gap-1.5 shrink-0">
+              <span className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1.5">
                 <a
                   href={ordNetWalletLink(w)}
                   target="_blank"
@@ -96,12 +103,20 @@ export function WalletsList({ wallets, inferredWallets = [], stagingWallets = []
                   ord.net ↗
                 </a>
                 <a
-                  href={addressLink(w)}
+                  href={satflowWalletLink(w)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="border border-ink-2 hover:border-bone-dim px-1.5 py-0.5 text-[9px] tracking-[0.12em] uppercase text-bone-dim hover:text-bone"
                 >
-                  ord.io ↗
+                  satflow ↗
+                </a>
+                <a
+                  href={ordiscanWalletLink(w)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="border border-ink-2 hover:border-bone-dim px-1.5 py-0.5 text-[9px] tracking-[0.12em] uppercase text-bone-dim hover:text-bone"
+                >
+                  ordiscan ↗
                 </a>
               </span>
             </li>

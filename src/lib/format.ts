@@ -127,14 +127,24 @@ export function ordinalsLink(
   return 'https://ordinals.com';
 }
 
+export function ordNetInscriptionLink(inscriptionNumber: number | null | undefined): string {
+  if (inscriptionNumber == null) return 'https://ord.net';
+  return `https://ord.net/inscription/${inscriptionNumber}`;
+}
+
 export function memepoolTxLink(txid: string | null | undefined): string {
   if (!txid || txid === 'unknown') return '';
   return `https://memepool.space/tx/${txid}`;
 }
 
-export function addressLink(addr: string | null | undefined): string {
+export function satflowWalletLink(addr: string | null | undefined): string {
   if (!addr) return '';
-  return `https://ord.io/${addr}`;
+  return `https://www.satflow.com/portfolio/${encodeURIComponent(addr)}`;
+}
+
+export function ordiscanWalletLink(addr: string | null | undefined): string {
+  if (!addr) return '';
+  return `https://ordiscan.com/address/${encodeURIComponent(addr)}`;
 }
 
 export function ordNetWalletLink(addr: string | null | undefined): string {
