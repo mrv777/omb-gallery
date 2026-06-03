@@ -84,8 +84,8 @@ const SATFLOW_BACKFILL_MAX_PAGES_PER_TICK = 8;
 const SATFLOW_BACKFILL_POLITENESS_MS = 500;
 
 // Listings drive marketplace buying and visible floor state, so keep them at
-// the same cadence as the 5-minute auto cron.
-const LISTINGS_MIN_INTERVAL_SEC = 5 * 60;
+// the same cadence as the 3-minute auto cron.
+const LISTINGS_MIN_INTERVAL_SEC = 3 * 60;
 // Hard cap on pages walked per listings tick. With ~209 active OMB listings
 // at pageSize=100, 5 pages is ample headroom for growth and a defensive
 // brake if the API ever returns runaway data.

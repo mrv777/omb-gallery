@@ -55,7 +55,7 @@ const MAX_EVENTS_PER_BUCKET = 10;
 const FANOUT_BUDGET_MS = 8_000;
 const FANOUT_CONCURRENCY = 8;
 const NOTIFY_LOCK_STALE_SEC = 120;
-const LISTED_NOTIFY_GRACE_SEC = 90;
+const LISTED_NOTIFY_GRACE_SEC = 30;
 
 function siteUrl(): string {
   return (process.env.NEXT_PUBLIC_SITE_URL || 'https://ordinalmaxibiz.wiki').replace(/\/$/, '');
