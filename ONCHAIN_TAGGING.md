@@ -88,6 +88,20 @@ Twenty-nine user-verified OMB loans from 2026 share a narrow instant-loan origin
 - **Code:** `src/lib/liquidiumOriginationFingerprint.ts` contains the production matcher. `src/lib/loanDetect.ts` runs it live against new `transferred` and `sold` events and computes the known-vault set per tick. `scripts/backfill-liquidium-originations.js` mirrors the same gate + confidence rule and also promotes exact confirmed variant txids from `scripts/known-transactions.json` as a fallback for txs that fail every gate but were externally confirmed.
 - **Tag rule:** emit `loan-originated` for every match kind, with confidence per the rule above. The historical close-variants previously held in `known-transactions.json` are now caught directly by the relaxed gate; the allowlist remains as belt-and-braces for future external confirmations that don't fit the structural rule.
 
+#### 2.4.1 Buy-and-borrow combo (Satflow purchase + Liquidium origination in one tx)
+
+A buyer can purchase an OMB on a marketplace (Satflow) **and** originate a Liquidium loan against it in a single atomic transaction: the marketplace pays the seller, the lender vault funds the LTV portion, and the OMB lands directly in the Liquidium escrow as collateral. Satflow reports this in its sales feed, so the poller tags it `sold` before the loans tick runs. The marketplace plumbing adds outputs (seller payout, buyer change, fees) — typically 7 — so the fixed-position §2.4 matcher (which requires exactly 4 outputs with the activation fee at `vout[1]`, vault at `vout[3]`) **never matches**, and absent a fallback the piece stays a bare `sold` with no loan tracking.
+
+Worked example — tx `1c28e06c…` (#60579862, 2026-05-14): buyer paid the seller 0.02165 BTC (`vout[2]`), financing 0.0165 of it from the lender vault (`vin[3]` 4,510,000 → `vout[5]` 2,860,000 change ⟹ 1,650,000 principal == 89% LTV), OMB into escrow at `vout[1]`, activation fee at `vout[4]`. Three combos beyond this one exist in the historical Satflow `sold` set (events 4085/10467/61220); the scan keyed on the activation-fee address.
+
+- **Position-independent gates** (`detectLiquidiumBuyBorrowCombo` in `src/lib/liquidiumOriginationFingerprint.ts`):
+  1. Some `vout` pays the Liquidium activation-fee address `bc1papmpmu0xzfvw4x9qe4jstgxfnfy5q8zhh6xredjxd86ca74uph3s59se9u` (paid only at origination, so it rules out a plain sale).
+  2. At least one `v0_p2wsh` input is spent via the 1-of-2 multisig witness (the lender vault) — guards against fee-address poisoning by a dust output.
+  3. Net principal = sum(vault inputs) − change returned to those same vault addresses > 0.
+- **Escrow / borrower:** the escrow is **not** derived from tx structure here — the caller uses the OMB's ord-detected destination (`events.new_owner`). The borrower/buyer is unrecoverable on chain (the principal pays the *seller*, and `old_owner` is the seller, not the borrower; the escrow is opaque until spend per §2.3), so `effective_owner` anchors to the escrow and self-corrects to the real holder when the loan resolves (§2.5).
+- **Code / ordering:** `src/lib/loanDetect.ts` tries this **only when the §2.4 canonical matcher returns null**, so the two are mutually exclusive and the well-calibrated §2.4 path is untouched.
+- **Tag rule:** emit `loan-originated` (`match_kind: 'combo-buy-borrow'`, confidence `high` — the activation-fee address is definitive). Because `events` has `UNIQUE (inscription_id, txid)`, the sale and the loan **cannot** both be rows for one tx; the combo collapses to the single `loan-originated` row via the canonical `onSoldOrigination` write path (decrements `sale_count` / `total_volume_sats`, increments `loan_count` / `active_loan_count`). The marketplace sale therefore drops from volume for these few pieces — consistent with how the system already treats any Satflow-mislabeled origination.
+
 ### 2.5 Modern Liquidium loan resolution fingerprint
 
 The §2.4 origination shape closes via one of two tap-leaves on a fixed internal pubkey. Both resolutions share:
@@ -230,7 +244,7 @@ On-chain shape: cooperative SIGHASH_ALL / SIGHASH_DEFAULT — `vin[2]` (the insc
 | `sold` (ord.net)                                   | `ord-net-fp` poll step finds the §2.11 fingerprint and upgrades the `transferred` row in place    | `src/lib/marketplaceFingerprint.ts` | chain-fingerprint | `'ord-net'`     |
 | `sold` (other paths)                               | (see §3.1 below — currently mixed quality)                                                        | Multiple paths                      | mixed             | varies          |
 | `listed`                                           | Satflow API listings stream                                                                       | Satflow                             | legacy-3rd-party  | `'satflow'`     |
-| `loan-originated`                                  | Liquidium origination fingerprint (§2.4), or Phase 4 traces backward from a resolution spend      | `src/lib/loanDetect.ts`             | chain-fingerprint | NULL            |
+| `loan-originated`                                  | Liquidium origination fingerprint (§2.4), buy-and-borrow combo (§2.4.1), or Phase 4 traces backward from a resolution spend | `src/lib/loanDetect.ts`             | chain-fingerprint | NULL            |
 | `loan-defaulted` / `loan-unlocked` / `loan-repaid` | Phase 4 OP_CSV+OP_DROP legacy detector OR §2.5 modern resolution fingerprint                      | `src/lib/loanDetect.ts`             | chain-fingerprint | NULL            |
 
 ### 3.1 `sold` events — current state of mixed quality
