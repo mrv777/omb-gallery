@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   detectLiquidiumOriginationCandidate,
+  detectLiquidiumBuyBorrowCombo,
   type LoanOriginationFingerprintTx,
 } from '@/lib/liquidiumOriginationFingerprint';
 
@@ -217,5 +218,99 @@ describe('detectLiquidiumOriginationCandidate', () => {
     });
 
     expect(detectLiquidiumOriginationCandidate(tx)?.matchKind).toBe('strict-p2sh');
+  });
+});
+
+// Real buy-and-borrow combo: tx 1c28e06c… (inscription #60579862). A Satflow
+// purchase + Liquidium origination settled atomically. Seven outputs, so the
+// fixed-position canonical matcher rejects it. Values in mempool.space integer
+// sats. in[2] is a 2-of-2 cooperative spend (must NOT be read as a vault);
+// in[3] is the real 1-of-2 lender-vault input.
+const twoOfTwoScript =
+  '522103d91309fffed9730450f2ad0ac7ddc8b86e30bda5d77679da85fe89d5dff28c832103ea1828361fe9d7215d1bde01d58cf23ad4c968e2e3a854f13bfb3d07f5d83e1b52ae';
+
+function comboTx(overrides: Partial<LoanOriginationFingerprintTx> = {}): LoanOriginationFingerprintTx {
+  const vault = 'bc1qgwq60mmzm8xnv2ztek7a6sqaqwsx78uh6p9x8l9qxravy3farjrqtea362';
+  const tx: LoanOriginationFingerprintTx = {
+    vin: [
+      { prevout: { scriptpubkey_type: 'p2sh', scriptpubkey_address: '3QgwQniFnVScVmtXBK2D7KCgGXxhsxea2w', value: 600 }, witness: ['x'] },
+      { prevout: { scriptpubkey_type: 'p2sh', scriptpubkey_address: '3QgwQniFnVScVmtXBK2D7KCgGXxhsxea2w', value: 600 }, witness: ['x'] },
+      { prevout: { scriptpubkey_type: 'v0_p2wsh', scriptpubkey_address: 'bc1quj58shmrkgepcltvd0vhexys4936j6y5z5t36es9ewapqaty4lfqya5y06', value: 999 }, witness: ['', 'sig', twoOfTwoScript] },
+      { prevout: { scriptpubkey_type: 'v0_p2wsh', scriptpubkey_address: vault, value: 4510000 }, witness: ['', 'sig', oneOfTwoScript] },
+      { prevout: { scriptpubkey_type: 'p2sh', scriptpubkey_address: '3QgwQniFnVScVmtXBK2D7KCgGXxhsxea2w', value: 2010338 }, witness: ['x'] },
+    ],
+    vout: [
+      { scriptpubkey_type: 'p2sh', scriptpubkey_address: '3QgwQniFnVScVmtXBK2D7KCgGXxhsxea2w', value: 1200 },
+      { scriptpubkey_type: 'v1_p2tr', scriptpubkey_address: 'bc1prxk449p5582uzh4y4xsl4tzmt5rj3dac7axgqsrvaqchm7v2465qp0agsz', value: 999 },
+      { scriptpubkey_type: 'v0_p2wpkh', scriptpubkey_address: 'bc1qxyj3pdrrz3nq50p0pmm4ujaj5m952yn352cxzw', value: 2165999 },
+      { scriptpubkey_type: 'v1_p2tr', scriptpubkey_address: 'bc1p39tdzrddy5swrsf4ysu9k867283nhq754lnfhj23u543a72r60wsz8c74p', value: 54125 },
+      { scriptpubkey_type: 'v1_p2tr', scriptpubkey_address: feeAddress, value: 12375 },
+      { scriptpubkey_type: 'v0_p2wsh', scriptpubkey_address: vault, value: 2860000 },
+      { scriptpubkey_type: 'p2sh', scriptpubkey_address: '3QgwQniFnVScVmtXBK2D7KCgGXxhsxea2w', value: 1426573 },
+    ],
+  };
+  return { ...tx, ...overrides };
+}
+
+describe('detectLiquidiumBuyBorrowCombo', () => {
+  it('matches a real Satflow-purchase + Liquidium-origination combo', () => {
+    expect(detectLiquidiumBuyBorrowCombo(comboTx())).toEqual({
+      kind: 'liquidium-buy-borrow-combo',
+      lenderVaultAddress: 'bc1qgwq60mmzm8xnv2ztek7a6sqaqwsx78uh6p9x8l9qxravy3farjrqtea362',
+      // 4,510,000 vault in − 2,860,000 vault change = 1,650,000 (== 0.0165 BTC,
+      // the 89%-LTV principal shown on the lender's Liquidium dashboard).
+      principalSats: 1650000,
+      activationFeeSats: 12375,
+    });
+  });
+
+  it('is rejected by the fixed-position canonical matcher (7 outputs)', () => {
+    expect(detectLiquidiumOriginationCandidate(comboTx())).toBeNull();
+  });
+
+  it('returns null when the activation-fee output is absent (plain sale)', () => {
+    const tx = comboTx({
+      vout: comboTx().vout.map(o =>
+        o.scriptpubkey_address === feeAddress
+          ? { ...o, scriptpubkey_address: 'bc1p39tdzrddy5swrsf4ysu9k867283nhq754lnfhj23u543a72r60wsz8c74p' }
+          : o
+      ),
+    });
+    expect(detectLiquidiumBuyBorrowCombo(tx)).toBeNull();
+  });
+
+  it('returns null when no 1-of-2 multisig vault input is present (fee-address poisoning guard)', () => {
+    // Activation fee paid, but the only P2WSH input is the 2-of-2 cooperative
+    // spend — not a lender vault. Must not be mistaken for an origination.
+    const tx = comboTx({ vin: [comboTx().vin[0], comboTx().vin[1], comboTx().vin[2], comboTx().vin[4]] });
+    expect(detectLiquidiumBuyBorrowCombo(tx)).toBeNull();
+  });
+
+  it('does not double-count the 2-of-2 cooperative P2WSH input as vault flow', () => {
+    // Principal must derive only from the 1-of-2 vault (in[3]); the 999-sat
+    // 2-of-2 input must be ignored.
+    expect(detectLiquidiumBuyBorrowCombo(comboTx())?.principalSats).toBe(1650000);
+  });
+
+  it('normalizes bitcoind verbose (BTC values + scriptPubKey fields)', () => {
+    const toVerbose = (o: {
+      scriptpubkey_type?: string;
+      scriptpubkey_address?: string;
+      value?: number;
+    }) => ({
+      scriptPubKey: { address: o.scriptpubkey_address, type: o.scriptpubkey_type },
+      value: (o.value ?? 0) / 1e8,
+    });
+    const base = comboTx();
+    const tx: LoanOriginationFingerprintTx = {
+      vin: base.vin.map(v => ({ prevout: v.prevout ? toVerbose(v.prevout) : undefined, txinwitness: v.witness })),
+      vout: base.vout.map(toVerbose),
+    };
+    expect(detectLiquidiumBuyBorrowCombo(tx)).toEqual({
+      kind: 'liquidium-buy-borrow-combo',
+      lenderVaultAddress: 'bc1qgwq60mmzm8xnv2ztek7a6sqaqwsx78uh6p9x8l9qxravy3farjrqtea362',
+      principalSats: 1650000,
+      activationFeeSats: 12375,
+    });
   });
 });

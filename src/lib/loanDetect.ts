@@ -30,6 +30,7 @@ import {
 } from './bitcoind';
 import {
   detectLiquidiumOriginationCandidate,
+  detectLiquidiumBuyBorrowCombo,
   type LiquidiumOriginationMatchKind,
 } from './liquidiumOriginationFingerprint';
 import {
@@ -677,6 +678,32 @@ export async function runLoanTick(
             matchKind: originationCandidate.matchKind,
           });
         }
+      } else {
+        // Buy-and-borrow combo: a Satflow purchase + Liquidium origination in
+        // one tx. The extra marketplace outputs break the fixed-position
+        // canonical matcher, so detect it separately. The escrow is the OMB's
+        // ord-detected destination (ev.new_owner); we have no signal for the
+        // buyer/borrower address (the principal pays the seller, and the escrow
+        // is opaque until spent), so effective_owner anchors to the escrow and
+        // self-corrects to the real holder when the loan resolves.
+        const combo = detectLiquidiumBuyBorrowCombo(tx);
+        if (combo) {
+          for (const ev of events) {
+            if (ev.event_type !== 'transferred' && ev.event_type !== 'sold') continue;
+            if (!ev.new_owner) continue;
+            directOriginations.push({
+              txid,
+              escrowAddr: ev.new_owner,
+              lender: combo.lenderVaultAddress,
+              borrower: ev.new_owner,
+              loanAmountSats: combo.principalSats,
+              activationFeeSats: combo.activationFeeSats,
+              inscriptionNumber: ev.inscription_number,
+              inscriptionId: ev.inscription_id,
+              matchKind: 'combo-buy-borrow',
+            });
+          }
+        }
       }
       if (verdict.kind === 'default') {
         defaults.push({ verdict, events });
@@ -945,11 +972,17 @@ export async function runLoanTick(
       // Liquidium's borrowerPayoutAddress is where the BTC goes, often a
       // different (legacy P2SH) address for the same user; using it strands
       // the OMB on a holder page nobody navigates to.
-      const ombSender = existing.old_owner ?? orig.borrower;
+      //
+      // EXCEPTION for buy-and-borrow combos: old_owner is the *seller* (the OMB
+      // changed hands in the same tx), not the borrower. We don't know the
+      // buyer/borrower, so anchor effective_owner to the escrow (orig.borrower,
+      // set to the escrow by the combo path); it self-corrects on resolution.
+      const isCombo = orig.matchKind === 'combo-buy-borrow';
+      const ombSender = isCombo ? orig.borrower : (existing.old_owner ?? orig.borrower);
 
       const isRelaxed = orig.matchKind.startsWith('relaxed-');
       const confidence =
-        orig.matchKind === 'strict-p2sh'
+        orig.matchKind === 'strict-p2sh' || isCombo
           ? 'high'
           : isRelaxed && knownVaults.has(orig.lender)
             ? 'high'

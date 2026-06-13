@@ -34,7 +34,12 @@ export type LiquidiumOriginationMatchKind =
   | 'variant-p2tr'
   | 'relaxed-p2sh'
   | 'relaxed-p2wpkh'
-  | 'relaxed-p2tr-bigvin';
+  | 'relaxed-p2tr-bigvin'
+  // Buy-and-borrow combo: a Satflow purchase and a Liquidium origination
+  // settled atomically in one tx. Has extra outputs (seller payout, buyer
+  // change, marketplace fees) so it never matches the fixed-position shapes
+  // above; detected separately by detectLiquidiumBuyBorrowCombo.
+  | 'combo-buy-borrow';
 
 export type LiquidiumOriginationCandidate = {
   kind: 'liquidium-origination-candidate';
@@ -184,5 +189,94 @@ export function detectLiquidiumOriginationCandidate(
     lenderVaultAddress,
     principalSats: valueSats(payoutOut),
     activationFeeSats: valueSats(feeOut),
+  };
+}
+
+export type LiquidiumBuyBorrowComboCandidate = {
+  kind: 'liquidium-buy-borrow-combo';
+  lenderVaultAddress: string;
+  principalSats: number;
+  activationFeeSats: number;
+};
+
+// Buy-and-borrow combo detector.
+//
+// A buyer purchases an OMB through a marketplace (Satflow) AND originates a
+// Liquidium loan against it in a SINGLE atomic transaction: the marketplace
+// pays the seller, the lender vault funds the LTV portion, and the OMB lands
+// directly in the Liquidium escrow as collateral. The marketplace plumbing
+// adds outputs (seller payout, buyer change, fees) so the tx has more than the
+// four outputs the canonical fixed-position matcher requires — it never
+// matches detectLiquidiumOriginationCandidate.
+//
+// Position-independent gates, anchored on Liquidium-specific evidence:
+//   1. The Liquidium activation-fee address is paid in some output. This
+//      address is paid only at loan origination, so its presence rules out a
+//      plain marketplace sale.
+//   2. At least one P2WSH input is spent via the Liquidium 1-of-2 multisig
+//      witness (the lender vault funding the loan).
+//   3. Net principal (vault inputs minus change returned to the same vault
+//      addresses) is positive.
+//
+// The escrow address is NOT derived here — the caller already knows it from
+// the ord-detected transfer's destination (the OMB's new owner). ONCHAIN_TAGGING.md §2.4.
+export function detectLiquidiumBuyBorrowCombo(
+  tx: LoanOriginationFingerprintTx
+): LiquidiumBuyBorrowComboCandidate | null {
+  if (!Array.isArray(tx.vin) || !Array.isArray(tx.vout)) return null;
+
+  // Gate 1: activation fee paid (the definitive Liquidium-origination anchor).
+  let activationFeeSats = 0;
+  let sawActivationFee = false;
+  for (const out of tx.vout) {
+    if (addressOf(out) === LIQUIDIUM_ACTIVATION_FEE_ADDR) {
+      sawActivationFee = true;
+      activationFeeSats = valueSats(out);
+      break;
+    }
+  }
+  if (!sawActivationFee) return null;
+
+  // Gate 2: lender vault input(s) — P2WSH prevouts spent via the 1-of-2
+  // multisig witness. Sum each vault address's input contribution.
+  const vaultInByAddr = new Map<string, number>();
+  for (const vin of tx.vin) {
+    const prevout = vin.prevout;
+    if (!isP2wshType(typeOf(prevout))) continue;
+    if (!isOneOfTwoMultisigWitness(vin)) continue;
+    const addr = addressOf(prevout);
+    if (!addr) continue;
+    vaultInByAddr.set(addr, (vaultInByAddr.get(addr) ?? 0) + valueSats(prevout));
+  }
+  if (vaultInByAddr.size === 0) return null;
+
+  // The dominant vault (largest input contribution) is the lender vault stored
+  // on the loan; mirrors the canonical detector's single-lender model.
+  let lenderVaultAddress: string | null = null;
+  let lenderVaultIn = 0;
+  let vaultInTotal = 0;
+  vaultInByAddr.forEach((sats, addr) => {
+    vaultInTotal += sats;
+    if (sats > lenderVaultIn) {
+      lenderVaultIn = sats;
+      lenderVaultAddress = addr;
+    }
+  });
+  if (!lenderVaultAddress) return null;
+
+  // Gate 3: net principal = vault inputs − change paid back to those vaults.
+  let vaultOutTotal = 0;
+  for (const out of tx.vout) {
+    const addr = addressOf(out);
+    if (addr && vaultInByAddr.has(addr)) vaultOutTotal += valueSats(out);
+  }
+  const principalSats = vaultInTotal - vaultOutTotal;
+  if (principalSats <= 0) return null;
+
+  return {
+    kind: 'liquidium-buy-borrow-combo',
+    lenderVaultAddress,
+    principalSats,
+    activationFeeSats,
   };
 }
