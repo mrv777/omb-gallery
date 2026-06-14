@@ -347,6 +347,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
                 columnCount={columnCount}
                 cellSize={cellSize}
                 listings={listings}
+                favoritesOnly={showFavoritesOnly}
                 onImageClick={handleImageClick}
                 style={{
                   position: 'absolute',

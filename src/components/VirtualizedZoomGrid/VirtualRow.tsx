@@ -29,6 +29,7 @@ interface VirtualRowProps {
   columnCount: number;
   cellSize: number;
   listings: Map<number, MarketplaceLiteListing>;
+  favoritesOnly: boolean;
   onImageClick: (index: number) => void;
   style: React.CSSProperties;
 }
@@ -40,6 +41,7 @@ const VirtualRow = memo(
     columnCount,
     cellSize,
     listings,
+    favoritesOnly,
     onImageClick,
     style,
   }: VirtualRowProps) {
@@ -246,9 +248,13 @@ const VirtualRow = memo(
           const favorited = isFavorite(image.src);
           const isFlashed = flashedKey === String(globalIndex);
           // On touch the heart is gone — show a red ring on favorited cells so
-          // users can still tell what they've saved at a glance.
+          // users can still tell what they've saved at a glance. Skipped in the
+          // favorites-only view: every cell is a favorite there, so the ring is
+          // redundant noise (the header's solid-red ♥ already signals the mode).
           const cellBoxShadow =
-            coarsePointer && favorited ? 'inset 0 0 0 2px var(--accent-red)' : cellShadow;
+            coarsePointer && favorited && !favoritesOnly
+              ? 'inset 0 0 0 2px var(--accent-red)'
+              : cellShadow;
           return (
             <div
               key={globalIndex}
