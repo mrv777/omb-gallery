@@ -32,8 +32,15 @@ const NAV: {
 ];
 
 export default function SubpageShell({ active, color = 'all', headerControls, children }: Props) {
+  // The scroll container is sized to the viewport so it (not body) scrolls.
+  // h-screen (100vh) is the fallback for browsers without dvh (pre-iOS 15.4);
+  // the arbitrary [height:100dvh] is emitted later in the stylesheet so it wins
+  // on modern browsers. dvh tracks the *visible* viewport, which keeps body from
+  // overflowing under iOS Safari's expanded address bar — without it,
+  // body{overflow:hidden} + 100vh leaves the page resting scrolled-down with the
+  // top inaccessible (WebKit bug 153852).
   return (
-    <div className="h-screen w-full overflow-y-auto bg-ink-0 text-bone">
+    <div className="h-screen [height:100dvh] w-full overflow-y-auto bg-ink-0 text-bone">
       <header className="sticky top-0 z-50 bg-ink-1/95 backdrop-blur border-b border-ink-2">
         <div className="flex h-12 items-center gap-3 sm:gap-6 px-3 sm:px-6 font-mono text-xs tracking-[0.08em] uppercase">
           <MobileMenu active={active} />
