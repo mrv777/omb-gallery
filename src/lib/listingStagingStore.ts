@@ -2,6 +2,7 @@ import 'server-only';
 
 import { getDb } from './db';
 import { recomputeClusterAnchors } from './clusterStore';
+import { isTradeShapedPmxEdge } from './cluster';
 import { log } from './log';
 import { EXCLUDED_OWNERS } from './walletLabels';
 
@@ -17,7 +18,19 @@ type SuppressionReason =
   | 'blacklisted_endpoint'
   | 'different_real_profile'
   | 'already_known_same'
+  | 'cross_trader_pmx'
   | 'insufficient_repeated_12h';
+
+// Per-pair cluster-edge signal breakdown used to veto trade-shaped folds.
+type ClusterEdgeSignals = {
+  confidence: number;
+  cih_count: number;
+  self_xfer_count: number;
+  co_cons_count: number;
+  co_parent_count: number;
+  pmx_count: number;
+  pmx_rt_count: number;
+};
 
 type TriggerRow = {
   trigger_type: TriggerType;
@@ -103,6 +116,7 @@ export type ListingStagingRecomputeResult = {
   suppressed_blacklist: number;
   suppressed_conflicts: number;
   suppressed_known_same: number;
+  suppressed_cross_trader: number;
   suppressed_insufficient: number;
   anchors: {
     components: number;
@@ -150,6 +164,7 @@ export function runListingStagingRecompute(): ListingStagingRecomputeResult {
     suppressed_blacklist: 0,
     suppressed_conflicts: 0,
     suppressed_known_same: 0,
+    suppressed_cross_trader: 0,
     suppressed_insufficient: 0,
     anchors: { components: 0, members: 0, skipped_split_clusters: 0 },
     duration_ms: 0,
@@ -169,7 +184,7 @@ export function runListingStagingRecompute(): ListingStagingRecomputeResult {
 
   try {
     const profiles = loadProfiles();
-    const cluster = loadClusterConfidence();
+    const cluster = loadClusterEdges();
     const blacklisted = loadSuppressedWallets();
     const evidence = scanEvidence();
     const rows = buildRows(evidence, { profiles, cluster, blacklisted });
@@ -213,6 +228,7 @@ export function runListingStagingRecompute(): ListingStagingRecomputeResult {
       suppressed_conflicts: rows.filter(r => r.suppression_reason === 'different_real_profile')
         .length,
       suppressed_known_same: rows.filter(r => r.suppression_reason === 'already_known_same').length,
+      suppressed_cross_trader: rows.filter(r => r.suppression_reason === 'cross_trader_pmx').length,
       suppressed_insufficient: rows.filter(
         r => r.suppression_reason === 'insufficient_repeated_12h'
       ).length,
@@ -406,7 +422,7 @@ function buildRows(
   evidence: CandidateEvidence[],
   ctx: {
     profiles: Map<string, Profile>;
-    cluster: Map<string, number>;
+    cluster: Map<string, ClusterEdgeSignals>;
     blacklisted: Set<string>;
   }
 ): StagingEdgeWrite[] {
@@ -428,7 +444,8 @@ function buildRows(
   const rows: StagingEdgeWrite[] = [];
   for (const pair of Array.from(byPair.values())) {
     const validation = validateProfiles(pair.source, pair.seller, ctx.profiles);
-    const clusterConfidence = ctx.cluster.get(pairKey(pair.source, pair.seller)) ?? null;
+    const clusterEdge = ctx.cluster.get(pairKey(pair.source, pair.seller)) ?? null;
+    const clusterConfidence = clusterEdge?.confidence ?? null;
     const gaps = pair.evidence.map(e => e.gap_sec).sort((a, b) => a - b);
     const fast = pair.evidence.filter(e => e.gap_sec <= FAST_WINDOW_SEC);
     const fastGaps = fast.map(e => e.gap_sec).sort((a, b) => a - b);
@@ -443,6 +460,7 @@ function buildRows(
       seller: pair.seller,
       validation,
       clusterConfidence,
+      clusterEdge,
       fastDistinctInscriptions,
       blacklisted: ctx.blacklisted,
     });
@@ -510,6 +528,7 @@ function suppressionReason(args: {
   seller: string;
   validation: ValidationKind;
   clusterConfidence: number | null;
+  clusterEdge: ClusterEdgeSignals | null;
   fastDistinctInscriptions: number;
   blacklisted: Set<string>;
 }): SuppressionReason | null {
@@ -519,6 +538,12 @@ function suppressionReason(args: {
   if (args.validation === 'different_real_profile') return 'different_real_profile';
   if (args.validation === 'same_real_profile' || (args.clusterConfidence ?? 0) >= 9500) {
     return 'already_known_same';
+  }
+  // The pair already has a cluster edge whose only signal is one-directional,
+  // non-round-trip pmx — a resale between distinct humans, not warehousing.
+  // Veto the fold (e.g. goot sold OMBs to hashmaxis, who relisted them).
+  if (args.clusterEdge && isTradeShapedPmxEdge(args.clusterEdge)) {
+    return 'cross_trader_pmx';
   }
   if (args.fastDistinctInscriptions < 2) return 'insufficient_repeated_12h';
   return null;
@@ -570,12 +595,26 @@ function loadProfiles(): Map<string, Profile> {
   return profiles;
 }
 
-function loadClusterConfidence(): Map<string, number> {
-  const out = new Map<string, number>();
+function loadClusterEdges(): Map<string, ClusterEdgeSignals> {
+  const out = new Map<string, ClusterEdgeSignals>();
   const rows = getDb()
-    .prepare(`SELECT addr_a, addr_b, confidence FROM wallet_cluster_edges`)
-    .all() as Array<{ addr_a: string; addr_b: string; confidence: number }>;
-  for (const row of rows) out.set(pairKey(row.addr_a, row.addr_b), row.confidence);
+    .prepare(
+      `SELECT addr_a, addr_b, confidence, cih_count, self_xfer_count,
+              co_cons_count, co_parent_count, pmx_count, pmx_rt_count
+         FROM wallet_cluster_edges`
+    )
+    .all() as Array<{ addr_a: string; addr_b: string } & ClusterEdgeSignals>;
+  for (const row of rows) {
+    out.set(pairKey(row.addr_a, row.addr_b), {
+      confidence: row.confidence,
+      cih_count: row.cih_count,
+      self_xfer_count: row.self_xfer_count,
+      co_cons_count: row.co_cons_count,
+      co_parent_count: row.co_parent_count,
+      pmx_count: row.pmx_count,
+      pmx_rt_count: row.pmx_rt_count,
+    });
+  }
   return out;
 }
 

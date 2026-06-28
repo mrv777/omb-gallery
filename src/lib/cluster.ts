@@ -536,6 +536,37 @@ export function isCrossTraderEdge(
 }
 
 /**
+ * Directional sibling of isCrossTraderEdge for the listing-staging fold.
+ *
+ * True when the ONLY signal on an edge is one-directional, non-round-trip
+ * pmx — an active trade/sale between two distinct humans, not shared
+ * control. Unlike isCrossTraderEdge this does NOT require both endpoints
+ * to be MSRs, because the staging pattern is asymmetric: the seller side
+ * is often a normal personal wallet that simply received a purchase and
+ * relisted it (e.g. goot sold OMBs to hashmaxis, who flipped them).
+ *
+ * Used as a fold veto: if a (source, seller) staging pair already has a
+ * cluster edge of this shape, the "transfer → list within 12h" sequence
+ * is a resale, not warehousing, so the pair must not fold into identity.
+ */
+export function isTradeShapedPmxEdge(e: {
+  cih_count: number;
+  self_xfer_count: number;
+  co_cons_count?: number;
+  co_parent_count?: number;
+  pmx_count?: number;
+  pmx_rt_count?: number;
+}): boolean {
+  if ((e.pmx_count ?? 0) === 0) return false; // no pmx → not this shape
+  if ((e.pmx_rt_count ?? 0) > 0) return false; // round-trip = consolidation
+  if (e.cih_count > 0) return false; // CIH anchor → genuine shared control
+  if (e.self_xfer_count > 0) return false; // sx anchor → genuine shared control
+  if ((e.co_cons_count ?? 0) > 0) return false; // cc anchor → keep
+  if ((e.co_parent_count ?? 0) > 0) return false; // cp anchor → keep
+  return true;
+}
+
+/**
  * Union-find over edges that meet the threshold — caller can use this
  * to materialize disjoint clusters from the per-edge table on demand.
  */

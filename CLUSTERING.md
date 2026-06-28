@@ -109,6 +109,15 @@ An edge is eligible for identity fold only when all of these hold:
 - endpoints do not map to two different real Matrica profiles
 - the pair is not already known-same by Matrica or an existing
   cluster edge at `>=9500`
+- the pair is not "trade-shaped" — vetoed (`suppression_reason =
+  'cross_trader_pmx'`) when an existing cluster edge's only signal is
+  one-directional, non-round-trip pmx (`isTradeShapedPmxEdge` in
+  `cluster.ts`). That shape is a resale between distinct humans (seller
+  bought/received and relisted), not warehousing into one's own seller
+  wallet. Directional sibling of `isCrossTraderEdge`, but it does not
+  require both endpoints to be MSRs since the seller side is often a
+  normal personal wallet. Example: goot sold OMBs + BTC to hashmaxis,
+  who instant-listed them.
 
 Eligible rows are unioned into `recomputeClusterAnchors()`, so the fold
 is site-wide after the daily recompute. The holder page shows the

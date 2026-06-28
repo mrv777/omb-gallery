@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 37;
+const SCHEMA_VERSION = 38;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -169,6 +169,7 @@ function migrate(db: DB): void {
         upgradeV34ToV35(db);
         upgradeV35ToV36(db);
         upgradeV36ToV37(db);
+        upgradeV37ToV38(db);
       } else {
         initSchemaLatest(db);
       }
@@ -209,6 +210,7 @@ function migrate(db: DB): void {
       if (current < 35) upgradeV34ToV35(db);
       if (current < 36) upgradeV35ToV36(db);
       if (current < 37) upgradeV36ToV37(db);
+      if (current < 38) upgradeV37ToV38(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -601,7 +603,7 @@ function initSchemaLatest(db: DB): void {
       source_wallet                   TEXT    NOT NULL,
       seller_wallet                   TEXT    NOT NULL,
       eligible_for_fold               INTEGER NOT NULL DEFAULT 0 CHECK (eligible_for_fold IN (0,1)),
-      suppression_reason              TEXT CHECK (suppression_reason IN ('blacklisted_endpoint','different_real_profile','already_known_same','insufficient_repeated_12h')),
+      suppression_reason              TEXT CHECK (suppression_reason IN ('blacklisted_endpoint','different_real_profile','already_known_same','cross_trader_pmx','insufficient_repeated_12h')),
       evidence_count                  INTEGER NOT NULL,
       distinct_inscriptions           INTEGER NOT NULL,
       fast_12h_evidence_count         INTEGER NOT NULL,
@@ -1795,6 +1797,51 @@ function upgradeV36ToV37(db: DB): void {
     ALTER TABLE active_listings_v37 RENAME TO active_listings;
     CREATE INDEX IF NOT EXISTS idx_listings_price ON active_listings (price_sats);
     CREATE INDEX IF NOT EXISTS idx_listings_inscription ON active_listings (inscription_number);
+  `);
+}
+
+function upgradeV37ToV38(db: DB): void {
+  // Add 'cross_trader_pmx' to the wallet_staging_edges suppression_reason CHECK.
+  // The listing-staging fold now vetoes pairs whose only cluster signal is
+  // one-directional, non-round-trip pmx (a resale between distinct humans, not
+  // warehousing). SQLite can't ALTER a CHECK, but the table is fully rebuilt by
+  // runListingStagingRecompute (DELETE + INSERT), so dropping and recreating it
+  // empty is safe — the next recompute repopulates with the new reason applied.
+  db.exec(`
+    DROP TABLE IF EXISTS wallet_staging_edges;
+    CREATE TABLE wallet_staging_edges (
+      source_wallet                   TEXT    NOT NULL,
+      seller_wallet                   TEXT    NOT NULL,
+      eligible_for_fold               INTEGER NOT NULL DEFAULT 0 CHECK (eligible_for_fold IN (0,1)),
+      suppression_reason              TEXT CHECK (suppression_reason IN ('blacklisted_endpoint','different_real_profile','already_known_same','cross_trader_pmx','insufficient_repeated_12h')),
+      evidence_count                  INTEGER NOT NULL,
+      distinct_inscriptions           INTEGER NOT NULL,
+      fast_12h_evidence_count         INTEGER NOT NULL,
+      fast_12h_distinct_inscriptions  INTEGER NOT NULL,
+      active_listing_count            INTEGER NOT NULL DEFAULT 0,
+      listed_event_count              INTEGER NOT NULL DEFAULT 0,
+      sold_count                      INTEGER NOT NULL DEFAULT 0,
+      listing_count                   INTEGER NOT NULL DEFAULT 0,
+      sale_count                      INTEGER NOT NULL DEFAULT 0,
+      min_gap_sec                     INTEGER NOT NULL,
+      median_gap_sec                  REAL    NOT NULL,
+      max_gap_sec                     INTEGER NOT NULL,
+      fast_12h_median_gap_sec         REAL,
+      validation_kind                 TEXT    NOT NULL CHECK (validation_kind IN ('same_real_profile','different_real_profile','auto_shell','unknown')),
+      existing_cluster_confidence     INTEGER,
+      evidence_json                   TEXT    NOT NULL DEFAULT '[]',
+      first_seen_at                   INTEGER NOT NULL,
+      last_seen_at                    INTEGER NOT NULL,
+      computed_at                     INTEGER NOT NULL DEFAULT (unixepoch()),
+      PRIMARY KEY (source_wallet, seller_wallet),
+      CHECK (source_wallet != seller_wallet)
+    );
+    CREATE INDEX IF NOT EXISTS idx_staging_edges_source
+      ON wallet_staging_edges (source_wallet, eligible_for_fold, last_seen_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_staging_edges_seller
+      ON wallet_staging_edges (seller_wallet, eligible_for_fold, last_seen_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_staging_edges_eligible
+      ON wallet_staging_edges (eligible_for_fold, fast_12h_distinct_inscriptions DESC);
   `);
 }
 
