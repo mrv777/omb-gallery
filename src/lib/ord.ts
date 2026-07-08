@@ -19,13 +19,6 @@ export type OrdInscriptionDetail = {
   block_height: number | null;
   block_timestamp: number | null;
   satpoint: string | null;
-  /**
-   * The ordinal (sat) number this inscription sits on. Null for unbound
-   * inscriptions (ord ships `sat: null`) or when ord omits the field. Max sat
-   * (~2.1e15) is well within Number.MAX_SAFE_INTEGER, so a JS number is safe.
-   * Used to build raster.art links (their token URL keys off the sat number).
-   */
-  sat: number | null;
 };
 
 export class OrdError extends Error {
@@ -191,7 +184,6 @@ function normalizeInscriptionDetail(item: Record<string, unknown>): OrdInscripti
       'genesis_timestamp',
     ]),
     satpoint: satpoint ?? null,
-    sat: pickInt(item, ['sat']),
   };
 }
 

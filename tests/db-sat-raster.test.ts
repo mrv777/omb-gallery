@@ -1,8 +1,9 @@
 /**
  * Schema v39 — inscriptions.sat column + raster.art link plumbing.
- * The migration is purely additive (a nullable INTEGER column). setInscriptionSat
- * writes the sat once and never overwrites it; rasterInscriptionLink builds the
- * sat-keyed raster.art URL (raster rejects inscription id/number — sat only).
+ * The migration is purely additive (a nullable INTEGER column). sat is
+ * populated once by scripts/backfill-sats.js (from ordinals.com); the app only
+ * reads it. rasterInscriptionLink builds the sat-keyed raster.art URL (raster
+ * rejects inscription id/number — sat only).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
@@ -44,59 +45,40 @@ describe('schema v39 — inscriptions.sat', () => {
     const cols = db.pragma('table_info(inscriptions)') as Array<{ name: string; notnull: number }>;
     const sat = cols.find(c => c.name === 'sat');
     expect(sat).toBeDefined();
-    expect(sat!.notnull).toBe(0); // nullable — NULL until resolved
+    expect(sat!.notnull).toBe(0); // nullable — NULL until backfilled
   });
 
-  it('setInscriptionSat writes once and never overwrites', () => {
+  it('getInscription surfaces the sat column (incl. 64-bit values)', () => {
     const db = dbModule.getDb();
     const stmts = dbModule.getStmts();
     const row = db
       .prepare(`SELECT inscription_number FROM inscriptions WHERE collection_slug='omb' LIMIT 1`)
       .get() as { inscription_number: number };
-    const num = row.inscription_number;
-
-    // Large sat near the ceiling to confirm 64-bit integers survive the round-trip.
+    // Write via raw SQL, exactly as scripts/backfill-sats.js does. A large sat
+    // near the ordinal ceiling confirms 64-bit integers survive the round-trip.
     const sat = 2_099_999_997_689_999;
-    stmts.setInscriptionSat.run({ inscription_number: num, sat });
-    let stored = db.prepare(`SELECT sat FROM inscriptions WHERE inscription_number=?`).get(num) as {
-      sat: number | null;
-    };
-    expect(stored.sat).toBe(sat);
-
-    // A later call with a different sat must NOT clobber it (sat is immutable).
-    stmts.setInscriptionSat.run({ inscription_number: num, sat: 123 });
-    stored = db.prepare(`SELECT sat FROM inscriptions WHERE inscription_number=?`).get(num) as {
-      sat: number | null;
-    };
-    expect(stored.sat).toBe(sat);
-  });
-
-  it('setInscriptionSat no-ops when sat is null', () => {
-    const db = dbModule.getDb();
-    const stmts = dbModule.getStmts();
-    const row = db
-      .prepare(`SELECT inscription_number FROM inscriptions WHERE collection_slug='omb' LIMIT 1`)
-      .get() as { inscription_number: number };
-    const num = row.inscription_number;
-    stmts.setInscriptionSat.run({ inscription_number: num, sat: null });
-    const stored = db
-      .prepare(`SELECT sat FROM inscriptions WHERE inscription_number=?`)
-      .get(num) as { sat: number | null };
-    expect(stored.sat).toBeNull();
-  });
-
-  it('getInscription surfaces the sat column', () => {
-    const db = dbModule.getDb();
-    const stmts = dbModule.getStmts();
-    const row = db
-      .prepare(`SELECT inscription_number FROM inscriptions WHERE collection_slug='omb' LIMIT 1`)
-      .get() as { inscription_number: number };
-    stmts.setInscriptionSat.run({ inscription_number: row.inscription_number, sat: 45015195336 });
+    db.prepare(`UPDATE inscriptions SET sat = ? WHERE inscription_number = ?`).run(
+      sat,
+      row.inscription_number
+    );
     const insc = stmts.getInscription.get({
       inscription_number: row.inscription_number,
       collection: 'omb',
     }) as { sat: number | null };
-    expect(insc.sat).toBe(45015195336);
+    expect(insc.sat).toBe(sat);
+  });
+
+  it('sat defaults to NULL for un-backfilled rows', () => {
+    const db = dbModule.getDb();
+    const stmts = dbModule.getStmts();
+    const row = db
+      .prepare(`SELECT inscription_number FROM inscriptions WHERE collection_slug='omb' LIMIT 1`)
+      .get() as { inscription_number: number };
+    const insc = stmts.getInscription.get({
+      inscription_number: row.inscription_number,
+      collection: 'omb',
+    }) as { sat: number | null };
+    expect(insc.sat).toBeNull();
   });
 });
 

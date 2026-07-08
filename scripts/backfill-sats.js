@@ -1,20 +1,23 @@
 #!/usr/bin/env node
 /* eslint-disable */
 // One-shot backfill: populate inscriptions.sat (the ordinal/sat number each
-// inscription sits on) for every row that already has an inscription_id but no
-// sat yet. Reads ord's /inscription/<id> `sat` field. Powers raster.art links,
-// whose token URL keys off the sat number, not the inscription id/number.
+// inscription sits on) for OMB rows that have an inscription_id but no sat yet.
+// Powers raster.art links, whose token URL keys off the sat number.
+//
+// SOURCE: ordinals.com's recursive endpoint /r/inscription/<id>, which returns
+// `sat` as clean JSON. We CANNOT use our own ord node for this — it runs with
+// sat indexing OFF (index_addresses=true, sats/runes off), so it ships
+// `sat: null` for every inscription. ordinals.com runs a sat-indexed ord.
 //
 // Idempotent + resumable: the WHERE clause only selects rows still missing sat,
-// so re-running after an interruption picks up where it left off. New
-// inscriptions get their sat during the live ord bootstrap pass (poll route);
-// this script is only for rows reconciled BEFORE the v39 column existed.
+// so re-running after an interruption (or a rate-limit stall) picks up where it
+// left off. Scoped to collection 'omb' — raster links are OMB-only.
 //
-// Required env:
-//   ORD_BASE_URL          e.g. http://127.0.0.1:4000
+// Required env: none (defaults below work against prod).
 // Optional:
 //   OMB_DB_PATH           default ./tmp/dev.db
-//   BACKFILL_CONCURRENCY  default 20 (be polite to your ord node)
+//   ORDINALS_BASE_URL     default https://ordinals.com
+//   BACKFILL_CONCURRENCY  default 8 (be polite to ordinals.com)
 //   BACKFILL_LIMIT        debug: only process the first N missing rows
 //
 // Max sat (~2.1e15) is well within Number.MAX_SAFE_INTEGER, so plain JS
@@ -23,35 +26,51 @@
 const path = require('node:path');
 const Database = require('better-sqlite3');
 
-const ORD_BASE = (process.env.ORD_BASE_URL ?? '').replace(/\/+$/, '');
 const DB_PATH = process.env.OMB_DB_PATH ?? path.resolve(__dirname, '..', 'tmp', 'dev.db');
-const CONCURRENCY = parseInt(process.env.BACKFILL_CONCURRENCY ?? '20', 10);
+const ORDINALS_BASE = (process.env.ORDINALS_BASE_URL ?? 'https://ordinals.com').replace(/\/+$/, '');
+const CONCURRENCY = parseInt(process.env.BACKFILL_CONCURRENCY ?? '8', 10);
 const LIMIT = process.env.BACKFILL_LIMIT ? parseInt(process.env.BACKFILL_LIMIT, 10) : null;
-const TIMEOUT_MS = 10_000;
+const TIMEOUT_MS = 15_000;
+const MAX_RETRIES = 4;
 
-if (!ORD_BASE) {
-  console.error('[backfill-sats] ORD_BASE_URL is required');
-  process.exit(2);
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
 }
 
+// Fetch sat for one inscription_id, retrying on 429 / 5xx / network with
+// exponential backoff. Returns { sat } (sat may be null = unbound) or { error }.
 async function fetchSat(inscriptionId) {
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), TIMEOUT_MS);
-  try {
-    const res = await fetch(`${ORD_BASE}/inscription/${inscriptionId}`, {
-      headers: { Accept: 'application/json' },
-      signal: ctl.signal,
-    });
-    if (!res.ok) return { error: `HTTP ${res.status}` };
-    const j = await res.json();
-    // ord ships `sat: null` for unbound inscriptions — treat as "no sat".
-    const sat = typeof j.sat === 'number' && Number.isFinite(j.sat) ? Math.trunc(j.sat) : null;
-    return { sat };
-  } catch (e) {
-    return { error: e.message ?? String(e) };
-  } finally {
-    clearTimeout(t);
+  let lastErr = 'unknown';
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+    try {
+      const res = await fetch(`${ORDINALS_BASE}/r/inscription/${inscriptionId}`, {
+        headers: { Accept: 'application/json' },
+        signal: ctl.signal,
+      });
+      if (res.status === 429 || res.status >= 500) {
+        lastErr = `HTTP ${res.status}`;
+        clearTimeout(t);
+        await sleep(Math.min(500 * 2 ** attempt, 8000) * (0.75 + Math.random() * 0.5));
+        continue;
+      }
+      if (!res.ok) {
+        clearTimeout(t);
+        return { error: `HTTP ${res.status}` };
+      }
+      const j = await res.json();
+      clearTimeout(t);
+      // ordinals.com ships `sat: null` for unbound inscriptions — treat as none.
+      const sat = typeof j.sat === 'number' && Number.isFinite(j.sat) ? Math.trunc(j.sat) : null;
+      return { sat };
+    } catch (e) {
+      lastErr = e.message ?? String(e);
+      clearTimeout(t);
+      await sleep(Math.min(500 * 2 ** attempt, 8000) * (0.75 + Math.random() * 0.5));
+    }
   }
+  return { error: lastErr };
 }
 
 async function main() {
@@ -59,12 +78,12 @@ async function main() {
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000');
 
-  // Guard: the sat column must exist (v39). Start the app once against this DB
-  // to run migrations if it doesn't.
+  // Guard: the sat column must exist (schema v39). Start the app once against
+  // this DB to run migrations if it doesn't.
   const cols = db.pragma('table_info(inscriptions)');
   if (!cols.some(c => c.name === 'sat')) {
     console.error(
-      '[backfill-sats] inscriptions.sat column missing — start the app once against this DB to migrate to v39, then re-run'
+      '[backfill-sats] inscriptions.sat column missing — migrate this DB to v39 first, then re-run'
     );
     process.exit(1);
   }
@@ -73,14 +92,14 @@ async function main() {
     .prepare(
       `SELECT inscription_number, inscription_id
        FROM inscriptions
-       WHERE inscription_id IS NOT NULL AND sat IS NULL
+       WHERE collection_slug = 'omb' AND inscription_id IS NOT NULL AND sat IS NULL
        ORDER BY inscription_number`
     )
     .all();
   if (LIMIT != null) rows = rows.slice(0, LIMIT);
 
   console.log(
-    `[backfill-sats] ord=${ORD_BASE} db=${DB_PATH} missing=${rows.length} concurrency=${CONCURRENCY}`
+    `[backfill-sats] src=${ORDINALS_BASE} db=${DB_PATH} missing(omb)=${rows.length} concurrency=${CONCURRENCY}`
   );
   if (rows.length === 0) {
     console.log('[backfill-sats] nothing to do');
@@ -138,12 +157,15 @@ async function main() {
   const counts = db
     .prepare(
       `SELECT
-        (SELECT COUNT(*) FROM inscriptions)                                  AS total,
-        (SELECT COUNT(*) FROM inscriptions WHERE inscription_id IS NOT NULL) AS with_id,
-        (SELECT COUNT(*) FROM inscriptions WHERE sat IS NOT NULL)            AS with_sat`
+        (SELECT COUNT(*) FROM inscriptions WHERE collection_slug='omb')                        AS omb_total,
+        (SELECT COUNT(*) FROM inscriptions WHERE collection_slug='omb' AND inscription_id IS NOT NULL) AS omb_with_id,
+        (SELECT COUNT(*) FROM inscriptions WHERE collection_slug='omb' AND sat IS NOT NULL)     AS omb_with_sat`
     )
     .get();
   console.log('[backfill-sats] counts:', counts);
+  if (err > 0) {
+    console.log('[backfill-sats] NOTE: err>0 — re-run to retry the failures (resumable).');
+  }
 
   db.close();
 }
