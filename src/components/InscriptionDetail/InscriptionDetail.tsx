@@ -11,6 +11,7 @@ import {
   marketplaceLabel,
   ordNetInscriptionLink,
   ordinalsLink,
+  rasterInscriptionLink,
   satflowInscriptionLink,
   truncateAddr,
 } from '@/lib/format';
@@ -61,6 +62,7 @@ export default function InscriptionDetail({
   const ordLink = ordinalsLink(inscription.inscription_id, inscription.inscription_number);
   const ordNetLink = ordNetInscriptionLink(inscription.inscription_number);
   const satflowLink = satflowInscriptionLink(inscription.inscription_id);
+  const rasterLink = rasterInscriptionLink(inscription.sat);
   const currentTxid = inscription.current_output ? inscription.current_output.split(':')[0] : null;
   const totalEvents = events.length;
   const transferCount = inscription.transfer_count ?? 0;
@@ -214,6 +216,16 @@ export default function InscriptionDetail({
                 className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
               >
                 satflow ↗
+              </a>
+            )}
+            {rasterLink && (
+              <a
+                href={rasterLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
+              >
+                raster ↗
               </a>
             )}
             {currentTxid && (

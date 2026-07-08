@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 38;
+const SCHEMA_VERSION = 39;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -170,6 +170,7 @@ function migrate(db: DB): void {
         upgradeV35ToV36(db);
         upgradeV36ToV37(db);
         upgradeV37ToV38(db);
+        upgradeV38ToV39(db);
       } else {
         initSchemaLatest(db);
       }
@@ -211,6 +212,7 @@ function migrate(db: DB): void {
       if (current < 36) upgradeV35ToV36(db);
       if (current < 37) upgradeV36ToV37(db);
       if (current < 38) upgradeV37ToV38(db);
+      if (current < 39) upgradeV38ToV39(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -255,7 +257,13 @@ function initSchemaLatest(db: DB): void {
       -- as if they were collectors.
       loan_count          INTEGER NOT NULL DEFAULT 0,
       active_loan_count   INTEGER NOT NULL DEFAULT 0,
-      effective_owner     TEXT
+      effective_owner     TEXT,
+      -- The ordinal (sat) number this inscription sits on (v39). Populated by
+      -- the ord bootstrap pass + scripts/backfill-sats.js from ord's
+      -- /inscription/<id> sat field. NULL until resolved (or for unbound
+      -- inscriptions). Immutable once set. Drives raster.art links, whose
+      -- token URL keys off the sat number, not the inscription id/number.
+      sat                 INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_insc_movement   ON inscriptions (last_movement_at);
     CREATE INDEX IF NOT EXISTS idx_insc_xfer_count ON inscriptions (transfer_count DESC);
@@ -1845,6 +1853,19 @@ function upgradeV37ToV38(db: DB): void {
   `);
 }
 
+function upgradeV38ToV39(db: DB): void {
+  // Add inscriptions.sat — the ordinal (sat) number each inscription sits on.
+  // Purely additive column-add; existing rows get NULL and are filled by the
+  // ord bootstrap pass (new inscriptions) + scripts/backfill-sats.js (existing
+  // reconciled rows). Powers raster.art links, which key off the sat number.
+  // Idempotent: skip if the column already exists (defensive against a partial
+  // run, mirroring v3/v7/v8 column-adds).
+  const cols = db.pragma('table_info(inscriptions)') as Array<{ name: string }>;
+  if (!cols.some(c => c.name === 'sat')) {
+    db.exec(`ALTER TABLE inscriptions ADD COLUMN sat INTEGER`);
+  }
+}
+
 function upgradeV30ToV31(db: DB): void {
   // Materialize connected components at IDENTITY_FOLD_THRESHOLD so the
   // top-holders leaderboard, color leaderboards, holder distribution
@@ -2023,6 +2044,7 @@ type Stmts = {
   unbumpTransferOnUpgrade: ReturnType<DB['prepare']>;
   setInscriptionState: ReturnType<DB['prepare']>;
   setInscriptionId: ReturnType<DB['prepare']>;
+  setInscriptionSat: ReturnType<DB['prepare']>;
   setInscriptionInscribeAt: ReturnType<DB['prepare']>;
   setInscriptionOwnerIfNewer: ReturnType<DB['prepare']>;
   // ord-specific reads
@@ -2219,6 +2241,16 @@ export function getStmts(): Stmts {
       UPDATE inscriptions
       SET inscription_id = COALESCE(inscriptions.inscription_id, @inscription_id)
       WHERE inscription_number = @inscription_number
+    `),
+
+    // Populate the sat number once, and never overwrite it — the sat an
+    // inscription sits on is immutable. COALESCE keeps an existing value if a
+    // later call somehow passes a different (or null) sat. Written by the ord
+    // bootstrap pass; scripts/backfill-sats.js fills existing reconciled rows.
+    setInscriptionSat: db.prepare(`
+      UPDATE inscriptions
+      SET sat = COALESCE(inscriptions.sat, @sat)
+      WHERE inscription_number = @inscription_number AND @sat IS NOT NULL
     `),
 
     // Set inscribe_at (genesis timestamp) only if not already set. Used by the
@@ -3562,6 +3594,10 @@ export type InscriptionRow = {
   loan_count: number;
   active_loan_count: number;
   effective_owner: string | null;
+  /** Ordinal (sat) number this inscription sits on. NULL until the ord
+   * bootstrap / backfill-sats resolves it (or for unbound inscriptions).
+   * Drives the raster.art link on the detail page. */
+  sat: number | null;
   /** Only populated by topByActiveLoans / topByActiveLoansPaged — block
    * timestamp of the most recent loan-originated event for the inscription.
    * Drives the currently-loaned leaderboard "loaned 3d ago" UI. */

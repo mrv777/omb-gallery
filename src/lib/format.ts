@@ -156,3 +156,15 @@ export function satflowInscriptionLink(inscriptionId: string | null | undefined)
   if (!inscriptionId || inscriptionId.startsWith('unknown-')) return '';
   return `https://www.satflow.com/ordinal/${inscriptionId}`;
 }
+
+/**
+ * raster.art keys its ordinal token pages by SAT NUMBER — the URL path segment
+ * is raster's `token_id`, which equals the sat the inscription sits on. It does
+ * NOT accept an inscription id or number (those 500). Returns '' when we don't
+ * yet know the sat, so callers can omit the link. See the `sat` column in
+ * src/lib/db.ts and reference_raster_url_scheme in memory.
+ */
+export function rasterInscriptionLink(sat: number | null | undefined): string {
+  if (sat == null) return '';
+  return `https://www.raster.art/token/bitcoin/ordinals/${sat}`;
+}

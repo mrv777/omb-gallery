@@ -744,6 +744,16 @@ async function bootstrapInscriptionIds(): Promise<number> {
           inscribe_at: detail.block_timestamp,
         });
       }
+      // Record the sat number (immutable) so raster.art links can be built.
+      // The setInscriptionSat statement no-ops when sat is null (unbound /
+      // omitted by ord). Existing rows bootstrapped before v39 are filled by
+      // scripts/backfill-sats.js.
+      if (detail.sat != null) {
+        stmts.setInscriptionSat.run({
+          inscription_number: row.inscription_number,
+          sat: detail.sat,
+        });
+      }
       bootstrapped++;
     }
     if (hardError) throw hardError;
