@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 39;
+const SCHEMA_VERSION = 40;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -171,6 +171,7 @@ function migrate(db: DB): void {
         upgradeV36ToV37(db);
         upgradeV37ToV38(db);
         upgradeV38ToV39(db);
+        upgradeV39ToV40(db);
       } else {
         initSchemaLatest(db);
       }
@@ -213,6 +214,7 @@ function migrate(db: DB): void {
       if (current < 37) upgradeV36ToV37(db);
       if (current < 38) upgradeV37ToV38(db);
       if (current < 39) upgradeV38ToV39(db);
+      if (current < 40) upgradeV39ToV40(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -508,6 +510,36 @@ function initSchemaLatest(db: DB): void {
       FOREIGN KEY (event_id) REFERENCES events (id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_notify_deliveries_event ON notify_deliveries (event_id);
+
+    -- Transfer-burst coalescing. One row per inscription currently in a
+    -- "peel chain" burst — a bot sweeping an inscription through many
+    -- one-in/one-out hops to fresh addresses, which the self-transfer guard
+    -- can't catch (every hop has a distinct old_owner/new_owner). The hops are
+    -- real and stay in the events table; this table only suppresses the
+    -- per-hop notification in favour of a periodic digest.
+    --
+    -- Cursors, not counts: the digest body is re-derived from events by id
+    -- range at send time, so this table is disposable state. Losing a row
+    -- degrades to "individual messages again", never to wrong data.
+    --   first_event_id > last_event_id  →  no undigested hops pending
+    --
+    -- Every timestamp here is WALLCLOCK (when we observed/sent), never a block
+    -- timestamp. Digest scheduling has to be relative to now; mixing in chain
+    -- time makes a burst over historical events look permanently overdue and
+    -- fires one digest per hop, which is the spam we're here to prevent. The
+    -- on-chain span shown IN the digest is derived from the hops themselves.
+    CREATE TABLE IF NOT EXISTS notify_bursts (
+      inscription_number INTEGER PRIMARY KEY
+        REFERENCES inscriptions (inscription_number) ON DELETE CASCADE,
+      opened_at          INTEGER NOT NULL,
+      last_hop_seen_at   INTEGER NOT NULL,
+      first_event_id     INTEGER NOT NULL,
+      last_event_id      INTEGER NOT NULL,
+      last_digest_at     INTEGER,
+      digest_attempts    INTEGER NOT NULL DEFAULT 0,
+      updated_at         INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_notify_bursts_hop ON notify_bursts (last_hop_seen_at);
 
     -- Holder roles (Phase 7). Derived from inscriptions.color counts per
     -- Matrica user. Recomputed every auto tick after loans finalize. Only
@@ -1865,6 +1897,27 @@ function upgradeV38ToV39(db: DB): void {
   if (!cols.some(c => c.name === 'sat')) {
     db.exec(`ALTER TABLE inscriptions ADD COLUMN sat INTEGER`);
   }
+}
+
+function upgradeV39ToV40(db: DB): void {
+  // Add notify_bursts — transfer-burst coalescing for the notification bot.
+  // Purely additive; no backfill. An in-flight burst at deploy time simply
+  // starts being tracked from the next hop. See initSchemaLatest for the
+  // rationale on why this table holds cursors rather than counts.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS notify_bursts (
+      inscription_number INTEGER PRIMARY KEY
+        REFERENCES inscriptions (inscription_number) ON DELETE CASCADE,
+      opened_at          INTEGER NOT NULL,
+      last_hop_seen_at   INTEGER NOT NULL,
+      first_event_id     INTEGER NOT NULL,
+      last_event_id      INTEGER NOT NULL,
+      last_digest_at     INTEGER,
+      digest_attempts    INTEGER NOT NULL DEFAULT 0,
+      updated_at         INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_notify_bursts_hop ON notify_bursts (last_hop_seen_at);
+  `);
 }
 
 function upgradeV30ToV31(db: DB): void {

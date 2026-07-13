@@ -275,3 +275,181 @@ describe('runNotifyFanout delivery dedupe', () => {
     expect(pending.n).toBe(1);
   });
 });
+
+// A "peel chain": a bot sweeping one inscription through many one-in/one-out
+// hops to freshly-derived addresses. Real transfers (distinct owners each hop),
+// so detection keeps them — but they must not become one push per hop.
+const BURST_BASE_TS = 1_800_000_000;
+
+function enqueueTransferEvent(n: number): number {
+  const row = firstOmb();
+  const insert = dbModule.getStmts().insertEvent.run({
+    inscription_id: row.inscription_id,
+    inscription_number: row.inscription_number,
+    event_type: 'transferred',
+    block_height: 957_700 + n,
+    // Hops land ~15 min apart, well inside the 6h burst window.
+    block_timestamp: BURST_BASE_TS + n * 900,
+    new_satpoint: `${String(n).padStart(64, 'd')}:0:0`,
+    old_owner: `bc1qhop${n}`,
+    new_owner: `bc1qhop${n + 1}`,
+    marketplace: null,
+    sale_price_sats: null,
+    txid: String(n).padStart(64, 'd'),
+    raw_json: null,
+  });
+  const eventId = Number(insert.lastInsertRowid);
+  dbModule
+    .getDb()
+    .prepare(`UPDATE events SET created_at = unixepoch() - 120 WHERE id = ?`)
+    .run(eventId);
+  dbModule.getStmts().enqueueNotify.run(eventId);
+  return eventId;
+}
+
+function enqueueSoldEvent(n: number): number {
+  const row = firstOmb();
+  const insert = dbModule.getStmts().insertEvent.run({
+    inscription_id: row.inscription_id,
+    inscription_number: row.inscription_number,
+    event_type: 'sold',
+    block_height: 957_700 + n,
+    block_timestamp: BURST_BASE_TS + n * 900,
+    new_satpoint: `${String(n).padStart(64, 'e')}:0:0`,
+    old_owner: `bc1qhop${n}`,
+    new_owner: 'bc1qbuyer',
+    marketplace: 'satflow',
+    sale_price_sats: 2_200_000,
+    txid: String(n).padStart(64, 'e'),
+    raw_json: null,
+  });
+  const eventId = Number(insert.lastInsertRowid);
+  dbModule
+    .getDb()
+    .prepare(`UPDATE events SET created_at = unixepoch() - 120 WHERE id = ?`)
+    .run(eventId);
+  dbModule.getStmts().enqueueNotify.run(eventId);
+  return eventId;
+}
+
+async function subscribeDiscordTransfers(target: string) {
+  const store = await import('../src/lib/subscriptionStore');
+  const created = store.createActive({
+    channel: 'discord',
+    channelTarget: target,
+    kind: 'collection',
+    targetKey: 'omb',
+    eventMask: store.MASK_TRANSFERRED | store.MASK_SOLD,
+    creatorIp: '127.0.0.1',
+  });
+  expect(created.ok).toBe(true);
+}
+
+function stubOkWebhook(posts: PostedWebhook[]) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      posts.push({
+        url: String(input),
+        body: JSON.parse(String(init?.body ?? '{}')) as PostedWebhook['body'],
+      });
+      return new Response('{}', { status: 200 });
+    })
+  );
+}
+
+function countRows(table: string): number {
+  return (dbModule.getDb().prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+}
+
+describe('runNotifyFanout transfer-burst coalescing', () => {
+  it('alerts on the first three hops, then suppresses and still dequeues', async () => {
+    const posts: PostedWebhook[] = [];
+    stubOkWebhook(posts);
+    await subscribeDiscordTransfers(WEBHOOK_A);
+
+    const { runNotifyFanout } = await import('../src/lib/notify');
+
+    // Fan-out runs every 5 min while hops land every ~15, so each hop arrives
+    // in its own tick. That's exactly why coalescing has to be cross-tick.
+    for (let n = 1; n <= 4; n++) {
+      enqueueTransferEvent(n);
+      await runNotifyFanout();
+    }
+
+    // Hops 1-3 sent individually; hop 4 tripped the burst and was suppressed.
+    expect(posts).toHaveLength(3);
+    expect(countRows('notify_bursts')).toBe(1);
+    // The suppressed hop must not linger in the queue forever.
+    expect(countRows('notify_pending')).toBe(0);
+
+    // Further hops stay suppressed without re-running the threshold check.
+    for (let n = 5; n <= 8; n++) {
+      enqueueTransferEvent(n);
+      await runNotifyFanout();
+    }
+    expect(posts).toHaveLength(3);
+    expect(countRows('notify_pending')).toBe(0);
+  });
+
+  it('still alerts immediately on a sale that lands mid-burst, and flushes the digest', async () => {
+    const posts: PostedWebhook[] = [];
+    stubOkWebhook(posts);
+    await subscribeDiscordTransfers(WEBHOOK_A);
+
+    const { runNotifyFanout } = await import('../src/lib/notify');
+    for (let n = 1; n <= 5; n++) {
+      enqueueTransferEvent(n);
+      await runNotifyFanout();
+    }
+    expect(posts).toHaveLength(3);
+    expect(countRows('notify_bursts')).toBe(1);
+
+    enqueueSoldEvent(6);
+    await runNotifyFanout();
+
+    // The sale went out, plus the digest of the hops that preceded it, and the
+    // burst was closed by the flush.
+    const titles = posts.flatMap(
+      p => (p.body.embeds ?? []).map(e => (e as { title: string }).title) as string[]
+    );
+    expect(titles.some(t => t.includes('sold'))).toBe(true);
+    expect(titles.some(t => t.includes('transfer burst'))).toBe(true);
+    expect(countRows('notify_bursts')).toBe(0);
+    expect(countRows('notify_pending')).toBe(0);
+  });
+
+  it('emits one digest and closes the burst once hops go quiet', async () => {
+    const posts: PostedWebhook[] = [];
+    stubOkWebhook(posts);
+    await subscribeDiscordTransfers(WEBHOOK_A);
+
+    const { runNotifyFanout } = await import('../src/lib/notify');
+    for (let n = 1; n <= 6; n++) {
+      enqueueTransferEvent(n);
+      await runNotifyFanout();
+    }
+    expect(posts).toHaveLength(3);
+    expect(countRows('notify_bursts')).toBe(1);
+
+    // Age the burst past the quiet threshold — the sweep is over. This is
+    // wallclock ("when did we last see a hop"), not block time.
+    const { BURST_QUIET_SEC } = await import('../src/lib/notifyBurst');
+    dbModule
+      .getDb()
+      .prepare(`UPDATE notify_bursts SET last_hop_seen_at = unixepoch() - ?`)
+      .run(BURST_QUIET_SEC + 60);
+
+    await runNotifyFanout();
+
+    const digests = posts.flatMap(p =>
+      (p.body.embeds ?? []).filter(e => (e as { title: string }).title.includes('transfer burst'))
+    );
+    expect(digests).toHaveLength(1);
+    // Hops 4,5,6 were suppressed — the digest speaks for exactly those.
+    expect((digests[0] as { fields: Array<{ name: string; value: string }> }).fields).toContainEqual(
+      { name: 'Hops', value: '3', inline: true }
+    );
+    expect(countRows('notify_bursts')).toBe(0);
+  });
+});

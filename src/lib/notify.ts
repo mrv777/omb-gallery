@@ -18,6 +18,16 @@ import {
   MASK_LISTED,
   type SubscriptionRow,
 } from './subscriptionStore';
+import {
+  burstHops,
+  burstInscription,
+  closeBurst,
+  dueBursts,
+  markBurstDigested,
+  recordBurstDigestFailure,
+  recordBurstHop,
+  BURST_QUIET_SEC,
+} from './notifyBurst';
 
 type EventRow = {
   id: number;
@@ -207,6 +217,74 @@ function buildTelegramMessage(
   };
 }
 
+function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h === 0 && m === 0) return '<1m';
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+function buildTelegramDigest(
+  digest: BurstDigest,
+  sub: SubscriptionRow,
+  matrica: MatricaOverlay
+): SendArgs {
+  const link = `<a href="${escapeHtml(ordinalsUrl(digest.inscriptionNumber))}">OMB #${digest.inscriptionNumber}</a>`;
+  const colorTag = digest.color ? ` <i>(${escapeHtml(digest.color)})</i>` : '';
+  const span = formatDuration(digest.endedAt - digest.startedAt);
+  const movement = `${escapeHtml(ownerDisplay(digest.firstOwner, matrica))} → ${escapeHtml(ownerDisplay(digest.lastOwner, matrica))}`;
+  const text =
+    `🔁 ${link}${colorTag} <b>TRANSFER BURST</b>\n` +
+    `   moved <b>${digest.hops}</b> times in ${escapeHtml(span)}\n` +
+    `   ${movement}`;
+  return {
+    chatId: sub.channel_target,
+    text,
+    parseMode: 'HTML',
+    disablePreview: true,
+    replyMarkup: {
+      inline_keyboard: [
+        [
+          { text: 'View latest', url: ordinalsUrl(digest.inscriptionNumber) },
+          { text: 'Mute this watch', callback_data: `mute:${sub.id}` },
+        ],
+      ],
+    },
+  };
+}
+
+function buildDiscordDigest(
+  digest: BurstDigest,
+  sub: SubscriptionRow,
+  matrica: MatricaOverlay
+): DiscordEmbed[] {
+  const lookup = lookupInscription(digest.inscriptionNumber);
+  const fields: DiscordEmbed['fields'] = [];
+  if (digest.color) fields.push({ name: 'Color', value: digest.color, inline: true });
+  fields.push({ name: 'Hops', value: String(digest.hops), inline: true });
+  fields.push({ name: 'Window', value: formatDuration(digest.endedAt - digest.startedAt), inline: true });
+  fields.push({ name: 'From', value: ownerDisplay(digest.firstOwner, matrica), inline: true });
+  fields.push({ name: 'To', value: ownerDisplay(digest.lastOwner, matrica), inline: true });
+  return [
+    {
+      title: `OMB #${digest.inscriptionNumber} moved ${digest.hops} times (transfer burst)`,
+      url: ordinalsUrl(digest.inscriptionNumber),
+      color: colorHex(digest.color),
+      thumbnail: lookup
+        ? { url: lookup.external ? lookup.thumbnail : `${siteUrl()}${lookup.thumbnail}` }
+        : undefined,
+      fields,
+      footer: {
+        text: `${sub.kind === 'collection' ? 'all OMB' : sub.kind === 'color' ? `${sub.target_key} OMBs` : `OMB #${sub.target_key}`} · burst digest`,
+      },
+      timestamp: new Date(digest.endedAt * 1000).toISOString(),
+    },
+  ];
+}
+
 function buildDiscordEmbeds(
   events: EventRow[],
   sub: SubscriptionRow,
@@ -266,6 +344,8 @@ type FanoutResult = {
   failed: number;
   events_dequeued: number;
   events_deferred: number;
+  bursts_suppressed?: number;
+  digests_sent?: number;
   dur_ms: number;
 };
 
@@ -281,6 +361,22 @@ type Bucket = {
   eventIds: Set<number>;
   /** Per-bucket render dedupe for marketplace listing timestamp/source wobble. */
   eventRenderKeys: Set<string>;
+  /** Set only on digest buckets, which render a transfer-burst summary instead
+   *  of a list of events. Digest buckets carry no eventIds — the hops they
+   *  describe were dequeued when they were suppressed. */
+  digest?: BurstDigest;
+};
+
+/** One rendered "this inscription got swept N times" summary. */
+type BurstDigest = {
+  inscriptionNumber: number;
+  inscriptionId: string;
+  color: string | null;
+  hops: number;
+  firstOwner: string | null;
+  lastOwner: string | null;
+  startedAt: number;
+  endedAt: number;
 };
 
 type ActiveListingRow = {
@@ -401,6 +497,154 @@ function recordDeliveredRecords(bucket: Bucket, eventIds: Set<number>): void {
   tx(Array.from(eventIds));
 }
 
+// Reports whether the bucket's one outbound message landed, plus the set of
+// event ids that message satisfies. `ok` is tracked separately from `ids`
+// because a digest bucket legitimately carries zero event ids (its hops were
+// dequeued when they were suppressed) yet still succeeds or fails.
+async function dispatch(
+  bucket: Bucket,
+  overlay: MatricaOverlay
+): Promise<{ ok: boolean; ids: Set<number> }> {
+  const allIds = new Set(bucket.eventIds);
+  if (bucket.channel === 'telegram') {
+    const args = bucket.digest
+      ? buildTelegramDigest(bucket.digest, bucket.representative, overlay)
+      : buildTelegramMessage(bucket.events, bucket.representative, overlay);
+    const r = await sendMessage(args);
+    if (r.ok) {
+      recordDeliverySuccess(bucket.channel, bucket.channelTarget);
+      return { ok: true, ids: allIds };
+    }
+    const dead = r.error.kind === 'blocked';
+    const retryable =
+      r.error.kind === 'config' || r.error.kind === 'rate-limit' || r.error.kind === 'network';
+    if (!retryable) {
+      recordDeliveryFailure(bucket.channel, bucket.channelTarget, dead);
+    }
+    log.warn('notify/telegram', 'send failed', {
+      target: hashTarget(bucket.channelTarget),
+      error: r.error,
+    });
+    return { ok: false, ids: new Set() };
+  }
+  const embeds = bucket.digest
+    ? buildDiscordDigest(bucket.digest, bucket.representative, overlay)
+    : buildDiscordEmbeds(bucket.events, bucket.representative, overlay);
+  const r = await postWebhook(bucket.channelTarget, { embeds });
+  if (r.ok) {
+    recordDeliverySuccess(bucket.channel, bucket.channelTarget);
+    return { ok: true, ids: allIds };
+  }
+  const dead = r.error.kind === 'dead' || r.error.kind === 'invalid-url';
+  const retryable =
+    r.error.kind === 'rate-limit' ||
+    r.error.kind === 'network' ||
+    (r.error.kind === 'http' && r.error.status >= 500);
+  if (!retryable) {
+    recordDeliveryFailure(bucket.channel, bucket.channelTarget, dead);
+  }
+  log.warn('notify/discord', 'post failed', {
+    target: hashTarget(bucket.channelTarget),
+    error: r.error,
+  });
+  return { ok: false, ids: new Set() };
+}
+
+/** Emit digests for bursts that are due. Deliberately independent of the notify
+ *  queue: a burst goes quiet precisely BECAUSE its hops stopped arriving, so
+ *  the tick that should send the closing digest is one with nothing queued.
+ *  Runs on every tick, including the empty-queue early return. */
+async function runBurstDigests(startedAt: number, forcedDigests: Set<number>): Promise<number> {
+  let digestsSent = 0;
+  if (Date.now() - startedAt > FANOUT_BUDGET_MS) return digestsSent;
+
+  const now = Math.floor(Date.now() / 1000);
+  for (const row of dueBursts(now, forcedDigests)) {
+    const forced = forcedDigests.has(row.inscription_number);
+    const closing = forced || now - row.last_hop_seen_at >= BURST_QUIET_SEC;
+    const hops = burstHops(row);
+    const insc = burstInscription(row.inscription_number);
+
+    // Nothing left to say: the burst went quiet after its last digest, or every
+    // hop in range got upgraded to a sale by a fingerprint tagger. Advance the
+    // cursor even when we're not closing, so the row stops coming back due.
+    if (hops.length === 0 || !insc) {
+      if (closing || !insc) closeBurst(row.inscription_number);
+      else markBurstDigested(row, now);
+      continue;
+    }
+
+    const digest: BurstDigest = {
+      inscriptionNumber: row.inscription_number,
+      inscriptionId: insc.inscription_id,
+      color: insc.color,
+      hops: hops.length,
+      firstOwner: hops[0].old_owner,
+      lastOwner: hops[hops.length - 1].new_owner,
+      // The span the message reports is CHAIN time, read off the hops this
+      // digest actually covers — never the row's wallclock scheduling fields.
+      startedAt: hops[0].block_timestamp,
+      endedAt: hops[hops.length - 1].block_timestamp,
+    };
+
+    const matches = findMatchesForEvent({
+      inscriptionNumber: row.inscription_number,
+      color: insc.color,
+      collectionSlug: insc.collection_slug,
+      eventBit: MASK_TRANSFERRED,
+    });
+
+    // One bucket per recipient — a target watching both the inscription and the
+    // collection still gets exactly one digest.
+    const digestBuckets = new Map<string, Bucket>();
+    for (const sub of matches) {
+      const key = `${sub.channel}:${sub.channel_target}`;
+      if (digestBuckets.has(key)) continue;
+      digestBuckets.set(key, {
+        channel: sub.channel,
+        channelTarget: sub.channel_target,
+        targetHash: targetDeliveryHash(sub.channel, sub.channel_target),
+        representative: sub,
+        events: [],
+        eventIds: new Set(),
+        eventRenderKeys: new Set(),
+        digest,
+      });
+    }
+
+    // No recipients at all (everyone unsubscribed mid-burst) counts as done.
+    let allOk = true;
+    if (digestBuckets.size > 0) {
+      const addrs = [digest.firstOwner, digest.lastOwner].filter((a): a is string => a != null);
+      const overlay = addrs.length > 0 ? matricaProfilesForAddrs(addrs) : ({} as MatricaOverlay);
+      const list = Array.from(digestBuckets.values());
+      const results = await Promise.allSettled(list.map(b => dispatch(b, overlay)));
+      allOk = results.every(r => r.status === 'fulfilled' && r.value.ok);
+      if (results.some(r => r.status === 'fulfilled' && r.value.ok)) digestsSent++;
+    }
+
+    if (allOk) {
+      if (closing) closeBurst(row.inscription_number);
+      else markBurstDigested(row, now);
+      log.info('notify/burst', 'digest sent', {
+        inscription_number: row.inscription_number,
+        hops: digest.hops,
+        recipients: digestBuckets.size,
+        reason: forced ? 'sale' : closing ? 'quiet' : 'interim',
+      });
+    } else if (recordBurstDigestFailure(row)) {
+      // Retry budget spent — close rather than re-send to healthy targets
+      // forever because one target is wedged.
+      closeBurst(row.inscription_number);
+      log.warn('notify/burst', 'digest abandoned after max attempts', {
+        inscription_number: row.inscription_number,
+        hops: digest.hops,
+      });
+    }
+  }
+  return digestsSent;
+}
+
 export async function runNotifyFanout(): Promise<FanoutResult> {
   const startedAt = Date.now();
 
@@ -440,6 +684,10 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
   deleteQueuedEventIds(staleListedIds);
 
   if (events.length === 0) {
+    // Still run digests: a burst goes quiet precisely because its hops stopped
+    // arriving, so the tick that owes the closing digest is one with an empty
+    // queue. Returning early here would strand every burst forever.
+    const idleDigests = await runBurstDigests(startedAt, new Set());
     finishNotifyPoll(graceDeferred > 0 ? 'deferred' : 'ok', 0, null);
     cleanupExpiredPending();
     return {
@@ -450,6 +698,8 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
       failed: 0,
       events_dequeued: staleListedIds.length,
       events_deferred: graceDeferred,
+      bursts_suppressed: 0,
+      digests_sent: idleDigests,
       dur_ms: Date.now() - startedAt,
     };
   }
@@ -461,6 +711,8 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
   const buckets = new Map<string, Bucket>();
   const eventToWantingBuckets = new Map<number, Set<string>>();
   const deliveredBefore = loadDeliveredRecords(events.map(ev => ev.id));
+  const forcedDigests = new Set<number>();
+  let burstsSuppressed = 0;
 
   for (const ev of events) {
     const bit = eventBit(ev.event_type);
@@ -477,6 +729,23 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
       eventToWantingBuckets.set(ev.id, new Set());
       continue;
     }
+    // Peel-chain suppression. Runs after the match check so we never open a
+    // burst for an inscription nobody is watching. An empty wanting set routes
+    // the hop through the same dequeue path as an unwanted event — the burst
+    // row is committed synchronously before deleteQueuedEventIds below, so a
+    // crash in between re-suppresses on the next tick rather than double-sending.
+    if (ev.event_type === 'transferred' && recordBurstHop(ev)) {
+      burstsSuppressed++;
+      eventToWantingBuckets.set(ev.id, new Set());
+      log.info('notify/burst', 'hop suppressed', {
+        inscription_number: ev.inscription_number,
+        event_id: ev.id,
+      });
+      continue;
+    }
+    // A sale mid-burst flushes the accumulated hops this tick, so subscribers
+    // read "SOLD" and then its backstory rather than getting them hours apart.
+    if (ev.event_type === 'sold') forcedDigests.add(ev.inscription_number);
     const wanting = new Set<string>();
     for (const sub of matches) {
       const targetHash = targetDeliveryHash(sub.channel, sub.channel_target);
@@ -527,53 +796,6 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
   const matrica =
     ownerAddrs.size > 0 ? matricaProfilesForAddrs(Array.from(ownerAddrs)) : ({} as MatricaOverlay);
 
-  // Dispatch returns the set of event ids actually delivered to this bucket.
-  // (Currently every bucket sends exactly one message containing all its
-  //  capped events, so on success the whole bucket is delivered; on failure,
-  //  none of it is. Returning a Set keeps the per-event reconciliation
-  //  algorithm below straightforward if we ever chunk per-bucket later.)
-  const dispatch = async (bucket: Bucket): Promise<Set<number>> => {
-    const allIds = new Set(bucket.eventIds);
-    if (bucket.channel === 'telegram') {
-      const args = buildTelegramMessage(bucket.events, bucket.representative, matrica);
-      const r = await sendMessage(args);
-      if (r.ok) {
-        recordDeliverySuccess(bucket.channel, bucket.channelTarget);
-        return allIds;
-      }
-      const dead = r.error.kind === 'blocked';
-      const retryable =
-        r.error.kind === 'config' || r.error.kind === 'rate-limit' || r.error.kind === 'network';
-      if (!retryable) {
-        recordDeliveryFailure(bucket.channel, bucket.channelTarget, dead);
-      }
-      log.warn('notify/telegram', 'send failed', {
-        target: hashTarget(bucket.channelTarget),
-        error: r.error,
-      });
-      return new Set();
-    }
-    const embeds = buildDiscordEmbeds(bucket.events, bucket.representative, matrica);
-    const r = await postWebhook(bucket.channelTarget, { embeds });
-    if (r.ok) {
-      recordDeliverySuccess(bucket.channel, bucket.channelTarget);
-      return allIds;
-    }
-    const dead = r.error.kind === 'dead' || r.error.kind === 'invalid-url';
-    const retryable =
-      r.error.kind === 'rate-limit' ||
-      r.error.kind === 'network' ||
-      (r.error.kind === 'http' && r.error.status >= 500);
-    if (!retryable) {
-      recordDeliveryFailure(bucket.channel, bucket.channelTarget, dead);
-    }
-    log.warn('notify/discord', 'post failed', {
-      target: hashTarget(bucket.channelTarget),
-      error: r.error,
-    });
-    return new Set();
-  };
-
   const items = Array.from(buckets.values());
   let delivered = 0;
   let failed = 0;
@@ -598,13 +820,13 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
       break;
     }
     const batch = items.slice(i, i + FANOUT_CONCURRENCY);
-    const results = await Promise.allSettled(batch.map(dispatch));
+    const results = await Promise.allSettled(batch.map(b => dispatch(b, matrica)));
     for (let k = 0; k < batch.length; k++) {
       const r = results[k];
       const key = `${batch[k].channel}:${batch[k].channelTarget}`;
-      if (r.status === 'fulfilled' && r.value.size > 0) {
-        recordDeliveredRecords(batch[k], r.value);
-        bucketDelivered.set(key, r.value);
+      if (r.status === 'fulfilled' && r.value.ok) {
+        recordDeliveredRecords(batch[k], r.value.ids);
+        bucketDelivered.set(key, r.value.ids);
         delivered++;
       } else {
         bucketDelivered.set(key, new Set());
@@ -645,6 +867,10 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
 
   deleteQueuedEventIds(toDequeue);
 
+  // Transfer-burst digests. Runs after the main fan-out so a sale that landed
+  // this tick goes out before the burst backstory that follows it.
+  const digestsSent = allAttempted ? await runBurstDigests(startedAt, forcedDigests) : 0;
+
   const lastStatus = !allAttempted ? 'deferred' : failed > 0 ? 'partial' : 'ok';
   // Track the highest dequeued event id in last_cursor for diagnostics only;
   // the queue table is the source of truth for "what's pending".
@@ -663,6 +889,8 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
     failed,
     dequeued: staleListedIds.length + toDequeue.length,
     deferred,
+    bursts_suppressed: burstsSuppressed,
+    digests_sent: digestsSent,
     attempted_all: allAttempted,
     dur_ms: Date.now() - startedAt,
   });
@@ -675,6 +903,8 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
     failed,
     events_dequeued: staleListedIds.length + toDequeue.length,
     events_deferred: graceDeferred + deferred,
+    bursts_suppressed: burstsSuppressed,
+    digests_sent: digestsSent,
     dur_ms: Date.now() - startedAt,
   };
 }
