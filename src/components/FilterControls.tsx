@@ -4,15 +4,12 @@ import React, { memo, useCallback } from 'react';
 import Link from 'next/link';
 import { ColorFilter } from '@/lib/types';
 import { appendColorParam } from '@/lib/colorFilter';
+import { NAV_ITEMS } from '@/lib/nav';
 import ColorSwatches from './ColorSwatches';
 import HelpButton from './HelpButton';
 import MobileMenu from './MobileMenu';
 import NotificationButton, { BellIcon } from './NotificationButton/NotificationButton';
 import { Tooltip } from './ui/Tooltip';
-
-const MARKETPLACE_NAV_ENABLED =
-  process.env.NEXT_PUBLIC_MARKETPLACE_ENABLED === 'true' ||
-  process.env.NEXT_PUBLIC_MARKETPLACE_MOCK === 'true';
 
 interface FilterControlsProps {
   colorFilter: ColorFilter;
@@ -162,40 +159,37 @@ const FilterControls = memo(function FilterControls({
       <div className="flex items-center gap-3 sm:gap-6 px-3 sm:px-6 h-11 md:h-full">
         <MobileMenu active="gallery" />
 
-        {/* Nav — desktop only */}
-        <nav className="hidden md:flex items-center gap-3 sm:gap-5 shrink-0">
-          <span className="text-bone">
-            <span className="border border-bone px-1.5 py-0.5">gallery</span>
-          </span>
-          <Link
-            href={appendColorParam('/activity', colorFilter)}
-            className="text-bone-dim hover:text-bone transition-colors"
-          >
-            <span className="border border-transparent px-1.5 py-0.5">activity</span>
-          </Link>
-          <Link
-            href={appendColorParam('/explorer', colorFilter)}
-            className="text-bone-dim hover:text-bone transition-colors"
-          >
-            <span className="border border-transparent px-1.5 py-0.5">explorer</span>
-          </Link>
-          {MARKETPLACE_NAV_ENABLED && (
-            <Link
-              href={appendColorParam('/marketplace', colorFilter)}
-              className="text-bone-dim hover:text-bone transition-colors"
-            >
-              <span className="border border-transparent px-1.5 py-0.5">marketplace</span>
-            </Link>
+        {/* Nav — desktop only. This is the gallery route (`/`), so `gallery` is
+            the active item and renders as a non-link boxed span. */}
+        <nav className="hidden lg:flex items-center gap-3 sm:gap-5 shrink-0">
+          {NAV_ITEMS.map(item =>
+            item.key === 'gallery' ? (
+              <span key={item.key} className="text-bone">
+                <span className="border border-bone px-1.5 py-0.5">{item.label}</span>
+              </span>
+            ) : (
+              <Link
+                key={item.key}
+                href={appendColorParam(item.href, colorFilter)}
+                className="text-bone-dim hover:text-bone transition-colors"
+              >
+                <span className="border border-transparent px-1.5 py-0.5">{item.label}</span>
+              </Link>
+            )
           )}
         </nav>
 
         {filtersBlock}
 
-        {/* Desktop search + zoom + help */}
+        {/* Desktop search + zoom + help. Search/zoom stay inline from md up; the
+            nav collapses to the hamburger below lg, which also carries the help
+            item, so the header help button only shows at lg+ to avoid duplication. */}
         <div className="hidden md:flex items-center gap-4 sm:gap-6 flex-1 min-w-0">
           <div className="flex-1 min-w-0">{searchInput}</div>
           {zoomCluster}
-          <HelpButton />
+          <div className="hidden lg:block">
+            <HelpButton />
+          </div>
         </div>
       </div>
 

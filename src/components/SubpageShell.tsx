@@ -6,9 +6,10 @@ import FirehoseSubscribe from './FirehoseSubscribe';
 import SearchBar from './Search/SearchBar';
 import type { ColorFilter } from '@/lib/types';
 import { appendColorParam } from '@/lib/colorFilter';
+import { NAV_ITEMS, type NavKey } from '@/lib/nav';
 
 type Props = {
-  active?: 'activity' | 'explorer' | 'marketplace';
+  active?: NavKey;
   /** Pass through so cross-page nav links preserve the user's filter. */
   color?: ColorFilter;
   /** Optional content rendered in the header between nav and the help button.
@@ -16,20 +17,6 @@ type Props = {
   headerControls?: ReactNode;
   children: ReactNode;
 };
-
-const NAV: {
-  key: 'gallery' | 'activity' | 'explorer' | 'marketplace';
-  label: string;
-  href: string;
-}[] = [
-  { key: 'gallery', label: 'gallery', href: '/' },
-  { key: 'activity', label: 'activity', href: '/activity' },
-  { key: 'explorer', label: 'explorer', href: '/explorer' },
-  ...(process.env.NEXT_PUBLIC_MARKETPLACE_ENABLED === 'true' ||
-  process.env.NEXT_PUBLIC_MARKETPLACE_MOCK === 'true'
-    ? ([{ key: 'marketplace', label: 'marketplace', href: '/marketplace' }] as const)
-    : []),
-];
 
 export default function SubpageShell({ active, color = 'all', headerControls, children }: Props) {
   // The scroll container is sized to the viewport so it (not body) scrolls.
@@ -44,8 +31,8 @@ export default function SubpageShell({ active, color = 'all', headerControls, ch
       <header className="sticky top-0 z-50 bg-ink-1/95 backdrop-blur border-b border-ink-2">
         <div className="flex h-12 items-center gap-3 sm:gap-6 px-3 sm:px-6 font-mono text-xs tracking-[0.08em] uppercase">
           <MobileMenu active={active} />
-          <nav className="hidden md:flex items-center gap-3 sm:gap-5">
-            {NAV.map(item => {
+          <nav className="hidden lg:flex items-center gap-3 sm:gap-5">
+            {NAV_ITEMS.map(item => {
               const isActive = item.key === active;
               return (
                 <Link
@@ -67,7 +54,7 @@ export default function SubpageShell({ active, color = 'all', headerControls, ch
           <SearchBar />
           <div className="ml-auto flex shrink-0 items-center gap-3">
             {headerControls}
-            <div className="hidden md:block">
+            <div className="hidden lg:block">
               <HelpButton />
             </div>
           </div>

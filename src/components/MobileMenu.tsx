@@ -6,19 +6,7 @@ import { createPortal } from 'react-dom';
 import { HelpDialog } from './HelpButton';
 import { useColorFilter } from '@/lib/useColorFilter';
 import { appendColorParam } from '@/lib/colorFilter';
-
-type NavKey = 'gallery' | 'activity' | 'explorer' | 'marketplace';
-type NavItem = { key: NavKey; label: string; href: string };
-
-const NAV: NavItem[] = [
-  { key: 'gallery', label: 'gallery', href: '/' },
-  { key: 'activity', label: 'activity', href: '/activity' },
-  { key: 'explorer', label: 'explorer', href: '/explorer' },
-  ...(process.env.NEXT_PUBLIC_MARKETPLACE_ENABLED === 'true' ||
-  process.env.NEXT_PUBLIC_MARKETPLACE_MOCK === 'true'
-    ? ([{ key: 'marketplace', label: 'marketplace', href: '/marketplace' }] as const)
-    : []),
-];
+import { NAV_ITEMS, type NavKey } from '@/lib/nav';
 
 export default function MobileMenu({ active }: { active?: NavKey } = {}) {
   const [open, setOpen] = useState(false);
@@ -47,7 +35,7 @@ export default function MobileMenu({ active }: { active?: NavKey } = {}) {
   const close = () => setOpen(false);
 
   const sheet = open ? (
-    <div className="fixed inset-0 z-[1400] md:hidden" onClick={close} role="presentation">
+    <div className="fixed inset-0 z-[1400] lg:hidden" onClick={close} role="presentation">
       <div className="absolute inset-0 bg-ink-0/70 backdrop-blur-sm" />
       <div
         role="menu"
@@ -55,7 +43,7 @@ export default function MobileMenu({ active }: { active?: NavKey } = {}) {
         className="absolute top-0 left-0 right-0 bg-ink-1 border-b border-ink-2 pt-12 pb-2 font-mono text-xs tracking-[0.12em] uppercase"
         onClick={e => e.stopPropagation()}
       >
-        {NAV.map(item => {
+        {NAV_ITEMS.map(item => {
           const isActive = item.key === active;
           return (
             <Link
@@ -98,7 +86,7 @@ export default function MobileMenu({ active }: { active?: NavKey } = {}) {
         ref={triggerRef}
         type="button"
         onClick={() => setOpen(v => !v)}
-        className="md:hidden h-10 w-10 flex items-center justify-center text-bone-dim hover:text-bone transition-colors shrink-0"
+        className="lg:hidden h-10 w-10 flex items-center justify-center text-bone-dim hover:text-bone transition-colors shrink-0"
         aria-label={open ? 'Close menu' : 'Open menu'}
         aria-expanded={open}
         aria-haspopup="menu"
