@@ -55,8 +55,13 @@ export type SearchResults = {
   redirect?: string;
 };
 
-/** Resolve an event row to a link target. OMB events go to the in-app
- * detail page; non-OMB events fall through to ordinals.com (which handles
+/** Collections with an in-app /inscription/[n] detail page. */
+export function isLocalCollection(slug: string | null): boolean {
+  return slug === 'omb' || slug === 'bravocados';
+}
+
+/** Resolve an event row to a link target. Local-collection events go to the
+ * in-app detail page; others fall through to ordinals.com (which handles
  * any collection). Returns `external: true` for callers that need to pick
  * between `<Link>` and `<a target="_blank">`. */
 export function eventLink(e: {
@@ -64,7 +69,7 @@ export function eventLink(e: {
   inscription_number: number;
   inscription_id: string | null;
 }): { href: string; external: boolean } {
-  if (e.collection_slug === 'omb') {
+  if (isLocalCollection(e.collection_slug)) {
     return { href: `/inscription/${e.inscription_number}`, external: false };
   }
   if (e.inscription_id) {

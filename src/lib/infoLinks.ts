@@ -1,7 +1,12 @@
 // Content for the /info resources hub. Kept as plain data so the page stays a
 // thin renderer and links are trivial to edit.
 
-export type InfoLink = { label: string; href: string };
+export type InfoLink = {
+  label: string;
+  href: string;
+  /** True for same-site links rendered via <Link> without the ↗ marker. */
+  internal?: boolean;
+};
 export type InfoSection = { id: string; title: string; blurb: string; links: InfoLink[] };
 
 export const INFO_SECTIONS: InfoSection[] = [
@@ -14,6 +19,13 @@ export const INFO_SECTIONS: InfoSection[] = [
       { label: 'X / @OrdinalMaxiBiz', href: 'https://x.com/OrdinalMaxiBiz' },
       { label: 'Discord', href: 'https://discord.gg/ordinalmaxibiz' },
     ],
+  },
+  {
+    id: 'bravocados',
+    title: 'Bitcoin Bravocados',
+    blurb:
+      'The 1,002-piece OMB companion collection — on-chain avocados inscribed as children of one parent. The first 100 sit in a dispensary wallet and are handed out one at a time to Parasite pool miners who land a big share.',
+    links: [{ label: 'Browse the collection', href: '/bravocados', internal: true }],
   },
   {
     id: 'parasite',

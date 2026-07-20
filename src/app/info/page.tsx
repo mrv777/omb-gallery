@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import SubpageShell from '@/components/SubpageShell';
 import { INFO_SECTIONS } from '@/lib/infoLinks';
 
@@ -27,17 +28,29 @@ export default function InfoPage() {
               <ul className="space-y-1">
                 {section.links.map(link => (
                   <li key={link.href + link.label} className="text-[11px]">
-                    <a
-                      href={link.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-block py-0.5 text-bone underline-offset-4 transition hover:underline"
-                    >
-                      {link.label}{' '}
-                      <span aria-hidden="true" className="text-bone-dim">
-                        ↗
-                      </span>
-                    </a>
+                    {link.internal ? (
+                      <Link
+                        href={link.href}
+                        className="inline-block py-0.5 text-bone underline-offset-4 transition hover:underline"
+                      >
+                        {link.label}{' '}
+                        <span aria-hidden="true" className="text-bone-dim">
+                          →
+                        </span>
+                      </Link>
+                    ) : (
+                      <a
+                        href={link.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-block py-0.5 text-bone underline-offset-4 transition hover:underline"
+                      >
+                        {link.label}{' '}
+                        <span aria-hidden="true" className="text-bone-dim">
+                          ↗
+                        </span>
+                      </a>
+                    )}
                   </li>
                 ))}
               </ul>

@@ -6,7 +6,7 @@ import ombInscriptions from '../data/collections/omb/inscriptions.json';
 import ombManifest from '../data/collections/omb/manifest.json';
 import bravocadosInscriptions from '../data/collections/bravocados/inscriptions.json';
 import bravocadosManifest from '../data/collections/bravocados/manifest.json';
-import { SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
+import { SQL_BRAVOCADO_DISTRIBUTION_LIST, SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
 const SCHEMA_VERSION = 40;
@@ -2133,6 +2133,8 @@ type Stmts = {
   countEvents: ReturnType<DB['prepare']>;
   countHolders: ReturnType<DB['prepare']>;
   getInscription: ReturnType<DB['prepare']>;
+  listBravocados: ReturnType<DB['prepare']>;
+  countBravocadoOmbOverlap: ReturnType<DB['prepare']>;
   getInscriptionEvents: ReturnType<DB['prepare']>;
   getAllInscriptionEvents: ReturnType<DB['prepare']>;
   otherInscriptionsByOwner: ReturnType<DB['prepare']>;
@@ -2601,6 +2603,29 @@ export function getStmts(): Stmts {
     getInscription: db.prepare(`
       SELECT * FROM inscriptions
       WHERE inscription_number = @inscription_number AND collection_slug = @collection
+    `),
+
+    // /bravocados: the whole collection is 1,002 rows, so the grid and every
+    // distribution stat are derived in TS from this one list.
+    listBravocados: db.prepare(`
+      SELECT inscription_number, inscription_id, effective_owner
+      FROM inscriptions
+      WHERE collection_slug = 'bravocados'
+      ORDER BY inscription_number ASC
+    `),
+
+    // Distinct bravocado holders (outside the distribution wallets) who also
+    // hold at least one OMB. Wallet-level, not identity-level.
+    countBravocadoOmbOverlap: db.prepare(`
+      SELECT COUNT(DISTINCT b.effective_owner) AS n
+      FROM inscriptions b
+      WHERE b.collection_slug = 'bravocados'
+        AND b.effective_owner IS NOT NULL
+        AND b.effective_owner NOT IN (${SQL_BRAVOCADO_DISTRIBUTION_LIST})
+        AND EXISTS (
+          SELECT 1 FROM inscriptions o
+          WHERE o.collection_slug = 'omb' AND o.effective_owner = b.effective_owner
+        )
     `),
 
     // Both inscription-detail timelines exclude 'listed' events for the
@@ -3623,6 +3648,7 @@ export type EventRow = {
 export type InscriptionRow = {
   inscription_number: number;
   inscription_id: string | null;
+  collection_slug: string;
   color: string | null;
   current_owner: string | null;
   current_output: string | null;

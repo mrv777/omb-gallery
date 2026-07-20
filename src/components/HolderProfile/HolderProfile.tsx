@@ -318,7 +318,9 @@ export default function HolderProfile({
         <div className="mb-12">
           <div className="flex items-baseline justify-between mb-3">
             <h2 className="font-mono text-[11px] tracking-[0.12em] uppercase text-bone-dim">
-              also holds bravocados{' '}
+              <Link href="/bravocados" className="hover:text-bone">
+                also holds bravocados
+              </Link>{' '}
               <span className="text-bone-dim tabular-nums">· {bravoHoldings.length}</span>
             </h2>
             {bravoHidden > 0 && (

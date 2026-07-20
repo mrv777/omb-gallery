@@ -70,12 +70,12 @@ export function InscriptionRow({
 }) {
   const hit = lookupInscription(row.inscription_number);
   const isExternal = hit?.external ?? false;
-  // Non-OMB rows can surface here (e.g. bravocados leaderboards). They don't
-  // have a /inscription/[n] page yet — link out to ordinals.com instead.
+  // Rows from a collection without a local detail page link out to ordinals.com.
   const link =
     isExternal && hit?.inscriptionId
       ? `https://ordinals.com/inscription/${hit.inscriptionId}`
       : `/inscription/${row.inscription_number}`;
+  const pixelated = hit?.kind === 'bravocados' ? ' [image-rendering:pixelated]' : '';
   const metric = renderInscriptionMetric(row, type);
   const metricTooltip = renderInscriptionMetricTooltip(row, type);
   // Currently-loaned: dim the metric when we're past the estimated expiry.
@@ -110,7 +110,7 @@ export function InscriptionRow({
               src={hit.thumbnail}
               alt={`Inscription ${row.inscription_number}`}
               loading="lazy"
-              className="w-full h-full object-cover"
+              className={`w-full h-full object-cover${pixelated}`}
             />
           ))}
       </span>
@@ -211,10 +211,7 @@ function looksLikeAddress(s: string): boolean {
   return /^bc1[a-z0-9]{30,}$/i.test(s) || /^0x[a-f0-9]{40}$/i.test(s) || s.length > 30;
 }
 
-function renderInscriptionMetricTooltip(
-  row: ApiInscription,
-  type: LeaderboardKey
-): string | null {
+function renderInscriptionMetricTooltip(row: ApiInscription, type: LeaderboardKey): string | null {
   if (type !== 'currently-loaned') return null;
   if (row.estimated_expiration_ts == null) return null;
   const expLine = row.is_overdue
@@ -233,7 +230,13 @@ function renderInscriptionMetricTooltip(
     row.estimated_term_min_days !== row.estimated_term_max_days
       ? `Vault range observed: ${row.estimated_term_min_days}–${row.estimated_term_max_days}d`
       : null;
-  return [expLine, termLine, basisLine, rangeLine, 'Estimate only — actual term not visible on chain.']
+  return [
+    expLine,
+    termLine,
+    basisLine,
+    rangeLine,
+    'Estimate only — actual term not visible on chain.',
+  ]
     .filter(Boolean)
     .join('\n');
 }

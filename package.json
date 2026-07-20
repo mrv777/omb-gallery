@@ -14,6 +14,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "optimize-images": "node scripts/optimize-images.js",
+    "fetch-bravocado-images": "node scripts/fetch-bravocado-images.mjs",
     "backfill-liquidium-originations": "node scripts/backfill-liquidium-originations.js",
     "backfill-liquidium-modern-resolutions": "node scripts/backfill-liquidium-modern-resolutions.js",
     "backfill-magisat-fingerprint": "node scripts/backfill-magisat-fingerprint.js",

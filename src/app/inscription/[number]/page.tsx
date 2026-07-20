@@ -19,10 +19,13 @@ export async function generateMetadata({ params }: { params: Promise<Params> }):
   const num = parseInt(number, 10);
   if (!Number.isFinite(num)) return { title: 'Inscription' };
   const hit = lookupInscription(num);
-  const description = hit?.description
-    ? `OMB #${num} — ${hit.description}`
-    : `On-chain history for OMB inscription #${num}.`;
-  const title = `OMB #${num}`;
+  const isBravocado = hit?.kind === 'bravocados';
+  const description = isBravocado
+    ? `On-chain history for Bravocado inscription #${num}.`
+    : hit?.description
+      ? `OMB #${num} — ${hit.description}`
+      : `On-chain history for OMB inscription #${num}.`;
+  const title = isBravocado ? `Bravocado #${num}` : `OMB #${num}`;
   return {
     title: `#${num}`,
     description,
@@ -40,13 +43,11 @@ export default async function InscriptionPage({ params }: { params: Promise<Para
   if (!Number.isFinite(num) || num < 0) notFound();
 
   const stmts = getStmts();
-  // This route is OMB-specific (it pulls thumbnail metadata from
-  // inscriptionLookup, which is OMB-only). Phase 5 will add a collection-
-  // parameterized variant for Bravocados et al.
-  const inscription = stmts.getInscription.get({
-    inscription_number: num,
-    collection: 'omb',
-  }) as InscriptionRow | undefined;
+  // Inscription numbers are globally unique, so try each local collection in
+  // turn (keeps the collection-scoped statement so scoped-read invariants hold).
+  const inscription = (['omb', 'bravocados']
+    .map(collection => stmts.getInscription.get({ inscription_number: num, collection }))
+    .find(Boolean) ?? undefined) as InscriptionRow | undefined;
   if (!inscription) notFound();
 
   const events = stmts.getAllInscriptionEvents.all(num) as EventRow[];
@@ -65,7 +66,7 @@ export default async function InscriptionPage({ params }: { params: Promise<Para
         owner: ownerKey,
         exclude: num,
         limit: OWNER_OTHERS_DISPLAY + 1,
-        collection: 'omb',
+        collection: inscription.collection_slug,
       }) as { inscription_number: number }[])
     : [];
   const ownerOthers = rawOwnerOthers.slice(0, OWNER_OTHERS_DISPLAY).map(r => r.inscription_number);

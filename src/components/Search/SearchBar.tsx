@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import SearchDropdown, { type FlatRow } from './SearchDropdown';
-import { eventLink, type SearchResults } from '@/lib/searchTypes';
+import { eventLink, isLocalCollection, type SearchResults } from '@/lib/searchTypes';
 import { useNavigationStart } from '@/components/NavigationProgress';
 
 const MIN_CHARS = 2;
@@ -32,15 +32,15 @@ export default function SearchBar() {
     if (!results) return q ? seeAllRow(q) : [];
     const rows: FlatRow[] = [];
     for (const insc of results.inscriptions) {
-      const isOmb = insc.collection_slug === 'omb';
+      const isLocal = isLocalCollection(insc.collection_slug);
       rows.push({
         key: `insc:${insc.collection_slug}:${insc.inscription_number}`,
-        href: isOmb
+        href: isLocal
           ? `/inscription/${insc.inscription_number}`
           : insc.inscription_id
             ? `https://ordinals.com/inscription/${insc.inscription_id}`
             : `/inscription/${insc.inscription_number}`,
-        external: !isOmb,
+        external: !isLocal,
         render: () => null,
       });
     }

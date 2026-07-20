@@ -37,10 +37,15 @@ type Props = { event: ApiEvent };
 const ActivityCard = memo(function ActivityCard({ event }: Props) {
   const hit = lookupInscription(event.inscription_number);
   const isOmb = hit?.kind === 'omb';
+  const isBravocado = hit?.kind === 'bravocados';
   const isExternal = hit?.external ?? false;
-  // OMB hits open the full local image; bravocado / unknown rows open the
-  // ordinals.com inscription page in a new tab.
-  const link = isOmb ? hit.full : ordinalsLink(event.inscription_id, event.inscription_number);
+  // OMB hits open the full local image; bravocados go to their local detail
+  // page; unknown rows open the ordinals.com inscription page in a new tab.
+  const link = isOmb
+    ? hit.full
+    : isBravocado
+      ? `/inscription/${event.inscription_number}`
+      : ordinalsLink(event.inscription_id, event.inscription_number);
   const tileBg = hit && hit.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
 
   const display = EVENT_DISPLAY[event.event_type];

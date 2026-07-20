@@ -58,6 +58,7 @@ export default function InscriptionDetail({
   currentListing,
 }: Props) {
   const hit = lookupInscription(inscription.inscription_number);
+  const isBravocado = hit?.kind === 'bravocados';
   const tileBg = hit?.color ? (COLOR_TILE_BG[hit.color] ?? 'bg-ink-2') : 'bg-ink-2';
   const ordLink = ordinalsLink(inscription.inscription_id, inscription.inscription_number);
   const ordNetLink = ordNetInscriptionLink(inscription.inscription_number);
@@ -89,7 +90,7 @@ export default function InscriptionDetail({
             <img
               src={hit.full}
               alt={`Inscription ${inscription.inscription_number}`}
-              className="w-full h-full object-cover"
+              className={`w-full h-full object-cover${isBravocado ? ' [image-rendering:pixelated]' : ''}`}
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center font-mono text-bone-dim">
@@ -107,6 +108,14 @@ export default function InscriptionDetail({
               <span className="text-[10px] tracking-[0.12em] uppercase text-bone-dim border border-bone-dim/40 px-1.5 py-0.5">
                 {hit.color}
               </span>
+            )}
+            {isBravocado && (
+              <Link
+                href="/bravocados"
+                className="text-[10px] tracking-[0.12em] uppercase text-accent-green border border-accent-green/40 px-1.5 py-0.5 hover:border-accent-green"
+              >
+                bravocado
+              </Link>
             )}
           </div>
 
@@ -200,14 +209,16 @@ export default function InscriptionDetail({
             >
               ordinals.com ↗
             </a>
-            <a
-              href={ordNetLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
-            >
-              ord.net ↗
-            </a>
+            {!isBravocado && (
+              <a
+                href={ordNetLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
+              >
+                ord.net ↗
+              </a>
+            )}
             {satflowLink && (
               <a
                 href={satflowLink}
@@ -238,15 +249,17 @@ export default function InscriptionDetail({
                 memepool ↗
               </a>
             )}
-            <a
-              href="https://swap.art/"
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Set up an OTC swap on swap.art"
-              className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
-            >
-              swap.art ↗
-            </a>
+            {!isBravocado && (
+              <a
+                href="https://swap.art/"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Set up an OTC swap on swap.art"
+                className="border border-ink-2 hover:border-bone-dim px-2 py-1 text-bone-dim hover:text-bone"
+              >
+                swap.art ↗
+              </a>
+            )}
             {hit && (
               <a
                 href={hit.full}
@@ -330,7 +343,7 @@ export default function InscriptionDetail({
                         alt={`#${n}`}
                         loading="lazy"
                         decoding="async"
-                        className="w-full h-full object-cover"
+                        className={`w-full h-full object-cover${otherHit.kind === 'bravocados' ? ' [image-rendering:pixelated]' : ''}`}
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center font-mono text-[9px] text-bone-dim">

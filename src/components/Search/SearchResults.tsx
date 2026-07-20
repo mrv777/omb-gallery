@@ -9,7 +9,11 @@ import {
   truncateAddr,
 } from '@/lib/format';
 import { lookupWalletLabel } from '@/lib/walletLabels';
-import { eventLink, type SearchResults as SearchResultsType } from '@/lib/searchTypes';
+import {
+  eventLink,
+  isLocalCollection,
+  type SearchResults as SearchResultsType,
+} from '@/lib/searchTypes';
 import { EVENT_DISPLAY } from '@/lib/eventDisplay';
 
 type Props = { q: string; results: SearchResultsType };
@@ -42,7 +46,10 @@ export default function SearchResults({ q, results }: Props) {
         <Section title="Inscriptions">
           <ul className="divide-y divide-ink-2 border border-ink-2 bg-ink-1">
             {results.inscriptions.map(insc => (
-              <InscriptionRow key={`${insc.collection_slug}:${insc.inscription_number}`} item={insc} />
+              <InscriptionRow
+                key={`${insc.collection_slug}:${insc.inscription_number}`}
+                item={insc}
+              />
             ))}
           </ul>
         </Section>
@@ -94,9 +101,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function InscriptionRow({ item }: { item: SearchResultsType['inscriptions'][number] }) {
   const hit = lookupInscription(item.inscription_number);
-  const isOmb = item.collection_slug === 'omb';
+  const isLocal = isLocalCollection(item.collection_slug);
   const isExternal = hit?.external ?? false;
-  const href = isOmb
+  const href = isLocal
     ? `/inscription/${item.inscription_number}`
     : isExternal && hit?.inscriptionId
       ? `https://ordinals.com/inscription/${hit.inscriptionId}`
@@ -116,12 +123,7 @@ function InscriptionRow({ item }: { item: SearchResultsType['inscriptions'][numb
             />
           ) : (
             /* eslint-disable-next-line @next/next/no-img-element */
-            <img
-              src={hit.thumbnail}
-              alt=""
-              loading="lazy"
-              className="w-full h-full object-cover"
-            />
+            <img src={hit.thumbnail} alt="" loading="lazy" className="w-full h-full object-cover" />
           ))}
       </span>
       <span className="font-mono text-xs text-bone tabular-nums truncate">
@@ -147,7 +149,7 @@ function InscriptionRow({ item }: { item: SearchResultsType['inscriptions'][numb
   );
   return (
     <li>
-      {isOmb ? (
+      {isLocal ? (
         <Link href={href} prefetch={false} className="block">
           {inner}
         </Link>
@@ -187,7 +189,12 @@ function UserRow({ item }: { item: SearchResultsType['users'][number] }) {
   const inner = (
     <div className="grid grid-cols-[1.5rem_1fr_auto] items-center gap-3 px-4 py-2.5 hover:bg-ink-2 transition-colors">
       <span className="block w-6 h-6 bg-ink-2 overflow-hidden rounded-sm">
-        <SafeImg src={item.avatar_url} alt="" loading="lazy" className="w-full h-full object-cover" />
+        <SafeImg
+          src={item.avatar_url}
+          alt=""
+          loading="lazy"
+          className="w-full h-full object-cover"
+        />
       </span>
       <span className="font-mono text-xs text-bone truncate">
         {showsName ? `@${item.username}` : truncateAddr(target, 8, 6)}
@@ -273,15 +280,13 @@ function EmptyTips({ compact = false }: { compact?: boolean } = {}) {
           an inscription number — e.g. <span className="text-bone">1234</span>
         </li>
         <li>
-          a wallet address — paste the full <span className="text-bone">bc1…</span>, or just the last
-          few characters you remember
+          a wallet address — paste the full <span className="text-bone">bc1…</span>, or just the
+          last few characters you remember
         </li>
         <li>
           a Matrica username — e.g. <span className="text-bone">@alice</span>
         </li>
-        <li>
-          a transaction id — 64-char hex from any explorer
-        </li>
+        <li>a transaction id — 64-char hex from any explorer</li>
       </ul>
     </div>
   );

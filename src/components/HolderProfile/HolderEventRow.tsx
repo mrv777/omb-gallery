@@ -78,8 +78,8 @@ export default function HolderEventRow({ event, wallets }: { event: EventRow; wa
         : '';
   const market = isSold ? marketplaceLabel(event.marketplace) : '';
   const txLink = memepoolTxLink(event.txid);
-  // Non-OMB inscriptions don't have a /inscription/[n] page yet (the route is
-  // OMB-scoped at the DB layer). Link out to ordinals.com for those.
+  // Inscriptions from a collection without a local detail page link out to
+  // ordinals.com (OMB + bravocados both resolve internally).
   const inscriptionLink =
     isExternal && hit?.inscriptionId
       ? `https://ordinals.com/inscription/${hit.inscriptionId}`
@@ -110,7 +110,7 @@ export default function HolderEventRow({ event, wallets }: { event: EventRow; wa
         alt={tooltipLabel}
         loading="lazy"
         decoding="async"
-        className="w-full h-full object-cover"
+        className={`w-full h-full object-cover${hit.kind === 'bravocados' ? ' [image-rendering:pixelated]' : ''}`}
       />
     )
   ) : (
@@ -135,11 +135,7 @@ export default function HolderEventRow({ event, wallets }: { event: EventRow; wa
     <div
       className={`flex items-center gap-x-3 sm:gap-x-4 px-2 sm:px-4 py-2 border-b border-ink-2 ${rowTint}`}
     >
-      <HoverImagePreview
-        src={hit?.thumbnail}
-        alt={tooltipLabel}
-        external={isExternal}
-      >
+      <HoverImagePreview src={hit?.thumbnail} alt={tooltipLabel} external={isExternal}>
         {isExternal ? (
           <a
             href={inscriptionLink}

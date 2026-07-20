@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { lookupInscription } from '@/lib/inscriptionLookup';
-import SafeImg from '@/components/SafeImg';
 import { Tooltip } from '../ui/Tooltip';
 
 const COLOR_TILE_BG: Record<string, string> = {
@@ -58,11 +57,7 @@ export function OmbTile({
           containIntrinsicSize: '96px 96px',
         }}
       >
-        <Link
-          href={`/inscription/${number}`}
-          prefetch={false}
-          className="block w-full h-full"
-        >
+        <Link href={`/inscription/${number}`} prefetch={false} className="block w-full h-full">
           {hit ? (
             /* eslint-disable-next-line @next/next/no-img-element */
             <img
@@ -97,38 +92,30 @@ export function OmbTile({
   );
 }
 
-export function BravocadosTile({
-  number,
-  inscriptionId,
-}: {
-  number: number;
-  inscriptionId: string | null;
-}) {
-  const href = inscriptionId
-    ? `https://ordinals.com/inscription/${inscriptionId}`
-    : `https://ordinals.com/inscription/${number}`;
-  const src = inscriptionId ? `https://ordinals.com/content/${inscriptionId}` : null;
+export function BravocadosTile({ number }: { number: number; inscriptionId?: string | null }) {
+  const hit = lookupInscription(number);
   return (
     <Tooltip content={`Bravocados #${number}`}>
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
+      <Link
+        href={`/inscription/${number}`}
+        prefetch={false}
         className="block w-16 h-16 bg-ink-2 overflow-hidden border border-ink-2 hover:border-bone-dim transition-colors"
       >
-        <SafeImg
-          src={src}
-          alt={`Bravocados #${number}`}
-          loading="lazy"
-          decoding="async"
-          className="w-full h-full object-cover"
-          fallback={
-            <div className="w-full h-full flex items-center justify-center font-mono text-[9px] text-bone-dim">
-              #{number}
-            </div>
-          }
-        />
-      </a>
+        {hit ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={hit.thumbnail}
+            alt={`Bravocados #${number}`}
+            loading="lazy"
+            decoding="async"
+            className="w-full h-full object-cover [image-rendering:pixelated]"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center font-mono text-[9px] text-bone-dim">
+            #{number}
+          </div>
+        )}
+      </Link>
     </Tooltip>
   );
 }

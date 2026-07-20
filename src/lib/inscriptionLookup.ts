@@ -47,17 +47,19 @@ export function getInscriptionLookup(): Map<number, LookupHit> {
     }
   }
 
-  // Bravocados: no local thumbnails — pulled live from ordinals.com via SafeImg.
+  // Bravocados: committed local copies of the on-chain 36×36 PNGs
+  // (public/bravocado-images/, fetched by scripts/fetch-bravocado-images.mjs).
+  // Tiny pixel art — render with image-rendering: pixelated.
   for (const entry of bravocadosData as BravocadosEntry[]) {
     if (!Number.isFinite(entry.inscription_number)) continue;
     map.set(entry.inscription_number, {
       color: null,
-      thumbnail: `https://ordinals.com/content/${entry.inscription_id}`,
-      full: `https://ordinals.com/content/${entry.inscription_id}`,
+      thumbnail: `/bravocado-images/${entry.inscription_number}.png`,
+      full: `/bravocado-images/${entry.inscription_number}.png`,
       description: '',
       kind: 'bravocados',
       inscriptionId: entry.inscription_id,
-      external: true,
+      external: false,
     });
   }
 
