@@ -4,6 +4,10 @@ import { truncateAddr } from '@/lib/format';
 import { Tooltip } from '../ui/Tooltip';
 import type { BravocadoGridItem } from './BravocadosGrid';
 
+// #64631714 was never loaded into the dispensary (it sits in the reserve
+// wallet), so only 99 of the first 100 are actually dispensable.
+const DISPENSABLE = 99;
+
 export default function DispensarySection({ items }: { items: BravocadoGridItem[] }) {
   const dispensed = items.filter(i => i.dispensed).length;
   return (
@@ -11,7 +15,7 @@ export default function DispensarySection({ items }: { items: BravocadoGridItem[
       <h2 className="text-lg text-bone uppercase tracking-[0.08em] mb-2">
         dispensary{' '}
         <span className="text-bone-dim text-[11px] tracking-[0.08em]">
-          {dispensed} of {items.length} dispensed
+          {dispensed} of {DISPENSABLE} dispensed
         </span>
       </h2>
       <p className="mb-4 text-[11px] leading-relaxed text-bone-dim uppercase tracking-[0.08em]">
