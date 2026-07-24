@@ -117,11 +117,18 @@ export default function SatProvenancePanel({
             {oldest && (
               <>
                 {' '}
-                Exactly {vintages[oldest.vintage ?? ''] ?? 0} sits on a {oldest.vintage} sat.
+                The oldest of them is #{oldest.number}, on a block {oldest.height.toLocaleString()}{' '}
+                sat. Note these are all <em className="not-italic text-bone">younger</em> than the
+                block 9 and block 78 sats above — the reds are distinguished by having their own
+                satoshi each, not by age.
               </>
             )}
           </p>
+          {/* Year counts below are scoped to these pieces only. Read collection-wide
+              they would be badly wrong: blocks 9 and 78 were mined in January 2009,
+              so nearly every OMB is on a 2009 sat. */}
           <p className="font-mono mb-4 text-[10px] uppercase tracking-[0.08em] text-bone-dim">
+            <span className="mr-3">by sat year, {variedColors.join('/')} only:</span>
             {vintageYears.map(y => (
               <span key={y} className="mr-3 inline-block">
                 {y} <span className="text-bone">{vintages[y]}</span>

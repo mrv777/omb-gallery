@@ -54,9 +54,10 @@ function SeriesCard({ series }: { series: Series }) {
         })}
       </div>
 
-      <p className="font-mono mt-3 max-w-2xl text-[10px] leading-relaxed text-bone-dim">
-        {series.provenance}
-      </p>
+      {/* series.provenance is deliberately NOT rendered — how a list was seeded
+          is maintainer methodology, and on a public card it buried the art
+          under a paragraph of process. The status pill above ("27 / 50
+          catalogued · incomplete") carries the honesty the reader needs. */}
 
       <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1">
         <Link

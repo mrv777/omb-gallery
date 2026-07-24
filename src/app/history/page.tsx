@@ -19,7 +19,6 @@ import DropTimeline, { type DropBand } from '@/components/Charts/DropTimeline';
 
 import { getStmts } from '@/lib/db';
 import { EXTRA_SOURCES, OFFCHAIN_TIMELINE, OPEN_QUESTIONS, collectSources } from '@/lib/history';
-import { SERIES } from '@/lib/series';
 import {
   NOTABLE_BLOCKS,
   VARIED_COLORS,
@@ -249,32 +248,52 @@ export default function HistoryPage() {
     });
   }
 
-  // Derived because the chase board below quotes it: how many of the
-  // artist-numbered pieces are still unidentified.
-  const stillMissing = SERIES.filter(x => x.declaredSize != null).reduce(
-    (n, x) => n + (x.declaredSize! - Object.keys(x.memberIndex ?? {}).length),
-    0
-  );
-
   // ---- chase board -------------------------------------------------------
   // Every tile derived, so there is no curated "grails" list to argue over.
-  const oldestSat = varied[0];
-  const oldestVintageCount = varied.filter(v => v.vintage === oldestSat?.vintage).length;
+  //
+  // Count vintages across the WHOLE collection, not just the individually-
+  // sourced colors. Scoping this to `varied` produced "1 on a 2009 sat", which
+  // was wrong by three orders of magnitude: blocks 9 and 78 were mined on
+  // 9 and 11 January 2009, so nearly the entire collection is on 2009 sats.
+  // Same trap made #489040 look like "the oldest satoshi in the collection"
+  // when block 30,917 is ~11 months YOUNGER than the block-9 sats.
+  const vintageCounts = new Map<string, number>();
+  for (const b of buckets) {
+    const y = b.minedAt != null ? String(new Date(b.minedAt * 1000).getUTCFullYear()) : null;
+    if (y) vintageCounts.set(y, (vintageCounts.get(y) ?? 0) + b.count);
+  }
+  for (const v of varied) {
+    if (v.vintage) vintageCounts.set(v.vintage, (vintageCounts.get(v.vintage) ?? 0) + 1);
+  }
+  const earliestVintage = Array.from(vintageCounts.keys()).sort()[0];
+  const earliestVintageCount = earliestVintage ? (vintageCounts.get(earliestVintage) ?? 0) : 0;
   const blueCount = dropByColor.get('blue')?.count ?? 0;
   const chaseTiles: ChaseTile[] = [];
-  if (oldestSat) {
+  chaseTiles.push({
+    id: 'supply',
+    headline: total.toLocaleString(),
+    label: `pieces across ${orderedColors.length} drops, 2023–2025`,
+    href: '#drops',
+  });
+  if (earliestVintage) {
     chaseTiles.push({
-      id: 'oldest-sat',
-      headline: `${oldestVintageCount} on a ${oldestSat.vintage} sat`,
-      label: `#${oldestSat.number} · block ${oldestSat.height.toLocaleString()} · the oldest satoshi in the collection`,
-      href: `/inscription/${oldestSat.number}`,
+      id: 'vintage-2009',
+      headline: `${earliestVintageCount.toLocaleString()} on ${earliestVintage} sats`,
+      label: `blocks 9 and 78, mined in bitcoin's first nine days`,
+      href: '#sats',
     });
   }
+  // The reds' distinction is that each has its OWN sat, not that they're old —
+  // the oldest of them (#489040, block 30,917) is younger than every block-9 sat.
   if (varied.length > 0) {
     chaseTiles.push({
       id: 'own-sat',
       headline: `${varied.length} own their sat`,
-      label: `every ${varied[0].color} eye on an individually-hunted satoshi`,
+      label: `every ${varied[0].color} eye on an individually-hunted satoshi${
+        varied[0].minedAt != null
+          ? ` — oldest #${varied[0].number}, block ${varied[0].height.toLocaleString()}`
+          : ''
+      }`,
       href: '#sats',
     });
   }
@@ -300,14 +319,6 @@ export default function HistoryPage() {
     label: 'never moved since they were inscribed',
     href: '/explorer/longest-unmoved',
   });
-  if (stillMissing > 0) {
-    chaseTiles.push({
-      id: 'uncatalogued',
-      headline: `${stillMissing} still unfound`,
-      label: 'numbered Fuck You sketches nobody has identified yet',
-      href: '#series',
-    });
-  }
 
   const sources = collectSources(OFFCHAIN_TIMELINE, OPEN_QUESTIONS, [
     ...EXTRA_SOURCES,

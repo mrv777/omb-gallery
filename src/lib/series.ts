@@ -26,8 +26,8 @@
 //      claim about a real person.
 //
 // Seeding off (2) is fine; it's how these sets were found. Presenting (2) as
-// (1) is not. Every entry carries a `provenance` string saying which it was,
-// and it renders verbatim on /history. `status: 'partial'` means we know we're
+// (1) is not. Every entry records which it was in `provenance` (an internal
+// note, not rendered), and `status: 'partial'` tells readers we know we're
 // missing some.
 //
 // To extend or finish a set: `pnpm series-scout --seed <term>` to find the
@@ -57,7 +57,11 @@ export type Series = {
   members: readonly number[];
   /** The index the artist wrote on the piece itself, e.g. 83294043 → 25 (of 50). */
   memberIndex?: Readonly<Record<number, number>>;
-  /** How this list was built. Rendered verbatim — this is the honesty knob. */
+  /**
+   * How this list was built — an internal note for whoever extends it.
+   * NOT rendered: on a public card it buried the art under methodology. The
+   * `status` pill communicates incompleteness to readers instead.
+   */
   provenance: string;
   /** How to re-find candidates. Consumed by scripts/series-scout.mjs. */
   seed: SeriesSeed;
