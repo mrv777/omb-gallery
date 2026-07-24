@@ -56,7 +56,7 @@ export const SERIES: readonly Series[] = [
     label: 'Fuck You sketches',
     slug: 'fuck-you-sketch',
     blurb:
-      'A set of fifty the artist numbered himself — every description reads "Fuck you sketch N/50". That makes it the one series in the collection with a known denominator, and the only one where you can prove what is still missing.',
+      'A set of fifty the artist numbered himself, with the index written onto the drawing — "FUCK YOU SKETCH 25/50 2025" and so on, legible in the artwork. That makes it the one series with a known denominator, and the only one where you can prove exactly what is still missing.',
     status: 'partial',
     declaredSize: 50,
     members: [
@@ -94,7 +94,7 @@ export const SERIES: readonly Series[] = [
       83308608: 34,
     },
     provenance:
-      'Seeded 2026-07-24 from artist descriptions matching "fuck you sketch N/50". 27 of the declared 50 identified, all black eyes, clustered in #83294043–#83308608. The other 23 are somewhere in that band and have not been catalogued yet.',
+      'Seeded 2026-07-24 from artist descriptions matching "fuck you sketch N/50". 27 of the declared 50 identified, all black eyes, clustered in #83294043–#83308608. The other 23 are in that band; finding them means reading the images, not the text — at least one piece spells its index out in words ("ELEVEN OF FIFTY") rather than digits, so it never matched the seed.',
     seed: { pattern: 'fuck you sketch', in: ['description'] },
   },
   {
