@@ -124,13 +124,6 @@ export type OpenQuestion = {
  */
 export const OPEN_QUESTIONS: readonly OpenQuestion[] = [
   {
-    id: 'supply-5141',
-    question: 'Why does everyone say OMB is 5,141 pieces?',
-    whatWeKnow:
-      "The arithmetic points one way: 100 blue + 1,900 green + 3,141 orange is exactly 5,141, so the figure looks like those three drops and nothing else — leaving out the 102 reds, which were inscribed first and are still the only OMBs on individually-sourced satoshis, and predating the 3,758 black eyes of January 2025. We can't prove that's the intent, but note the guides can't keep it straight either: Leather gives the total as 5,141 while its own per-colour breakdown (100 red, 200 blue, 1,900 green, 3,000 orange) sums to 5,200 and matches the chain on only one colour. The counts on this page come from the chain: 9,001.",
-    sources: [LEATHER, XVERSE],
-  },
-  {
     id: 'block-9-green-only',
     question: 'Is it only the green eyes that sit on block-9 satoshis?',
     whatWeKnow:

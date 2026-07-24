@@ -1,5 +1,5 @@
-// Named sub-series — the groupings the artist actually drew as sets, and the
-// ones collectors chase.
+// Named sub-series — recurring runs in the collection, and the ones collectors
+// chase.
 //
 // Framework-free (same contract as src/lib/nav.ts): imported by the client
 // gallery AND by server pages, so no 'use client', no server-only, no
@@ -11,17 +11,30 @@
 // ships to every gallery visitor; adding curation there produces unreviewable
 // diffs and grows the payload. ~120 integers here cost nothing.
 //
-// HONESTY: OMB is 1/1 hand-drawn. There is no generative trait metadata to
-// read, here or on any marketplace — these lists are catalogued by hand from
-// the artist's own descriptions and are openly incomplete. Every entry carries
-// a `provenance` string saying exactly how it was built, and it renders
-// verbatim on /history. `status: 'partial'` means we know we're missing some.
+// HONESTY — READ BEFORE WRITING ANY COPY HERE:
+// OMB is 1/1 hand-drawn. There is no generative trait metadata to read, here or
+// on any marketplace. Two different kinds of evidence back these lists and they
+// must never be conflated:
+//
+//   1. THE ARTWORK. Things visible in the piece itself — the "FUCK YOU SKETCH
+//      25/50" written onto the drawing, the shared pirate tricorn. This is the
+//      artist's own doing and can be cited as such.
+//   2. OUR OWN NOTES. The `description` and `tags` fields in
+//      src/data/collections/omb/inscriptions.json were written BY THE WIKI
+//      MAINTAINERS while cataloguing. They are not the artist's metadata and
+//      must never be described as such — "the artist tagged these" is a false
+//      claim about a real person.
+//
+// Seeding off (2) is fine; it's how these sets were found. Presenting (2) as
+// (1) is not. Every entry carries a `provenance` string saying which it was,
+// and it renders verbatim on /history. `status: 'partial'` means we know we're
+// missing some.
 //
 // To extend or finish a set: `pnpm series-scout --seed <term>` to find the
 // band, `--band a-b` for a slideshow link that makes eyeballing it quick, then
 // paste numbers below and re-run `--diff`. See scripts/series-scout.mjs.
 
-export type SeriesId = 'fuck-you-sketch' | 'optimus' | 'pirates' | 'tt-lunch-sketch';
+export type SeriesId = 'fuck-you-sketch' | 'optimus' | 'pirates';
 
 export type SeriesSeed = {
   /** Case-insensitive regex source used to find candidates. */
@@ -38,11 +51,11 @@ export type Series = {
   blurb: string;
   /** 'complete' = we believe the list is exhaustive. 'partial' = still being catalogued. */
   status: 'complete' | 'partial';
-  /** For artist-numbered sets, the size the artist declared. Null when open-ended. */
+  /** For sets the artist numbered ON the artwork, the size declared there. Null when open-ended. */
   declaredSize: number | null;
   /** Sorted ascending inscription numbers. */
   members: readonly number[];
-  /** The artist's own index within the set, e.g. 83294043 → 25 (of 50). */
+  /** The index the artist wrote on the piece itself, e.g. 83294043 → 25 (of 50). */
   memberIndex?: Readonly<Record<number, number>>;
   /** How this list was built. Rendered verbatim — this is the honesty knob. */
   provenance: string;
@@ -94,7 +107,7 @@ export const SERIES: readonly Series[] = [
       83308608: 34,
     },
     provenance:
-      'Seeded 2026-07-24 from artist descriptions matching "fuck you sketch N/50". 27 of the declared 50 identified, all black eyes, clustered in #83294043–#83308608. The other 23 are in that band; finding them means reading the images, not the text — at least one piece spells its index out in words ("ELEVEN OF FIFTY") rather than digits, so it never matched the seed.',
+      'Seeded 2026-07-24 from this wiki\'s own catalogue notes, which record the "N/50" written on each drawing. 27 of the declared 50 identified, all black eyes, clustered in #83294043–#83308608. The other 23 are in that band; finding them means reading the images, not the text — at least one piece spells its index out in words ("ELEVEN OF FIFTY") rather than digits, so it never matched the seed.',
     seed: { pattern: 'fuck you sketch', in: ['description'] },
   },
   {
@@ -102,7 +115,7 @@ export const SERIES: readonly Series[] = [
     label: 'Pirates',
     slug: 'pirates',
     blurb:
-      'Tricorn hats, ships, spyglasses, hooks and one bitcoin earring. Several descriptions say outright "same hat as others in the pirate collection", so the artist was working this as a set rather than a recurring motif.',
+      'Tricorn hats, ships, spyglasses, hooks and one bitcoin earring. The same hat — skull and crossbones over an OMB band — recurs across nearly the whole run, which is what marks this as a set rather than a motif that happened to come round twice.',
     status: 'partial',
     declaredSize: null,
     members: [
@@ -112,7 +125,7 @@ export const SERIES: readonly Series[] = [
       83314539,
     ],
     provenance:
-      'Seeded 2026-07-24 from artist descriptions containing "pirate". 27 black eyes clustered in #83296231–#83314539 plus one earlier orange (#60569771). Open-ended — pieces whose description is blank or does not use the word have not been reviewed.',
+      'Seeded 2026-07-24 from this wiki\'s own catalogue notes containing "pirate", then confirmed by eye against the shared hat. 27 black eyes clustered in #83296231–#83314539 plus one earlier orange (#60569771). Open-ended — pieces whose note is blank or does not use the word have not been reviewed.',
     seed: { pattern: 'pirate', in: ['description'] },
   },
   {
@@ -120,7 +133,7 @@ export const SERIES: readonly Series[] = [
     label: 'Optimus robots',
     slug: 'optimus',
     blurb:
-      "Humanoid robots after Tesla's Optimus — working fast food, on the phone refusing a request, pouring oil into its own head. The artist tagged these as a group.",
+      "Humanoid robots after Tesla's Optimus — working fast food, on the phone refusing a request, pouring oil into its own head. Grouped here by eye: unlike the Fuck You sketches there is no marker in the artwork tying them together, so this one is our reading, not the artist's declaration.",
     status: 'partial',
     declaredSize: null,
     members: [
@@ -128,23 +141,18 @@ export const SERIES: readonly Series[] = [
       83295503, 83295540, 83295560, 83295634, 83308300,
     ],
     provenance:
-      'Seeded 2026-07-24 from the artist\'s own "Optimus" / "Tesla" tags (including one record where both were stored in a single comma-joined string). 14 black eyes in #83293807–#83308300. Untagged robots elsewhere in the collection have not been reviewed.',
+      'Seeded 2026-07-24 from this wiki\'s own "Optimus" / "Tesla" tags (including one record where both were stored in a single comma-joined string). 14 black eyes in #83293807–#83308300. Untagged robots elsewhere in the collection have not been reviewed.',
     seed: { pattern: 'optimus|tesla', in: ['tags'] },
   },
-  {
-    id: 'tt-lunch-sketch',
-    label: 'TT lunch sketches',
-    slug: 'tt-lunch-sketch',
-    blurb:
-      'Sketches the artist dated by the day he drew them over lunch. Only two are catalogued so far, three weeks apart — if the habit was regular there should be many more.',
-    status: 'partial',
-    declaredSize: null,
-    members: [83315117, 83315934],
-    provenance:
-      'Seeded 2026-07-24 from descriptions containing "lunch sketch" — #83315117 (dated 12/22/24) and #83315934 (dated 1/2/25). Almost certainly incomplete; the dated-sketch habit is not yet mapped.',
-    seed: { pattern: 'lunch sketch', in: ['description'] },
-  },
 ];
+
+// NOT shipped as a series yet — "TT lunch sketches", pieces that appear to be
+// dated by the day they were drawn (#83315117 "12/22/24", #83315934 "1/2/25").
+// Two members found from two descriptions is a hunch, not a catalogue: there is
+// no evidence yet of how big the habit was, and a two-piece chip in the gallery
+// filter bar carries no information. Sweep it with
+// `pnpm series-scout --seed "lunch sketch"` and promote it here if it turns out
+// to be a real run.
 
 const BY_SLUG = new Map(SERIES.map(s => [s.slug, s]));
 const BY_ID = new Map(SERIES.map(s => [s.id, s]));
@@ -184,7 +192,7 @@ export function seriesForNumber(n: number): readonly Series[] {
   return BY_NUMBER.get(n) ?? [];
 }
 
-/** The artist's index for a piece within a numbered set, e.g. "25/50". */
+/** The index written on the piece itself within a numbered set, e.g. "25/50". */
 export function memberLabel(series: Series, n: number): string {
   const idx = series.memberIndex?.[n];
   if (idx == null) return series.label;

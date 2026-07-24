@@ -18,13 +18,7 @@ import ChaseBoard, { type ChaseTile } from '@/components/History/ChaseBoard';
 import DropTimeline, { type DropBand } from '@/components/Charts/DropTimeline';
 
 import { getStmts } from '@/lib/db';
-import {
-  EXTRA_SOURCES,
-  OFFCHAIN_TIMELINE,
-  OPEN_QUESTIONS,
-  collectSources,
-  type OpenQuestion,
-} from '@/lib/history';
+import { EXTRA_SOURCES, OFFCHAIN_TIMELINE, OPEN_QUESTIONS, collectSources } from '@/lib/history';
 import { SERIES } from '@/lib/series';
 import {
   NOTABLE_BLOCKS,
@@ -255,30 +249,12 @@ export default function HistoryPage() {
     });
   }
 
-  // ---- section 9: open questions -----------------------------------------
-  // The catalogue-gap question is DERIVED from SERIES rather than written out,
-  // so finishing a set updates the ask instead of leaving a stale "23 missing"
-  // sitting on the page.
-  const numbered = SERIES.filter(s => s.declaredSize != null);
-  const stillMissing = numbered.reduce(
-    (n, s) => n + (s.declaredSize! - Object.keys(s.memberIndex ?? {}).length),
+  // Derived because the chase board below quotes it: how many of the
+  // artist-numbered pieces are still unidentified.
+  const stillMissing = SERIES.filter(x => x.declaredSize != null).reduce(
+    (n, x) => n + (x.declaredSize! - Object.keys(x.memberIndex ?? {}).length),
     0
   );
-  const catalogued = SERIES.reduce((n, s) => n + s.members.length, 0);
-  const questions: OpenQuestion[] = [
-    ...OPEN_QUESTIONS,
-    {
-      id: 'series-gaps',
-      question: 'What is still missing from the sub-series catalogue?',
-      whatWeKnow:
-        `${catalogued} pieces across ${SERIES.length} sets are catalogued so far, out of 9,001. ` +
-        (stillMissing > 0
-          ? `${stillMissing} of the artist-numbered Fuck You sketches are unaccounted for — we know they exist because he numbered them out of 50, we just haven't identified which pieces they are. `
-          : '') +
-        'The open-ended sets (pirates, Optimus robots, lunch sketches) have no known denominator at all; they were seeded from the ~14% of pieces that carry a written description, so anything undescribed is invisible to us. If you can name a piece that belongs to one of these, say so in Discord.',
-      sources: [],
-    },
-  ];
 
   // ---- chase board -------------------------------------------------------
   // Every tile derived, so there is no curated "grails" list to argue over.
@@ -386,7 +362,7 @@ export default function HistoryPage() {
         <Section
           id="series"
           title="named sub-series"
-          lede="OMB is 1/1 hand-drawn, so there is no generative trait metadata — not here, not on any marketplace. What does exist are the sets the artist drew as sets. These are catalogued by hand from his own descriptions and tags, and every one is openly incomplete."
+          lede="OMB is 1/1 hand-drawn, so there is no generative trait metadata — not here, not on any marketplace. What does exist are recurring runs, and we catalogue them by hand from our own notes on the pieces. Every one is openly incomplete."
         >
           <SeriesCards />
         </Section>
@@ -408,7 +384,7 @@ export default function HistoryPage() {
           title="open questions"
           lede="Where the public record is wrong, incomplete, or still unknown. Corrections welcome."
         >
-          <OpenQuestions questions={questions} />
+          <OpenQuestions questions={OPEN_QUESTIONS} />
         </Section>
 
         <Section id="sources" title="sources">
