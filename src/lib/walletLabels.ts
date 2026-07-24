@@ -6,6 +6,17 @@
 export const ORANGE_MINT_ADDRESS = 'bc1p4a29gzwlear4csc9sz6ll97j9yl7877tasy75evq8wm6r3admtqq3m72k0';
 export const TREASURY_ADDRESS = 'bc1pd6l0a8zg58wgvn30ef46mqmyrtdhwkeqz78kwhe52rk3nl48txhq05ke8f';
 
+// The other four per-color mint wallets. These mirror MINT_WALLETS in
+// src/lib/db.ts (which is the authority on mint-window validity); labelling
+// them here is purely so distribution history reads as names rather than
+// bech32 on /history, /activity and holder pages. Unlike the orange mint they
+// are NOT in EXCLUDED_OWNERS — they emptied out years ago and hold nothing to
+// skew an aggregate with.
+export const GREEN_MINT_ADDRESS = 'bc1pyl6g53k220rggaukyx929qnnxqw8vzt8xrfw88muw22pnwfvqjkqreeqpw';
+export const BLUE_MINT_ADDRESS = 'bc1p53jarhva6eg4wggv7apndndger4y4gy9s6mf3gp0rttdzensu2nq3598ur';
+export const RED_MINT_ADDRESS = 'bc1pg8jywvphzeyf9fg8tsac6jq7ft2dzz7pez720r6uanumn6lyayeshg46es';
+export const BLACK_MINT_ADDRESS = 'bc1q86ssqhk04chjah6kkuqw3fv5wjy7v2nflyg50t';
+
 // Bravocados: the dispensary wallet holds the first 100 and dispenses them one
 // at a time to Parasite mining-pool participants who land a big share. A
 // bravocado still sitting in a distribution wallet counts as "not yet
@@ -29,6 +40,10 @@ export type WalletLabel = {
 
 export const WALLET_LABELS: Record<string, WalletLabel> = {
   [ORANGE_MINT_ADDRESS]: { name: 'OMB Orange Mint' },
+  [GREEN_MINT_ADDRESS]: { name: 'OMB Green Mint' },
+  [BLUE_MINT_ADDRESS]: { name: 'OMB Blue Mint' },
+  [RED_MINT_ADDRESS]: { name: 'OMB Red Mint' },
+  [BLACK_MINT_ADDRESS]: { name: 'OMB Black Mint' },
   [TREASURY_ADDRESS]: { name: 'OMB Treasury' },
   [BRAVOCADO_DISPENSARY_ADDRESS]: {
     name: 'Bravocados Dispensary',

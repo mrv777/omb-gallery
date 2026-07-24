@@ -2193,6 +2193,14 @@ type Stmts = {
   transferActivityByDay: ReturnType<DB['prepare']>;
   ownershipChangesByAddress: ReturnType<DB['prepare']>;
   holderColorHighlights: ReturnType<DB['prepare']>;
+  // /history — collection-scale provenance & timeline facts. Read-only.
+  collectionDropWindows: ReturnType<DB['prepare']>;
+  mintWindowsByColor: ReturnType<DB['prepare']>;
+  eventTypeSpans: ReturnType<DB['prepare']>;
+  satCountsByColor: ReturnType<DB['prepare']>;
+  redSatsOrdered: ReturnType<DB['prepare']>;
+  countNeverMoved: ReturnType<DB['prepare']>;
+  recordSales: ReturnType<DB['prepare']>;
   // global search
   searchInscriptionByNumber: ReturnType<DB['prepare']>;
   searchInscriptionById: ReturnType<DB['prepare']>;
@@ -3475,6 +3483,131 @@ export function getStmts(): Stmts {
         AND i.collection_slug = 'omb'
         AND i.color IN ('red', 'blue')
       ORDER BY block_timestamp ASC, event_id ASC
+    `),
+
+    // ---------------- /history ----------------
+    // Collection-scale facts for the history page. Every number rendered there
+    // comes from one of these at request time — nothing is typed as a literal
+    // into the page, so the copy can't drift from the index.
+    //
+    // These are SUPPLY facts, so unlike the leaderboards and charts above they
+    // deliberately do NOT apply SQL_EXCLUDED_OWNERS_LIST. A piece sitting in
+    // the treasury was still inscribed, still sits on the sat it sits on, and
+    // still belongs in the drop count. Excluding it would understate the
+    // collection.
+
+    // Per-color inscribe window — when each drop was written to chain.
+    collectionDropWindows: db.prepare(`
+      SELECT color,
+             COUNT(*)          AS count,
+             MIN(inscribe_at)  AS first_inscribed_at,
+             MAX(inscribe_at)  AS last_inscribed_at
+      FROM inscriptions
+      WHERE collection_slug = @collection
+        AND inscribe_at IS NOT NULL
+      GROUP BY color
+    `),
+
+    // Per-color distribution window — when each drop actually reached holders.
+    // Distinct from the inscribe window, sometimes by many months (orange was
+    // inscribed in a single day and distributed over ~13 months).
+    mintWindowsByColor: db.prepare(`
+      SELECT i.color,
+             COUNT(*)                 AS count,
+             MIN(e.block_timestamp)   AS first_mint_at,
+             MAX(e.block_timestamp)   AS last_mint_at
+      FROM events e
+      JOIN inscriptions i ON i.inscription_number = e.inscription_number
+      WHERE i.collection_slug = @collection
+        AND e.event_type = 'mint'
+      GROUP BY i.color
+    `),
+
+    // Lifetime count + span per event type. Powers the "movement at a glance"
+    // strip; 'listed' is included here (unlike the activity chart) because the
+    // page is describing the index itself, not on-chain movement.
+    eventTypeSpans: db.prepare(`
+      SELECT e.event_type,
+             COUNT(*)               AS count,
+             MIN(e.block_timestamp) AS first_at,
+             MAX(e.block_timestamp) AS last_at
+      FROM events e
+      JOIN inscriptions i ON i.inscription_number = e.inscription_number
+      WHERE i.collection_slug = @collection
+      GROUP BY e.event_type
+    `),
+
+    // How many pieces of each color have a known sat.
+    //
+    // Deliberately does NOT decode sats to block heights in SQL. The obvious
+    // `sat / 5000000000` only holds for epoch 0, and 68 of the 102 reds sit on
+    // epoch 1+ satoshis — that divisor invents heights for them that don't
+    // exist. Decoding is halving-aware and belongs in one place:
+    // blockForSat() in src/lib/satProvenance.ts. The caller reads raw sats
+    // (redSatsOrdered) and buckets them there.
+    satCountsByColor: db.prepare(`
+      SELECT color, COUNT(*) AS count
+      FROM inscriptions
+      WHERE collection_slug = @collection
+        AND sat IS NOT NULL
+      GROUP BY color
+    `),
+
+    // The individually-sourced sats, earliest satoshi first. Today that's the
+    // 102 reds — the only per-piece scarcity gradient in the collection.
+    // Parameterised by color so it doesn't hardcode which color is the varied
+    // one; src/lib/satProvenance.ts VARIED_COLORS is the source of truth.
+    redSatsOrdered: db.prepare(`
+      SELECT inscription_number, sat, color, current_owner, effective_owner
+      FROM inscriptions
+      WHERE collection_slug = @collection
+        AND color = @color
+        AND sat IS NOT NULL
+      ORDER BY sat ASC
+    `),
+
+    // Pieces that have never moved since they were inscribed.
+    countNeverMoved: db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM inscriptions
+      WHERE collection_slug = @collection
+        AND transfer_count = 0
+    `),
+
+    // Record sales, with the date and venue of the sale itself.
+    //
+    // Deliberately NOT topByHighestSale: that reads the denormalized
+    // inscriptions.highest_sale_sats, which carries no timestamp — pairing it
+    // with last_event_at would print the date of some unrelated later transfer
+    // next to the price. Here the price and the date come from the same row.
+    //
+    // ROW_NUMBER dedupes to each piece's own best sale, so a piece that set a
+    // record twice occupies one line instead of two.
+    //
+    // No EXCLUDED_OWNERS filter: a record sale is a historical fact about a
+    // price, and shouldn't disappear because the piece later landed in the
+    // treasury.
+    recordSales: db.prepare(`
+      SELECT inscription_number, color, sale_price_sats, block_timestamp, marketplace
+      FROM (
+        SELECT e.inscription_number,
+               i.color,
+               e.sale_price_sats,
+               e.block_timestamp,
+               e.marketplace,
+               ROW_NUMBER() OVER (
+                 PARTITION BY e.inscription_number
+                 ORDER BY e.sale_price_sats DESC, e.block_timestamp ASC
+               ) AS rn
+        FROM events e
+        JOIN inscriptions i ON i.inscription_number = e.inscription_number
+        WHERE i.collection_slug = @collection
+          AND e.event_type = 'sold'
+          AND e.sale_price_sats > 0
+      )
+      WHERE rn = 1
+      ORDER BY sale_price_sats DESC
+      LIMIT @limit
     `),
 
     // ---------------- global search ----------------

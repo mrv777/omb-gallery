@@ -16,6 +16,7 @@ export const INFO_SECTIONS: InfoSection[] = [
     blurb:
       'Ordinal Maxi Biz — hand-drawn black-and-white heads inscribed on Bitcoin, where eye color is tied to the block a piece was inscribed on. There is no official OMB website; this wiki is the hub. Find the community on X and Discord.',
     links: [
+      { label: 'History & provenance', href: '/history', internal: true },
       { label: 'X / @OrdinalMaxiBiz', href: 'https://x.com/OrdinalMaxiBiz' },
       { label: 'Discord', href: 'https://discord.gg/ordinalmaxibiz' },
     ],
