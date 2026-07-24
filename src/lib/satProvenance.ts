@@ -110,10 +110,10 @@ export const NOTABLE_BLOCKS: Readonly<Record<number, NotableBlock>> = {
     nickname: '',
     attributedMiner: 'Hal Finney',
     confidence: 'attributed',
-    note: 'Attributed to Hal Finney — the first person to receive a Bitcoin transaction. Attribution is community consensus from early mining analysis, not an on-chain fact.',
+    note: 'The first block mined by someone other than Satoshi. Attributed to Hal Finney — the first person to receive a Bitcoin transaction — by Nullish, who located these satoshis and later sourced sats for OMB. The attribution is inferred from the block timestamp lining up with Finney\'s "Running bitcoin" tweet and his early correspondence with Satoshi, not proven on-chain.',
     source: {
-      label: 'Bitcoin Wiki — Hal Finney',
-      href: 'https://en.bitcoin.it/wiki/Hal_Finney',
+      label: "Nullish — Ordinal sats from Hal Finney's first mined block",
+      href: 'https://medium.com/@nullish/ordinal-sats-from-hal-finneys-first-mined-bitcoin-block-have-been-found-6636b3c4925e',
     },
   },
 };

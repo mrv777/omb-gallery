@@ -5,7 +5,9 @@ import Link from 'next/link';
 import { ColorFilter } from '@/lib/types';
 import { appendColorParam } from '@/lib/colorFilter';
 import { NAV_ITEMS } from '@/lib/nav';
+import type { Series } from '@/lib/series';
 import ColorSwatches from './ColorSwatches';
+import SeriesChips from './SeriesChips';
 import HelpButton from './HelpButton';
 import MobileMenu from './MobileMenu';
 import NotificationButton, { BellIcon } from './NotificationButton/NotificationButton';
@@ -26,6 +28,13 @@ interface FilterControlsProps {
   onToggleFavoritesOnly: () => void;
   searchInputRef: React.RefObject<HTMLInputElement | null>;
   playHref: string | null;
+  /** Curated sub-series filter (`?series=`), or null when unfiltered. */
+  activeSeries: Series | null;
+  onSeriesChange: (slug: string | null) => void;
+  /** Whether the series chip row is expanded. Owned by the grid, which also
+   *  owns the header height the row has to grow into. */
+  seriesRowOpen: boolean;
+  onToggleSeriesRow: () => void;
 }
 
 const FilterControls = memo(function FilterControls({
@@ -43,6 +52,10 @@ const FilterControls = memo(function FilterControls({
   onToggleFavoritesOnly,
   searchInputRef,
   playHref,
+  activeSeries,
+  onSeriesChange,
+  seriesRowOpen,
+  onToggleSeriesRow,
 }: FilterControlsProps) {
   // The search input is rendered in two places (desktop row 1, mobile row 2)
   // and only one is visible at a time per breakpoint. A plain shared ref
@@ -80,6 +93,33 @@ const FilterControls = memo(function FilterControls({
       >
         {showFavoritesOnly ? '♥' : '♡'}
       </button>
+      <button
+        type="button"
+        onClick={onToggleSeriesRow}
+        aria-pressed={seriesRowOpen}
+        aria-label={seriesRowOpen ? 'Hide series filters' : 'Show series filters'}
+        className={`h-10 px-2 flex items-center transition-colors ${
+          seriesRowOpen ? 'text-bone' : 'text-bone-dim hover:text-bone'
+        }`}
+      >
+        <span className="border border-transparent px-1.5 py-0.5 text-[11px] tracking-[0.12em]">
+          ⌗ SERIES
+        </span>
+      </button>
+      {/* Always visible when a series filter is on, even with the chip row
+          collapsed — a filter that hides 8,900 pieces must never be silent. */}
+      {activeSeries && (
+        <button
+          type="button"
+          onClick={() => onSeriesChange(null)}
+          className="h-10 flex items-center text-bone hover:text-accent-red transition-colors"
+          aria-label={`Clear the ${activeSeries.label} filter`}
+        >
+          <span className="border border-bone px-1.5 py-0.5 text-[10px] tracking-[0.08em] whitespace-nowrap">
+            × {activeSeries.label} {activeSeries.members.length}
+          </span>
+        </button>
+      )}
       {playHref ? (
         <Link
           href={playHref}
@@ -198,6 +238,14 @@ const FilterControls = memo(function FilterControls({
         <div className="flex-1 min-w-0">{searchInput}</div>
         {zoomCluster}
       </div>
+
+      {/* Row 3 — the curated sub-series, collapsed by default. The toolbar is
+          already two rows on mobile; this only costs height when asked for. */}
+      {seriesRowOpen && (
+        <div className="flex items-center px-3 sm:px-6 h-10 border-t border-ink-2">
+          <SeriesChips active={activeSeries} onChange={onSeriesChange} />
+        </div>
+      )}
     </div>
   );
 });

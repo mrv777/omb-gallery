@@ -9,6 +9,7 @@ import type { MarketplaceLiteListing } from '@/lib/marketplace/types';
 import NotificationButton, { BellIcon } from './NotificationButton/NotificationButton';
 import DownloadMenu from './DownloadMenu/DownloadMenu';
 import { Tooltip } from './ui/Tooltip';
+import { memberLabel, seriesForNumber } from '@/lib/series';
 
 interface ImageModalProps {
   onClose: () => void;
@@ -337,6 +338,19 @@ const ImageModal = memo(function ImageModal({
                   {image.caption ? `"${image.caption}"` : ''}
                 </div>
               </Tooltip>
+              {/* Series membership only — no sat line here. "Block 9" is true of
+                  8,799 of 9,001 pieces, so in a one-at-a-time viewer it reads as
+                  chrome rather than information. It earns its place on the
+                  detail page, where the exact sat is also available. */}
+              {seriesForNumber(image.number).length > 0 && (
+                <div className="mt-1 flex flex-wrap justify-center gap-x-2 text-[10px] tracking-[0.12em] uppercase text-bone-dim">
+                  {seriesForNumber(image.number).map(s => (
+                    <span key={s.id} className="border border-bone-dim/40 px-1.5 py-0.5">
+                      {memberLabel(s, image.number)}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

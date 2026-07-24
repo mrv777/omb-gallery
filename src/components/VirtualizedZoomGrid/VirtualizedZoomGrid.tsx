@@ -8,6 +8,8 @@ import { useFavorites } from '@/lib/FavoritesContext';
 import { useColorFilter } from '@/lib/useColorFilter';
 import { useSearchQueryParam } from '@/lib/useSearchQueryParam';
 import { useFavoritesOnlyParam } from '@/lib/useFavoritesOnlyParam';
+import { useSeriesParam } from '@/lib/useSeriesParam';
+import { seriesMemberSet } from '@/lib/series';
 import { encodeIds } from '@/lib/slideshowCodec';
 import { useListings } from '@/components/Marketplace/useListings';
 import ImageModal from '../ImageModal';
@@ -46,6 +48,15 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
   // same 500ms debounce as the actual filter, not on every keystroke.
   const { color: colorFilter, setColor: setColorFilter } = useColorFilter();
   const { query: urlQuery, setQuery: setUrlQuery } = useSearchQueryParam();
+  const { series: activeSeries, setSeries } = useSeriesParam();
+  // Owned here because the header height below has to grow to fit the row.
+  // Initialized open when the page LOADS with a series filter (a shared
+  // /?series= link), so the chips explain the filter without a click. Not an
+  // effect — deriving it once at mount is enough, since every other way to set
+  // a series either goes through the chips (already open) or arrives as a full
+  // navigation that remounts this component.
+  const [seriesRowOpen, setSeriesRowOpen] = useState(() => activeSeries != null);
+  const toggleSeriesRow = useCallback(() => setSeriesRowOpen(v => !v), []);
   const { favoritesOnly: showFavoritesOnly, setFavoritesOnly: setShowFavoritesOnly } =
     useFavoritesOnlyParam();
   const [searchQuery, setSearchQuery] = useState(urlQuery);
@@ -109,13 +120,21 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
   const baseFiltered = useMemo(() => {
     let filtered = colorFilter === 'all' ? images : images.filter(img => img.color === colorFilter);
 
+    // Runs BEFORE the substring pass: it's an O(1) Set probe that typically
+    // cuts 9,001 down to a few dozen, so the (much more expensive) string scan
+    // below then walks almost nothing.
+    if (activeSeries) {
+      const members = seriesMemberSet(activeSeries.id);
+      filtered = filtered.filter(img => members.has(img.number));
+    }
+
     if (debouncedSearchQuery.trim() !== '') {
       const q = debouncedSearchQuery.toLowerCase();
       filtered = filtered.filter(img => img.searchText.includes(q));
     }
 
     return filtered;
-  }, [images, colorFilter, debouncedSearchQuery]);
+  }, [images, colorFilter, activeSeries, debouncedSearchQuery]);
 
   const filteredImages = useMemo(() => {
     if (!showFavoritesOnly) return baseFiltered;
@@ -133,9 +152,10 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     const ids: string[] = [];
     for (const img of filteredImages) {
       if (ids.length >= MAX_PLAY_IDS) break;
-      const file = img.src.split('/').pop() ?? '';
-      const stem = file.replace(/\.[^./]+$/, '');
-      if (/^\d{1,8}$/.test(stem)) ids.push(stem);
+      // img.number is parsed once in imageLoader; the codec caps at 99,999,999.
+      if (Number.isFinite(img.number) && img.number >= 0 && img.number < 100_000_000) {
+        ids.push(String(img.number));
+      }
     }
     if (ids.length === 0) return null;
     try {
@@ -173,7 +193,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
   // Reset scroll when filters change significantly
   useEffect(() => {
     rowVirtualizer.scrollToIndex(0);
-  }, [colorFilter, debouncedSearchQuery, rowVirtualizer]);
+  }, [colorFilter, debouncedSearchQuery, activeSeries, rowVirtualizer]);
 
   // Image click handlers
   const handleImageClick = useCallback((index: number) => {
@@ -295,7 +315,8 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     return () => scrollElement.removeEventListener('scroll', handleScroll);
   }, [handleScroll]);
 
-  const headerHeight = isDesktop ? 48 : 88;
+  const SERIES_ROW_H = 40;
+  const headerHeight = (isDesktop ? 48 : 88) + (seriesRowOpen ? SERIES_ROW_H : 0);
 
   return (
     <div className="gallery-container h-screen flex flex-col relative">
@@ -320,6 +341,10 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
           onToggleFavoritesOnly={handleToggleFavoritesOnly}
           searchInputRef={searchInputRef}
           playHref={playHref}
+          activeSeries={activeSeries}
+          onSeriesChange={setSeries}
+          seriesRowOpen={seriesRowOpen}
+          onToggleSeriesRow={toggleSeriesRow}
         />
       </div>
 

@@ -15,6 +15,7 @@ import {
   satflowInscriptionLink,
   truncateAddr,
 } from '@/lib/format';
+import ProvenanceStrip from './ProvenanceStrip';
 import EventTimelineRow from './EventTimelineRow';
 import NotificationButton, { BellIcon } from '@/components/NotificationButton/NotificationButton';
 import MovementTimeline from '@/components/Charts/MovementTimeline';
@@ -124,6 +125,11 @@ export default function InscriptionDetail({
               {hit.description}
             </p>
           )}
+
+          <ProvenanceStrip
+            inscriptionNumber={inscription.inscription_number}
+            sat={inscription.sat ?? null}
+          />
 
           <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3 text-[11px] tracking-[0.08em] uppercase text-bone-dim mb-5">
             <Stat label="transfers" value={transferCount.toLocaleString()} />

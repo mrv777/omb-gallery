@@ -6,6 +6,8 @@ export interface GalleryImage {
   caption?: string;
   tags?: string[];
   color: string;
+  /** Inscription number, parsed once from the filename stem in imageLoader. */
+  number: number;
   // Lowercased "<filename> <caption> <tags>" for cheap substring search.
   searchText: string;
 }

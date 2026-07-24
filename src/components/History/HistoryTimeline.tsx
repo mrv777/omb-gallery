@@ -78,14 +78,27 @@ export default function HistoryTimeline({
             {row.body}
           </p>
           {row.kind === 'offchain' && (
-            <a
-              href={row.source.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-mono mt-1 inline-block text-[10px] uppercase tracking-[0.08em] text-bone-dim hover:text-bone underline underline-offset-4"
-            >
-              {row.source.label} ↗
-            </a>
+            <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+              <a
+                href={row.source.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-mono text-[10px] uppercase tracking-[0.08em] text-bone-dim hover:text-bone underline underline-offset-4"
+              >
+                {row.source.label} ↗
+              </a>
+              {row.corrects && (
+                <a
+                  href={row.corrects.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-mono text-[10px] uppercase tracking-[0.08em] text-bone-dim/70 hover:text-bone underline underline-offset-4"
+                  title="The published account this entry corrects"
+                >
+                  corrects: {row.corrects.label} ↗
+                </a>
+              )}
+            </div>
           )}
         </li>
       ))}

@@ -27,11 +27,19 @@ export type OffChainFact = {
   body: string;
   source: Citation;
   confidence: Confidence;
+  /**
+   * A published source this entry supersedes. Set when the press got it wrong
+   * and someone who was there corrected it — the correction is the fact, and
+   * the thing it replaces stays visible so a reader can check both.
+   */
+  corrects?: Citation;
 };
 
 const LEATHER: Citation = {
   label: 'Leather — Guide to Ordinal Maxi Biz',
-  href: 'https://leather.io/posts/guide-to-bitcoin-ordinals-collections-what-is-ordinal-maxi-biz',
+  // The /posts/ URL 301s here; link the destination so the citation doesn't
+  // depend on a redirect surviving.
+  href: 'https://app.leather.io/support/guide/guide-to-bitcoin-ordinals-collections-what-is-ordinal-maxi-biz',
 };
 const XVERSE: Citation = {
   label: 'Xverse — What Is Ordinal Maxi Biz?',
@@ -41,9 +49,29 @@ const NFTNOW: Citation = {
   label: "nft now — Christie's announces first Ordinals auction",
   href: 'https://nftnow.com/art/christies-ordinals-auction-ordinal-maxi-biz-omb-zk-shark/',
 };
+/**
+ * First-hand community testimony. Not a published article, so it carries no
+ * deep link — but it is frequently the ONLY correct account, since the press
+ * coverage was written from a distance. Labelled as testimony rather than
+ * dressed up as a citation.
+ */
+const OMB_COMMUNITY: Citation = {
+  label: 'OMB community, via Discord (first-hand account)',
+  href: 'https://discord.gg/ordinalmaxibiz',
+};
 const NFTCULTURE: Citation = {
   label: "NFT Culture — Christie's dives into Bitcoin Ordinals",
   href: 'https://www.nftculture.com/nft-news/christies-dives-into-bitcoin-ordinals-with-ordinal-maxi-biz-auction/',
+};
+/** The only write-up found that publishes the per-lot Christie's results. */
+const CRYPTOFLIES: Citation = {
+  label: "Cryptoflies — Christie's OMB auction results, lot by lot",
+  href: 'https://cryptoflies.com/christies-first-bitcoin-nft-auction-ordinal-maxi-biz-rakes-in-730k/',
+};
+/** Contemporaneous reporting on the Punk burns and the whitelist allocation. */
+const NFTNOW_PUNKS: Citation = {
+  label: 'nft now — Why are people burning CryptoPunks for Ordinals?',
+  href: 'https://nftnow.com/features/why-are-people-burning-cryptopunks-for-ordinals-nfts/',
 };
 
 export const OFFCHAIN_TIMELINE: readonly OffChainFact[] = [
@@ -51,7 +79,7 @@ export const OFFCHAIN_TIMELINE: readonly OffChainFact[] = [
     id: 'origin',
     date: '2023-02',
     title: 'ZK Shark quits finance; Tony Tafuro starts drawing',
-    body: 'Ordinal Maxi Biz is built by the pseudonymous ZK Shark, a former Wall Street professional who left his job to work on it full time, with artist Tony Tafuro drawing every head by hand. Nullish sourced the satoshis — the sat-hunting that put later drops on block 9 and block 78.',
+    body: 'Ordinal Maxi Biz is built by the pseudonymous ZK Shark, a former Wall Street professional who left his job to work on it full time, with artist Tony Tafuro drawing every head by hand and further artwork from berkin bags. Nullish — the sat-hunter who located and secured the block-78 satoshis in the first place — sourced the sats that later drops were inscribed on.',
     source: LEATHER,
     confidence: 'confirmed',
   },
@@ -66,18 +94,20 @@ export const OFFCHAIN_TIMELINE: readonly OffChainFact[] = [
   {
     id: 'punk-burn',
     date: '2023-06',
-    title: 'CryptoPunk #8611 burned for whitelist',
-    body: 'A group buys CryptoPunk #8611 and sends it to an Ethereum burn address. Everyone who took part is given a whitelist spot — an entry ritual that cost an actual Punk.',
-    source: XVERSE,
-    confidence: 'reported',
+    title: 'Two CryptoPunks burned for whitelist',
+    body: 'Bitcoin Bandits open a burn site in mid-June and two Punks leave Ethereum for good — #8611 first, then #9146, which had just sold for 54.49 ETH (~$94,000). It was not a blanket "burn and you are in": DeGods and Bitcoin Bandits received 33 whitelist spots each for the Green Eyes mint, many of them raffled off, and everyone else who took part got WLPublic. Corrected by the OMB community after this page first went up, and confirmed against contemporaneous reporting.',
+    source: NFTNOW_PUNKS,
+    confidence: 'confirmed',
+    corrects: XVERSE,
   },
   {
     id: 'christies',
     date: '2024-04',
-    title: "Christie's first Ordinals auction",
-    body: "Christie's runs its first-ever Ordinals auction with a set of four OMBs — one blue, one green, one red, one orange. The set sells for $441,000.",
-    source: NFTNOW,
+    title: "Christie's first Ordinals auction — $730,800",
+    body: "Christie's runs its first-ever Bitcoin Ordinals auction, April 9–16, four lots curated by ZK Shark. Total realised: $730,800. Watch the figure people quote: $441,000 was LOT 1 alone. The other three went for $126,000, $88,200 and $75,600. Write-ups that report $441,000 as the whole sale are quoting one lot as if it were four.",
+    source: CRYPTOFLIES,
     confidence: 'confirmed',
+    corrects: NFTNOW,
   },
 ];
 
@@ -97,7 +127,7 @@ export const OPEN_QUESTIONS: readonly OpenQuestion[] = [
     id: 'supply-5141',
     question: 'Why does everyone say OMB is 5,141 pieces?',
     whatWeKnow:
-      'Because it was, for a while. 100 blue + 1,900 green + 3,141 orange is exactly 5,141 — the figure counts those three drops and nothing else. It leaves out the 102 reds, which were inscribed first and are still the only OMBs on individually-sourced satoshis, and it predates the 3,758 black eyes of January 2025. The full collection this wiki indexes is 9,001.',
+      "The arithmetic points one way: 100 blue + 1,900 green + 3,141 orange is exactly 5,141, so the figure looks like those three drops and nothing else — leaving out the 102 reds, which were inscribed first and are still the only OMBs on individually-sourced satoshis, and predating the 3,758 black eyes of January 2025. We can't prove that's the intent, but note the guides can't keep it straight either: Leather gives the total as 5,141 while its own per-colour breakdown (100 red, 200 blue, 1,900 green, 3,000 orange) sums to 5,200 and matches the chain on only one colour. The counts on this page come from the chain: 9,001.",
     sources: [LEATHER, XVERSE],
   },
   {
@@ -111,11 +141,15 @@ export const OPEN_QUESTIONS: readonly OpenQuestion[] = [
     id: 'block-attribution',
     question: 'Were blocks 9 and 78 really mined by Satoshi and Hal Finney?',
     whatWeKnow:
-      "Neither is provable from the chain. Block 9's coinbase demonstrably funded the first ever Bitcoin transaction — 10 BTC to Hal Finney in block 170 — and that part is fact. Attributing the mining of block 9 to Satoshi rests on the Patoshi nonce pattern, and block 78 to Hal Finney on early-mining analysis. Both are strong community consensus, not proof. We mark them † throughout.",
+      'Neither is provable from the chain. Block 9\'s coinbase demonstrably funded the first ever Bitcoin transaction — 10 BTC to Hal Finney in block 170 — and that part is fact. Attributing the mining of block 9 to Satoshi rests on the Patoshi nonce pattern. Block 78 is the first block mined by someone other than Satoshi, and the Finney attribution comes from Nullish, who traced it by lining the block timestamp up with Finney\'s "Running bitcoin" tweet and his early correspondence with Satoshi — a correlation, not a signature. Both are strong community consensus. We mark them † throughout.',
     sources: [
       {
         label: 'Patoshi pattern — Sergio Demian Lerner',
         href: 'https://bitslog.com/2013/04/17/the-well-deserved-fortune-of-satoshi-nakamoto/',
+      },
+      {
+        label: "Nullish — Ordinal sats from Hal Finney's first mined block",
+        href: 'https://medium.com/@nullish/ordinal-sats-from-hal-finneys-first-mined-bitcoin-block-have-been-found-6636b3c4925e',
       },
     ],
   },
@@ -128,13 +162,16 @@ export function collectSources(
   extra: readonly Citation[] = []
 ): Citation[] {
   const byHref = new Map<string, Citation>();
-  for (const f of facts) byHref.set(f.source.href, f.source);
+  for (const f of facts) {
+    byHref.set(f.source.href, f.source);
+    if (f.corrects) byHref.set(f.corrects.href, f.corrects);
+  }
   for (const q of questions) for (const c of q.sources) byHref.set(c.href, c);
   for (const c of extra) byHref.set(c.href, c);
   return Array.from(byHref.values()).sort((a, b) => a.label.localeCompare(b.label));
 }
 
-export const EXTRA_SOURCES: readonly Citation[] = [NFTCULTURE];
+export const EXTRA_SOURCES: readonly Citation[] = [NFTCULTURE, OMB_COMMUNITY];
 
 /**
  * Sort key for merging hand-written facts with chain-derived rows. Partial

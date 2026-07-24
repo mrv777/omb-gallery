@@ -1,5 +1,6 @@
 import { GalleryImage } from './types';
 import imageData from '../data/collections/omb/inscriptions.json';
+import { searchTokensForNumber } from './series';
 
 type ImageEntry = { filename: string; description: string; tags: string[] };
 type ImagesByColor = Record<string, ImageEntry[]>;
@@ -20,6 +21,14 @@ export function loadImages(): GalleryImage[] {
       const filename = imageObj.filename.replace(/\.[^/.]+$/, '');
       const description = imageObj.description ?? '';
       const tags = imageObj.tags ?? [];
+      // The stem IS the inscription number. Parsing it once here saves the
+      // series filter and playHref from re-deriving it from `src` on every
+      // filter change.
+      const number = parseInt(filename, 10);
+      // Curated sub-series names, so typing "pirate" in the existing search box
+      // finds the catalogued set as well as any description that happens to
+      // mention one. Empty for the ~8,930 pieces in no series.
+      const seriesTokens = searchTokensForNumber(number);
 
       images.push({
         src: `/images/${color}/${imageObj.filename}`,
@@ -27,9 +36,10 @@ export function loadImages(): GalleryImage[] {
         thumbnailWidth: THUMBNAIL_SIZE,
         thumbnailHeight: THUMBNAIL_SIZE,
         color: color,
+        number,
         caption: description,
         tags,
-        searchText: `${filename} ${description} ${tags.join(' ')}`.toLowerCase(),
+        searchText: `${filename} ${description} ${tags.join(' ')} ${seriesTokens}`.toLowerCase(),
       });
     });
   });

@@ -13,10 +13,19 @@ import MarketHistory, { type SaleRow } from '@/components/History/MarketHistory'
 import MovementStrip, { type EventSpan } from '@/components/History/MovementStrip';
 import OpenQuestions from '@/components/History/OpenQuestions';
 import SourceList from '@/components/History/SourceList';
+import SeriesCards from '@/components/History/SeriesCards';
+import ChaseBoard, { type ChaseTile } from '@/components/History/ChaseBoard';
 import DropTimeline, { type DropBand } from '@/components/Charts/DropTimeline';
 
 import { getStmts } from '@/lib/db';
-import { EXTRA_SOURCES, OFFCHAIN_TIMELINE, OPEN_QUESTIONS, collectSources } from '@/lib/history';
+import {
+  EXTRA_SOURCES,
+  OFFCHAIN_TIMELINE,
+  OPEN_QUESTIONS,
+  collectSources,
+  type OpenQuestion,
+} from '@/lib/history';
+import { SERIES } from '@/lib/series';
 import {
   NOTABLE_BLOCKS,
   VARIED_COLORS,
@@ -27,6 +36,7 @@ import {
 } from '@/lib/satProvenance';
 import { fullDate } from '@/components/Charts/chartUtils';
 import { buildSocial } from '@/lib/metadata';
+import { formatBtc } from '@/lib/format';
 
 const DESCRIPTION =
   'How Ordinal Maxi Biz was made, drop by drop — inscribe and distribution windows, the satoshis each drop sits on, and the market record. Every figure recomputed from our own index.';
@@ -245,6 +255,84 @@ export default function HistoryPage() {
     });
   }
 
+  // ---- section 9: open questions -----------------------------------------
+  // The catalogue-gap question is DERIVED from SERIES rather than written out,
+  // so finishing a set updates the ask instead of leaving a stale "23 missing"
+  // sitting on the page.
+  const numbered = SERIES.filter(s => s.declaredSize != null);
+  const stillMissing = numbered.reduce(
+    (n, s) => n + (s.declaredSize! - Object.keys(s.memberIndex ?? {}).length),
+    0
+  );
+  const catalogued = SERIES.reduce((n, s) => n + s.members.length, 0);
+  const questions: OpenQuestion[] = [
+    ...OPEN_QUESTIONS,
+    {
+      id: 'series-gaps',
+      question: 'What is still missing from the sub-series catalogue?',
+      whatWeKnow:
+        `${catalogued} pieces across ${SERIES.length} sets are catalogued so far, out of 9,001. ` +
+        (stillMissing > 0
+          ? `${stillMissing} of the artist-numbered Fuck You sketches are unaccounted for — we know they exist because he numbered them out of 50, we just haven't identified which pieces they are. `
+          : '') +
+        'The open-ended sets (pirates, Optimus robots, lunch sketches) have no known denominator at all; they were seeded from the ~14% of pieces that carry a written description, so anything undescribed is invisible to us. If you can name a piece that belongs to one of these, say so in Discord.',
+      sources: [],
+    },
+  ];
+
+  // ---- chase board -------------------------------------------------------
+  // Every tile derived, so there is no curated "grails" list to argue over.
+  const oldestSat = varied[0];
+  const oldestVintageCount = varied.filter(v => v.vintage === oldestSat?.vintage).length;
+  const blueCount = dropByColor.get('blue')?.count ?? 0;
+  const chaseTiles: ChaseTile[] = [];
+  if (oldestSat) {
+    chaseTiles.push({
+      id: 'oldest-sat',
+      headline: `${oldestVintageCount} on a ${oldestSat.vintage} sat`,
+      label: `#${oldestSat.number} · block ${oldestSat.height.toLocaleString()} · the oldest satoshi in the collection`,
+      href: `/inscription/${oldestSat.number}`,
+    });
+  }
+  if (varied.length > 0) {
+    chaseTiles.push({
+      id: 'own-sat',
+      headline: `${varied.length} own their sat`,
+      label: `every ${varied[0].color} eye on an individually-hunted satoshi`,
+      href: '#sats',
+    });
+  }
+  if (blueCount > 0) {
+    chaseTiles.push({
+      id: 'finney',
+      headline: `${blueCount} on block 78`,
+      label: '†mined by Hal Finney, the first person to receive bitcoin',
+      href: '/?color=blue',
+    });
+  }
+  if (sales[0]) {
+    chaseTiles.push({
+      id: 'ath',
+      headline: formatBtc(sales[0].sats),
+      label: `all-time high — #${sales[0].number}`,
+      href: '#market',
+    });
+  }
+  chaseTiles.push({
+    id: 'never-moved',
+    headline: neverMoved.toLocaleString(),
+    label: 'never moved since they were inscribed',
+    href: '/explorer/longest-unmoved',
+  });
+  if (stillMissing > 0) {
+    chaseTiles.push({
+      id: 'uncatalogued',
+      headline: `${stillMissing} still unfound`,
+      label: 'numbered Fuck You sketches nobody has identified yet',
+      href: '#series',
+    });
+  }
+
   const sources = collectSources(OFFCHAIN_TIMELINE, OPEN_QUESTIONS, [
     ...EXTRA_SOURCES,
     ...Object.values(NOTABLE_BLOCKS).map(b => b.source),
@@ -264,6 +352,8 @@ export default function HistoryPage() {
           </Link>
           .
         </p>
+
+        <ChaseBoard tiles={chaseTiles} />
 
         <Section id="timeline" title="timeline">
           <HistoryTimeline chainFacts={chainFacts} offChainFacts={OFFCHAIN_TIMELINE} />
@@ -293,6 +383,14 @@ export default function HistoryPage() {
           />
         </Section>
 
+        <Section
+          id="series"
+          title="named sub-series"
+          lede="OMB is 1/1 hand-drawn, so there is no generative trait metadata — not here, not on any marketplace. What does exist are the sets the artist drew as sets. These are catalogued by hand from his own descriptions and tags, and every one is openly incomplete."
+        >
+          <SeriesCards />
+        </Section>
+
         <Section id="market" title="market history">
           <MarketHistory sales={sales} />
         </Section>
@@ -310,7 +408,7 @@ export default function HistoryPage() {
           title="open questions"
           lede="Where the public record is wrong, incomplete, or still unknown. Corrections welcome."
         >
-          <OpenQuestions questions={OPEN_QUESTIONS} />
+          <OpenQuestions questions={questions} />
         </Section>
 
         <Section id="sources" title="sources">
