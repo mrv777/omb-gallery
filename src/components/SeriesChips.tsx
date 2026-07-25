@@ -37,16 +37,10 @@ const SeriesChips = memo(function SeriesChips({ active, onChange }: Props) {
             }`}
             title={s.blurb}
           >
-            {s.label}{' '}
-            <span className="opacity-60">
-              {s.declaredSize != null ? `${s.members.length}/${s.declaredSize}` : s.members.length}
-            </span>
+            {s.label} <span className="opacity-60">{s.members.length}</span>
           </button>
         );
       })}
-      <span className="shrink-0 pl-1 text-[10px] text-bone-dim opacity-60">
-        hand-catalogued · incomplete
-      </span>
     </div>
   );
 });
