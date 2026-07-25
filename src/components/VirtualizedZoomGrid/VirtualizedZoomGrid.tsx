@@ -16,6 +16,7 @@ import ImageModal from '../ImageModal';
 import FilterControls from '../FilterControls';
 import ZoomGestureHandler from './ZoomGestureHandler';
 import VirtualRow from './VirtualRow';
+import GridHoverPreview from './GridHoverPreview';
 import { useZoomLevel } from './useZoomLevel';
 import { useGridDimensions } from './useGridDimensions';
 
@@ -379,6 +380,14 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
           </div>
         </div>
       </ZoomGestureHandler>
+
+      <GridHoverPreview
+        scrollRef={parentRef}
+        images={filteredImages}
+        cellSize={cellSize}
+        columnCount={columnCount}
+        disabled={isModalOpen}
+      />
 
       {isModalOpen && (
         <ImageModal

@@ -5,8 +5,10 @@ import { GalleryImage } from '@/lib/types';
 import { useFavorites } from '@/lib/FavoritesContext';
 import type { MarketplaceLiteListing } from '@/lib/marketplace/types';
 
-// Get the appropriate thumbnail URL based on cell size
-function getThumbnailUrl(originalThumbnail: string, cellSize: number): string {
+// Get the appropriate thumbnail URL based on cell size.
+// Exported so GridHoverPreview can paint the *same* URL the cell is showing —
+// that guarantees its instant layer is a browser-cache hit.
+export function getThumbnailUrl(originalThumbnail: string, cellSize: number): string {
   const useSmallThumbnail = cellSize < 50;
   if (useSmallThumbnail) {
     return originalThumbnail.replace('_128.webp', '_48.webp');

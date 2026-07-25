@@ -139,6 +139,41 @@ body {
   animation: omb-fav-flash 280ms ease-out;
 }
 
+/* Floating hover preview for zoomed-out cells. Opacity only — a scale would
+ * fight the translate3d that positions the card. */
+@keyframes omb-preview-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.grid-hover-preview {
+  animation: omb-preview-in 140ms ease-out;
+}
+
+/* Mirrors .grid-cell-hover::after, which is hidden at these zoom levels. */
+.grid-hover-preview__label {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  color: var(--bone);
+  background: rgba(0, 0, 0, 0.55);
+  padding: 3px 5px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grid-hover-preview {
+    animation: none;
+  }
+}
+
 /* Tooltip enter animation. Subtle fade + scale around the side anchor so it
  * reads as "popping out of" the trigger. Driven by Radix's data-state attr. */
 @keyframes omb-tooltip-in {
