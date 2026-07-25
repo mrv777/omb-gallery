@@ -2200,7 +2200,7 @@ type Stmts = {
   satCountsByColor: ReturnType<DB['prepare']>;
   redSatsOrdered: ReturnType<DB['prepare']>;
   countNeverMoved: ReturnType<DB['prepare']>;
-  recordSales: ReturnType<DB['prepare']>;
+  recordSaleByColor: ReturnType<DB['prepare']>;
   // global search
   searchInscriptionByNumber: ReturnType<DB['prepare']>;
   searchInscriptionById: ReturnType<DB['prepare']>;
@@ -3574,20 +3574,26 @@ export function getStmts(): Stmts {
         AND transfer_count = 0
     `),
 
-    // Record sales, with the date and venue of the sale itself.
+    // The record sale for EACH eye colour, with the date and venue of that sale.
+    //
+    // Per-colour rather than a global top-N: the overall top 5 is three-fifths
+    // red and its first row just restates the all-time high shown above it, so
+    // it spends five slots to say less than these five do. One row per drop
+    // covers the whole collection and lets a reader compare eras.
+    //
+    // The all-time high is simply the first row — the global maximum is by
+    // definition some colour's maximum — so this one statement feeds both the
+    // headline card and the list.
     //
     // Deliberately NOT topByHighestSale: that reads the denormalized
     // inscriptions.highest_sale_sats, which carries no timestamp — pairing it
     // with last_event_at would print the date of some unrelated later transfer
     // next to the price. Here the price and the date come from the same row.
     //
-    // ROW_NUMBER dedupes to each piece's own best sale, so a piece that set a
-    // record twice occupies one line instead of two.
-    //
     // No EXCLUDED_OWNERS filter: a record sale is a historical fact about a
     // price, and shouldn't disappear because the piece later landed in the
     // treasury.
-    recordSales: db.prepare(`
+    recordSaleByColor: db.prepare(`
       SELECT inscription_number, color, sale_price_sats, block_timestamp, marketplace
       FROM (
         SELECT e.inscription_number,
@@ -3596,7 +3602,7 @@ export function getStmts(): Stmts {
                e.block_timestamp,
                e.marketplace,
                ROW_NUMBER() OVER (
-                 PARTITION BY e.inscription_number
+                 PARTITION BY i.color
                  ORDER BY e.sale_price_sats DESC, e.block_timestamp ASC
                ) AS rn
         FROM events e
@@ -3607,7 +3613,6 @@ export function getStmts(): Stmts {
       )
       WHERE rn = 1
       ORDER BY sale_price_sats DESC
-      LIMIT @limit
     `),
 
     // ---------------- global search ----------------

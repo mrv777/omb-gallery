@@ -98,8 +98,7 @@ export default function HistoryPage() {
   const neverMoved =
     (stmts.countNeverMoved.get({ collection: COLLECTION }) as { count: number } | undefined)
       ?.count ?? 0;
-  const topSaleRows = stmts.recordSales.all({
-    limit: 5,
+  const topSaleRows = stmts.recordSaleByColor.all({
     collection: COLLECTION,
   }) as RecordSaleRow[];
   const variedRows = VARIED_COLORS.flatMap(
