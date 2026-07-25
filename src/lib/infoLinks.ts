@@ -16,9 +16,19 @@ export const INFO_SECTIONS: InfoSection[] = [
     blurb:
       'Ordinal Maxi Biz — hand-drawn black-and-white heads inscribed on Bitcoin, where eye color is tied to the block a piece was inscribed on. There is no official OMB website; this wiki is the hub. Find the community on X and Discord.',
     links: [
-      { label: 'History & provenance', href: '/history', internal: true },
       { label: 'X / @OrdinalMaxiBiz', href: 'https://x.com/OrdinalMaxiBiz' },
       { label: 'Discord', href: 'https://discord.gg/ordinalmaxibiz' },
+    ],
+  },
+  {
+    id: 'history',
+    title: 'History & provenance',
+    blurb:
+      'How the collection came to be, drop by drop — plus the satoshis underneath it. 8,799 of the 9,001 sit on block-9 sats from January 2009; the 102 red eyes each got their own individually-hunted sat. Every number on the page is recomputed from our index at request time, and every off-chain claim carries a source.',
+    links: [
+      { label: 'The full history', href: '/history', internal: true },
+      { label: 'What the collection sits on', href: '/history#sats', internal: true },
+      { label: 'Named sub-series', href: '/history#series', internal: true },
     ],
   },
   {
