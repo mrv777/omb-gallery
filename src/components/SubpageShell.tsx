@@ -1,12 +1,11 @@
-import Link from 'next/link';
 import type { ReactNode } from 'react';
 import HelpButton from './HelpButton';
 import MobileMenu from './MobileMenu';
+import DesktopNav from './DesktopNav';
 import FirehoseSubscribe from './FirehoseSubscribe';
 import SearchBar from './Search/SearchBar';
 import type { ColorFilter } from '@/lib/types';
-import { appendColorParam } from '@/lib/colorFilter';
-import { NAV_ITEMS, type NavKey } from '@/lib/nav';
+import { type NavKey } from '@/lib/nav';
 
 type Props = {
   active?: NavKey;
@@ -29,32 +28,15 @@ export default function SubpageShell({ active, color = 'all', headerControls, ch
   return (
     <div className="h-screen [height:100dvh] w-full overflow-y-auto bg-ink-0 text-bone">
       <header className="sticky top-0 z-50 bg-ink-1/95 backdrop-blur border-b border-ink-2">
-        <div className="flex h-12 items-center gap-3 sm:gap-6 px-3 sm:px-6 font-mono text-xs tracking-[0.08em] uppercase">
+        <div className="flex h-12 items-center gap-2 sm:gap-6 px-3 sm:px-6 font-mono text-xs tracking-[0.08em] uppercase">
           <MobileMenu active={active} />
-          <nav className="hidden lg:flex items-center gap-3 sm:gap-5">
-            {NAV_ITEMS.map(item => {
-              const isActive = item.key === active;
-              return (
-                <Link
-                  key={item.key}
-                  href={appendColorParam(item.href, color)}
-                  className={`transition-colors ${
-                    isActive ? 'text-bone' : 'text-bone-dim hover:text-bone'
-                  }`}
-                >
-                  <span
-                    className={`border px-1.5 py-0.5 ${isActive ? 'border-bone' : 'border-transparent'}`}
-                  >
-                    {item.label}
-                  </span>
-                </Link>
-              );
-            })}
-          </nav>
+          <DesktopNav active={active} color={color} />
           <SearchBar />
           <div className="ml-auto flex shrink-0 items-center gap-3">
             {headerControls}
-            <div className="hidden lg:block">
+            {/* Matches MobileMenu's breakpoint — below `nav-full` the sheet carries
+                own help item, and showing both would duplicate it. */}
+            <div className="hidden nav-full:block">
               <HelpButton />
             </div>
           </div>

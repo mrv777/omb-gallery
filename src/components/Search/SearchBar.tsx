@@ -183,7 +183,16 @@ export default function SearchBar() {
   };
 
   return (
-    <div ref={containerRef} className="relative shrink min-w-0 flex-1 sm:flex-none sm:w-56 md:w-72">
+    // Flexible between a floor and a cap rather than a fixed width. This is the
+    // only elastic item in the subpage header, so a fixed width has nowhere to
+    // give: at `lg` the nav appears (~490px with both tiers) alongside the
+    // colour swatches, and a hard 18rem overflowed the row by up to 130px
+    // between 1024 and 1150. The floors keep it legible instead — without the
+    // mobile one a 375px phone crushed it to 34px and rendered "sea".
+    <div
+      ref={containerRef}
+      className="relative flex-1 shrink min-w-0 min-[360px]:min-w-[5.5rem] max-w-[18rem] sm:min-w-[9rem]"
+    >
       <form ref={formRef} action="/search" method="get" onSubmit={onSubmit} role="search">
         <input
           ref={inputRef}

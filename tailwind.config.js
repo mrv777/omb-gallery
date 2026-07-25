@@ -7,6 +7,18 @@ module.exports = {
   ],
   theme: {
     extend: {
+      screens: {
+        // Width at which the *full* nav — both tiers, marketplace included —
+        // fits alongside the search field and colour swatches. Measured, not
+        // guessed: all seven items clear the subpage header with zero overflow
+        // down to 1080px, where the search input hits its 9rem floor exactly.
+        // 1120 keeps ~24px of slack for font-rendering differences.
+        //
+        // Below this the secondary tier moves into the menu sheet, so this one
+        // value drives four things that must agree: the secondary tier, the
+        // menu trigger, the menu sheet, and the inline help button.
+        'nav-full': '1120px',
+      },
       colors: {
         // Punk-zine palette. Single mode (dark).
         'ink-0': '#000000', // page background

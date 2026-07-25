@@ -56,7 +56,7 @@ export default function BravocadosPage() {
   const dispensaryItems = items.slice(0, DISPENSARY_COUNT);
 
   return (
-    <SubpageShell>
+    <SubpageShell active="bravocados">
       <section className="px-4 sm:px-6 pb-16 max-w-6xl mx-auto">
         <h1 className="font-mono text-2xl text-bone uppercase tracking-[0.08em] mb-3">
           bitcoin bravocados

@@ -325,7 +325,7 @@ export default function HistoryPage() {
   ]);
 
   return (
-    <SubpageShell>
+    <SubpageShell active="history">
       <section className="px-4 sm:px-6 pb-16 max-w-4xl mx-auto">
         <h1 className="font-mono text-2xl text-bone uppercase tracking-[0.08em] mb-3">history</h1>
         <p className="font-mono mb-10 max-w-2xl text-[11px] leading-relaxed text-bone-dim uppercase tracking-[0.08em]">

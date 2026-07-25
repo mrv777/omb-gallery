@@ -35,7 +35,7 @@ export default function MobileMenu({ active }: { active?: NavKey } = {}) {
   const close = () => setOpen(false);
 
   const sheet = open ? (
-    <div className="fixed inset-0 z-[1400] lg:hidden" onClick={close} role="presentation">
+    <div className="fixed inset-0 z-[1400] nav-full:hidden" onClick={close} role="presentation">
       <div className="absolute inset-0 bg-ink-0/70 backdrop-blur-sm" />
       <div
         role="menu"
@@ -43,8 +43,11 @@ export default function MobileMenu({ active }: { active?: NavKey } = {}) {
         className="absolute top-0 left-0 right-0 bg-ink-1 border-b border-ink-2 pt-12 pb-2 font-mono text-xs tracking-[0.12em] uppercase"
         onClick={e => e.stopPropagation()}
       >
-        {NAV_ITEMS.map(item => {
+        {NAV_ITEMS.map((item, i) => {
           const isActive = item.key === active;
+          // Mirror the desktop tier divider so the sheet tells the same story:
+          // the OMB app proper, then adjacent surfaces.
+          const startsSecondary = item.tier === 'secondary' && NAV_ITEMS[i - 1]?.tier === 'primary';
           return (
             <Link
               key={item.key}
@@ -52,8 +55,8 @@ export default function MobileMenu({ active }: { active?: NavKey } = {}) {
               role="menuitem"
               onClick={close}
               className={`flex items-center h-12 px-5 transition-colors ${
-                isActive ? 'text-bone' : 'text-bone-dim hover:text-bone'
-              }`}
+                startsSecondary ? 'border-t border-ink-2 mt-1 pt-1' : ''
+              } ${isActive ? 'text-bone' : 'text-bone-dim hover:text-bone'}`}
             >
               <span
                 className={`border px-1.5 py-0.5 ${
@@ -80,13 +83,17 @@ export default function MobileMenu({ active }: { active?: NavKey } = {}) {
     </div>
   ) : null;
 
+  // The trigger is visible below `nav-full`, not below `lg`: between those two
+  // desktop nav shows only its primary tier, so this sheet is where history /
+  // bravocados / info still live. It repeats the primary items too — harmless,
+  // and cheaper than maintaining a second overflow-only menu.
   return (
     <>
       <button
         ref={triggerRef}
         type="button"
         onClick={() => setOpen(v => !v)}
-        className="lg:hidden h-10 w-10 flex items-center justify-center text-bone-dim hover:text-bone transition-colors shrink-0"
+        className="nav-full:hidden h-10 w-10 flex items-center justify-center text-bone-dim hover:text-bone transition-colors shrink-0"
         aria-label={open ? 'Close menu' : 'Open menu'}
         aria-expanded={open}
         aria-haspopup="menu"

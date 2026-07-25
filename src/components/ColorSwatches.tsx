@@ -28,7 +28,7 @@ const ColorSwatches = memo(function ColorSwatches({ color, onChange, compact }: 
         <button
           type="button"
           onClick={() => onChange('all')}
-          className={`h-10 px-2.5 flex items-center text-[11px] tracking-[0.12em] transition-colors ${
+          className={`h-10 px-1.5 sm:px-2.5 flex items-center text-[11px] tracking-[0.12em] transition-colors ${
             color === 'all' ? 'text-bone' : 'text-bone-dim hover:text-bone'
           }`}
           aria-label="Show all colors"
@@ -49,7 +49,7 @@ const ColorSwatches = memo(function ColorSwatches({ color, onChange, compact }: 
             key={value}
             type="button"
             onClick={() => onChange(active && compact ? 'all' : value)}
-            className="h-10 w-9 flex items-center justify-center group"
+            className="h-10 w-7 sm:w-9 flex items-center justify-center group"
             aria-label={active ? `Clear ${value} filter` : `Filter by ${value}`}
             aria-pressed={active}
           >

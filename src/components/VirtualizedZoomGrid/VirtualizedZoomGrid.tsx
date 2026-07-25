@@ -33,16 +33,6 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
   const lastScrollTop = useRef(0);
   const scrollThreshold = 10; // Minimum scroll distance to trigger hide/show
 
-  // Mobile lays out the toolbar in two rows (filters + search/zoom).
-  const [isDesktop, setIsDesktop] = useState(true);
-  useEffect(() => {
-    const mq = window.matchMedia('(min-width: 768px)');
-    const update = () => setIsDesktop(mq.matches);
-    update();
-    mq.addEventListener('change', update);
-    return () => mq.removeEventListener('change', update);
-  }, []);
-
   // Filter state lives in the URL so the full filtered view is shareable.
   // Search keeps a local buffer for snappy typing — the URL is updated on the
   // same 500ms debounce as the actual filter, not on every keystroke.
@@ -315,8 +305,10 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     return () => scrollElement.removeEventListener('scroll', handleScroll);
   }, [handleScroll]);
 
+  // Two h-11 rows (nav/search, then filters) at every width — no breakpoint
+  // term, so this constant can't desync from the toolbar's actual CSS height.
   const SERIES_ROW_H = 40;
-  const headerHeight = (isDesktop ? 48 : 88) + (seriesRowOpen ? SERIES_ROW_H : 0);
+  const headerHeight = 88 + (seriesRowOpen ? SERIES_ROW_H : 0);
 
   return (
     <div className="gallery-container h-screen flex flex-col relative">

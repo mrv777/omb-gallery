@@ -1,15 +1,14 @@
 'use client';
 
-import React, { memo, useCallback } from 'react';
+import React, { memo } from 'react';
 import Link from 'next/link';
 import { ColorFilter } from '@/lib/types';
-import { appendColorParam } from '@/lib/colorFilter';
-import { NAV_ITEMS } from '@/lib/nav';
 import type { Series } from '@/lib/series';
 import ColorSwatches from './ColorSwatches';
 import SeriesChips from './SeriesChips';
 import HelpButton from './HelpButton';
 import MobileMenu from './MobileMenu';
+import DesktopNav from './DesktopNav';
 import NotificationButton, { BellIcon } from './NotificationButton/NotificationButton';
 import { Tooltip } from './ui/Tooltip';
 
@@ -57,20 +56,6 @@ const FilterControls = memo(function FilterControls({
   seriesRowOpen,
   onToggleSeriesRow,
 }: FilterControlsProps) {
-  // The search input is rendered in two places (desktop row 1, mobile row 2)
-  // and only one is visible at a time per breakpoint. A plain shared ref
-  // gets overwritten by whichever element mounts last, which on desktop is
-  // the hidden mobile input — so the `/` shortcut would focus a display:none
-  // element. This callback only stores the visible one.
-  const setSearchRef = useCallback(
-    (el: HTMLInputElement | null) => {
-      if (el && el.offsetParent !== null) {
-        searchInputRef.current = el;
-      }
-    },
-    [searchInputRef]
-  );
-
   const isSingleColor = colorFilter !== 'all';
   const filtersBlock = (
     <div className="flex items-center shrink-0">
@@ -148,7 +133,7 @@ const FilterControls = memo(function FilterControls({
 
   const searchInput = (
     <input
-      ref={setSearchRef}
+      ref={searchInputRef}
       type="search"
       value={searchQuery}
       onChange={onSearchChange}
@@ -195,48 +180,29 @@ const FilterControls = memo(function FilterControls({
 
   return (
     <div className="h-full flex flex-col font-mono text-xs tracking-[0.08em] uppercase">
-      {/* Row 1: hamburger (mobile) + nav (desktop) + filters + desktop search/zoom/help */}
-      <div className="flex items-center gap-3 sm:gap-6 px-3 sm:px-6 h-11 md:h-full">
+      {/* Row 1 — navigation + search + zoom. Search is the only flexible item
+          here, and the fixed furniture beside it is now just nav + zoom + help,
+          so it can no longer be squeezed to nothing the way it was when the
+          colour/series/play cluster shared this row (0px wide at ~1060px). */}
+      <div className="flex items-center gap-3 sm:gap-6 px-3 sm:px-6 h-11">
         <MobileMenu active="gallery" />
-
-        {/* Nav — desktop only. This is the gallery route (`/`), so `gallery` is
-            the active item and renders as a non-link boxed span. */}
-        <nav className="hidden lg:flex items-center gap-3 sm:gap-5 shrink-0">
-          {NAV_ITEMS.map(item =>
-            item.key === 'gallery' ? (
-              <span key={item.key} className="text-bone">
-                <span className="border border-bone px-1.5 py-0.5">{item.label}</span>
-              </span>
-            ) : (
-              <Link
-                key={item.key}
-                href={appendColorParam(item.href, colorFilter)}
-                className="text-bone-dim hover:text-bone transition-colors"
-              >
-                <span className="border border-transparent px-1.5 py-0.5">{item.label}</span>
-              </Link>
-            )
-          )}
-        </nav>
-
-        {filtersBlock}
-
-        {/* Desktop search + zoom + help. Search/zoom stay inline from md up; the
-            nav collapses to the hamburger below lg, which also carries the help
-            item, so the header help button only shows at lg+ to avoid duplication. */}
-        <div className="hidden md:flex items-center gap-4 sm:gap-6 flex-1 min-w-0">
-          <div className="flex-1 min-w-0">{searchInput}</div>
-          {zoomCluster}
-          <div className="hidden lg:block">
-            <HelpButton />
-          </div>
+        <DesktopNav active="gallery" color={colorFilter} />
+        <div className="flex-1 min-w-0">{searchInput}</div>
+        {zoomCluster}
+        {/* Below `nav-full` the hamburger sheet carries its own help item, so showing
+            this one too would duplicate it. */}
+        <div className="hidden nav-full:block">
+          <HelpButton />
         </div>
       </div>
 
-      {/* Row 2 — mobile only: search + zoom */}
-      <div className="md:hidden flex items-center gap-3 px-3 h-11 border-t border-ink-2">
-        <div className="flex-1 min-w-0">{searchInput}</div>
-        {zoomCluster}
+      {/* Row 2 — the filters, on their own row at every width. Mobile already
+          worked this way; making it universal means one layout to reason about
+          and one search input instead of two breakpoint-swapped copies.
+          overflow-x-auto because the cluster is ~380px and a 375px phone is
+          narrower than that. */}
+      <div className="flex items-center px-3 sm:px-6 h-11 border-t border-ink-2 overflow-x-auto">
+        {filtersBlock}
       </div>
 
       {/* Row 3 — the curated sub-series, collapsed by default. The toolbar is
