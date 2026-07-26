@@ -30,6 +30,22 @@ const DEFAULT_STALE_SEC = 600;
 const ORD_LAG_WARN_BLOCKS = 50;
 const ORD_LAG_DEGRADED_BLOCKS = 1000;
 
+// Non-'ok' last_status values that are still healthy outcomes, so the roll-up
+// doesn't cry wolf. The old test was `startsWith('ok')`, which lumped these in
+// with real faults and pinned the endpoint at `warn` on a perfectly good box:
+//   idle         — tick ran, nothing to do. The steady state for the
+//                  fingerprint taggers, cluster and loans between events.
+//   bootstrapped — first run after deploy; cursor initialised, no work yet.
+//   running      — notify's in-flight lock marker. A genuinely stuck 'running'
+//                  still surfaces, just via the staleness check instead.
+// Everything else — partial, deferred, failed, rpc-fail-hold — stays a warn.
+const HEALTHY_STATUSES = new Set(['idle', 'bootstrapped', 'running']);
+
+function isHealthyStatus(s: string | null): boolean {
+  if (s == null) return true;
+  return s.startsWith('ok') || HEALTHY_STATUSES.has(s);
+}
+
 type StreamStatus = {
   stream: string;
   collection: string;
@@ -92,7 +108,7 @@ export async function GET() {
   // stream is stale, non-ok, or ord lag exceeds threshold; never 'down' (passive
   // read can't tell us that).
   const anyStale = streams.some(s => s.stale);
-  const anyError = streams.some(s => s.last_status != null && !s.last_status.startsWith('ok'));
+  const anyError = streams.some(s => !isHealthyStatus(s.last_status));
   const ordLag = streams.find(s => s.stream === 'ord')?.ord_lag_blocks ?? 0;
   const lagDegraded = ordLag > ORD_LAG_DEGRADED_BLOCKS;
   const lagWarn = ordLag > ORD_LAG_WARN_BLOCKS;
