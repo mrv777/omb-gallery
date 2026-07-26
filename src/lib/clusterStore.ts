@@ -286,16 +286,19 @@ export async function runClusterTick(): Promise<TickResult> {
           WHERE id > @cursor AND created_at < unixepoch() - @delay`
       )
       .get({ cursor, delay: SETTLEMENT_DELAY_SEC }) as { m: number };
-    if (advanced.m > cursor) {
-      s.updateState.run({
-        c: String(advanced.m),
-        status: 'idle',
-        count: 0,
-        s: STREAM,
-        col: COLLECTION,
-      });
-      result.cursor_advanced = true;
-    }
+    // Stamp last_run_at even when the cursor doesn't move — see the sibling
+    // note in magisatFingerprintTick.ts. Note the cursor here is gated on the
+    // settlement delay, so it legitimately sits still while recent events wait
+    // it out; that must not read as a stalled tick.
+    const didAdvance = advanced.m > cursor;
+    s.updateState.run({
+      c: String(didAdvance ? advanced.m : cursor),
+      status: 'idle',
+      count: 0,
+      s: STREAM,
+      col: COLLECTION,
+    });
+    result.cursor_advanced = didAdvance;
     // Bootstrap-friendly recompute: even if no new candidates landed this
     // tick, the cluster_anchors table may be empty (first tick after a
     // deploy with the v31 schema, or after a backfill). Cheap to redo.

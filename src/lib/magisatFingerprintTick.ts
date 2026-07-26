@@ -127,14 +127,22 @@ export async function runMagisatFingerprintTick(opts: { live: boolean }): Promis
     const max = db.prepare(`SELECT COALESCE(MAX(id), @c) AS m FROM events`).get({ c: cursor }) as {
       m: number;
     };
-    if (max.m > cursor) {
-      db.prepare(
-        `UPDATE poll_state
-            SET last_cursor = @c, last_run_at = unixepoch(), last_status = 'idle'
-          WHERE stream = @s AND collection_slug = @col`
-      ).run({ c: String(max.m), s: STREAM, col: COLLECTION });
-      result.cursor_advanced = true;
-    }
+    // Stamp last_run_at even when the cursor doesn't move. "Ran, nothing to
+    // do" is a successful tick, and last_run_at is the health endpoint's only
+    // liveness signal — gating the stamp on new events made /health report
+    // `degraded` for a perfectly healthy poller during any quiet spell longer
+    // than its 900s threshold, which on a 9k collection is most of the time.
+    // last_event_count is zeroed too: it means "upgrades this tick", and
+    // leaving the previous tick's value behind made /health show a non-zero
+    // count next to an idle status. Matches cluster + listing_staging.
+    const advanced = max.m > cursor;
+    db.prepare(
+      `UPDATE poll_state
+          SET last_cursor = @c, last_run_at = unixepoch(), last_status = 'idle',
+              last_event_count = 0
+        WHERE stream = @s AND collection_slug = @col`
+    ).run({ c: String(advanced ? max.m : cursor), s: STREAM, col: COLLECTION });
+    result.cursor_advanced = advanced;
     result.duration_ms = Date.now() - startedAt;
     return result;
   }

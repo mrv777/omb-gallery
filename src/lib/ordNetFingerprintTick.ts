@@ -106,14 +106,17 @@ export async function runOrdNetFingerprintTick(opts: { live: boolean }): Promise
     const max = db.prepare(`SELECT COALESCE(MAX(id), @c) AS m FROM events`).get({ c: cursor }) as {
       m: number;
     };
-    if (max.m > cursor) {
-      db.prepare(
-        `UPDATE poll_state
-            SET last_cursor = @c, last_run_at = unixepoch(), last_status = 'idle'
-          WHERE stream = @s AND collection_slug = @col`
-      ).run({ c: String(max.m), s: STREAM, col: COLLECTION });
-      result.cursor_advanced = true;
-    }
+    // Stamp last_run_at even when the cursor doesn't move — see the sibling
+    // note in magisatFingerprintTick.ts. A quiet collection is not a dead
+    // poller, but gating the stamp on new events made /health say otherwise.
+    const advanced = max.m > cursor;
+    db.prepare(
+      `UPDATE poll_state
+          SET last_cursor = @c, last_run_at = unixepoch(), last_status = 'idle',
+              last_event_count = 0
+        WHERE stream = @s AND collection_slug = @col`
+    ).run({ c: String(advanced ? max.m : cursor), s: STREAM, col: COLLECTION });
+    result.cursor_advanced = advanced;
     result.duration_ms = Date.now() - startedAt;
     return result;
   }
