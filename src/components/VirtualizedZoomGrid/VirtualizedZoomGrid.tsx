@@ -312,7 +312,10 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
   const headerHeight = 88 + (seriesRowOpen ? SERIES_ROW_H : 0);
 
   return (
-    <div className="gallery-container h-screen flex flex-col relative">
+    // Height comes from `.gallery-container` (100vh with a 100dvh override) —
+    // deliberately not `h-screen` here, so the dvh fallback pair lives in one
+    // place and a utility can't win over it.
+    <div className="gallery-container flex flex-col relative">
       <div
         className={`header-wrapper fixed top-0 left-0 right-0 z-50 bg-ink-1 border-b border-ink-2 transition-transform duration-300 ease-in-out ${
           headerVisible ? 'translate-y-0' : '-translate-y-full'
@@ -344,9 +347,13 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
       <ZoomGestureHandler onZoom={handleZoomGesture}>
         <div
           ref={parentRef}
-          className="virtualized-grid-container flex-1 overflow-y-auto overflow-x-hidden transition-[margin-top] duration-300 ease-in-out"
+          className="virtualized-grid-container min-h-0 flex-1 overflow-y-auto overflow-x-hidden transition-[margin-top] duration-300 ease-in-out"
           style={{
-            height: '100vh',
+            // No explicit height: `flex-1` inside ZoomGestureHandler's column
+            // resolves to (viewport − marginTop), so the bottom of the grid
+            // can't fall below the fold. It used to be a hard 100vh *plus* an
+            // 88px margin, which pushed the last row out of the viewport
+            // entirely and left it unreachable.
             marginTop: headerVisible ? headerHeight : 0,
           }}
         >

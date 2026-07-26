@@ -59,19 +59,19 @@ const FilterControls = memo(function FilterControls({
   const isSingleColor = colorFilter !== 'all';
   const filtersBlock = (
     <div className="flex items-center shrink-0">
-      <ColorSwatches color={colorFilter} onChange={onColorFilterChange} />
+      <ColorSwatches color={colorFilter} onChange={onColorFilterChange} hideAllOnMobile />
       {isSingleColor && (
         <NotificationButton
           kind="color"
           targetKey={colorFilter}
           label={<BellIcon />}
-          className="h-10 w-10 flex items-center justify-center text-bone-dim hover:text-bone transition-colors"
+          className="h-10 w-8 sm:w-10 flex items-center justify-center text-bone-dim hover:text-bone transition-colors"
         />
       )}
       <button
         type="button"
         onClick={onToggleFavoritesOnly}
-        className={`h-10 w-10 flex items-center justify-center text-lg leading-none transition-colors ${
+        className={`h-10 w-8 sm:w-10 flex items-center justify-center text-lg leading-none transition-colors ${
           showFavoritesOnly ? 'text-accent-red' : 'text-bone-dim hover:text-bone'
         }`}
         aria-label={showFavoritesOnly ? 'Show all pieces' : 'Show favorites only'}
@@ -83,50 +83,63 @@ const FilterControls = memo(function FilterControls({
         onClick={onToggleSeriesRow}
         aria-pressed={seriesRowOpen}
         aria-label={seriesRowOpen ? 'Hide series filters' : 'Show series filters'}
-        className={`h-10 px-2 flex items-center transition-colors ${
+        className={`h-10 px-1.5 sm:px-2 flex items-center shrink-0 transition-colors ${
           seriesRowOpen ? 'text-bone' : 'text-bone-dim hover:text-bone'
         }`}
       >
         <span className="border border-transparent px-1.5 py-0.5 text-[11px] tracking-[0.12em]">
-          ⌗ SERIES
+          ⌗
+          {/* With a series active the chip at the end of this row already names
+              it, so on a phone the word is 56px spent saying it twice. */}
+          <span className={activeSeries ? 'hidden sm:inline' : ''}> SERIES</span>
         </span>
       </button>
-      {/* Always visible when a series filter is on, even with the chip row
-          collapsed — a filter that hides 8,900 pieces must never be silent. */}
-      {activeSeries && (
-        <button
-          type="button"
-          onClick={() => onSeriesChange(null)}
-          className="h-10 flex items-center text-bone hover:text-accent-red transition-colors"
-          aria-label={`Clear the ${activeSeries.label} filter`}
-        >
-          <span className="border border-bone px-1.5 py-0.5 text-[10px] tracking-[0.08em] whitespace-nowrap">
-            × {activeSeries.label} {activeSeries.members.length}
-          </span>
-        </button>
-      )}
+      {/* Glyph-only below `sm`. ▶ is self-explanatory in a row that already
+          speaks in glyphs (♡, ⌗), and dropping the word is part of what lets
+          the whole cluster clear a 390px phone. ⌗ SERIES keeps its label when
+          nothing is selected — the glyph alone says nothing. */}
       {playHref ? (
         <Link
           href={playHref}
-          className="h-10 px-2 flex items-center text-bone-dim hover:text-bone transition-colors"
+          className="h-10 px-1.5 sm:px-2 flex items-center shrink-0 text-bone-dim hover:text-bone transition-colors"
           aria-label="Play slideshow of current filter"
         >
           <span className="border border-transparent px-1.5 py-0.5 text-[11px] tracking-[0.12em]">
-            ▶ PLAY
+            ▶<span className="hidden sm:inline"> PLAY</span>
           </span>
         </Link>
       ) : (
         <Tooltip content="No images in the current filter">
           <span
-            className="h-10 px-2 flex items-center text-bone-dim opacity-30 cursor-not-allowed"
+            className="h-10 px-1.5 sm:px-2 flex items-center shrink-0 text-bone-dim opacity-30 cursor-not-allowed"
             aria-label="Play slideshow (no images selected)"
             aria-disabled="true"
           >
             <span className="border border-transparent px-1.5 py-0.5 text-[11px] tracking-[0.12em]">
-              ▶ PLAY
+              ▶<span className="hidden sm:inline"> PLAY</span>
             </span>
           </span>
         </Tooltip>
+      )}
+      {/* Always rendered when a series filter is on, even with the chip row
+          collapsed — a filter that hides 8,900 pieces must never be silent.
+          Last in the row on purpose: it is the widest item and the only one
+          whose width is arbitrary (the label is prose), so if anything has to
+          run past the right edge of a phone it should be this rather than a
+          control. Its "×" — the part that actually clears — stays on screen
+          either way, and the label truncates before it gets there. */}
+      {activeSeries && (
+        <button
+          type="button"
+          onClick={() => onSeriesChange(null)}
+          className="h-10 flex items-center shrink-0 pl-1 text-bone hover:text-accent-red transition-colors"
+          aria-label={`Clear the ${activeSeries.label} filter`}
+        >
+          <span className="flex items-center gap-1 border border-bone px-1.5 py-0.5 text-[10px] tracking-[0.08em] whitespace-nowrap">
+            ×<span className="max-w-[7rem] truncate sm:max-w-none">{activeSeries.label}</span>
+            {activeSeries.members.length}
+          </span>
+        </button>
       )}
     </div>
   );
@@ -199,9 +212,19 @@ const FilterControls = memo(function FilterControls({
       {/* Row 2 — the filters, on their own row at every width. Mobile already
           worked this way; making it universal means one layout to reason about
           and one search input instead of two breakpoint-swapped copies.
-          overflow-x-auto because the cluster is ~380px and a 375px phone is
-          narrower than that. */}
-      <div className="flex items-center px-3 sm:px-6 h-11 border-t border-ink-2 overflow-x-auto">
+          The cluster now fits ~370px (no ALL pill, narrower glyph buttons, ▶
+          without its label), so the scroll below is a backstop for the one case
+          that still can't fit — an active series chip, whose label is arbitrary
+          length. Scrollbar hidden: a native bar inside a 44px toolbar row reads
+          as breakage, and it was showing on every phone before the cluster was
+          compacted. */}
+      <div
+        className={`flex items-center px-3 sm:px-6 h-11 border-t border-ink-2 overflow-x-auto no-scrollbar ${
+          // Faded only in the state that can still overflow a narrow phone.
+          // Unconditional, it would dim ▶ on every screen that fits fine.
+          activeSeries ? 'edge-fade-x sm:[mask-image:none]' : ''
+        }`}
+      >
         {filtersBlock}
       </div>
 

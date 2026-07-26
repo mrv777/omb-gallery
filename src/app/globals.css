@@ -26,16 +26,48 @@ body {
 
 .gallery-container {
   width: 100%;
+  /* 100vh is the fallback for browsers without dvh (pre-iOS 15.4). dvh tracks
+   * the *visible* viewport, which keeps this from overflowing body under iOS
+   * Safari's expanded address bar in portrait — without it,
+   * body{overflow:hidden} + 100vh leaves the page resting scrolled-down and the
+   * inner grid unscrollable (WebKit bug 153852). Landscape hides the address
+   * bar, which is why the same phone scrolls fine when rotated. Same fix
+   * SubpageShell already carries. */
   height: 100vh;
+  height: 100dvh;
   position: relative;
 }
 
+/* Horizontal overflow that is expected (the toolbar filter cluster, the series
+ * chip row) — scrollable, but without a native scrollbar drawn inside a 40px
+ * toolbar row, where it reads as breakage rather than as an affordance. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Fades the right edge of a hidden-scrollbar row so "there is more" survives
+ * losing the scrollbar. */
+.edge-fade-x {
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%);
+}
+
+/* No `content-visibility: auto` here. On a scroll container it is not a free
+ * optimization: the moment the browser decides the subtree is skippable it also
+ * drops the scrollable overflow, so scrollHeight collapses to clientHeight and
+ * the grid simply stops scrolling — reproduced directly (a backgrounded tab
+ * scrolls with it removed and does not with it present). It bought nothing
+ * anyway: this element is always on screen, and react-virtual already bounds
+ * the DOM to the visible rows. */
 .virtualized-grid-container {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   scrollbar-color: var(--ink-2) transparent;
-  content-visibility: auto;
-  contain-intrinsic-size: auto 500px;
 }
 
 .virtualized-grid-container::-webkit-scrollbar {

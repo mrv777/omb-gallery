@@ -20,7 +20,10 @@ type Props = {
 
 const SeriesChips = memo(function SeriesChips({ active, onChange }: Props) {
   return (
-    <div className="flex items-center gap-2 overflow-x-auto">
+    // This row genuinely can't fit on a phone — chip labels are prose. Hide the
+    // scrollbar (it renders as a bright hairline under a 40px row) and fade the
+    // right edge instead, so "there is more" survives losing the bar.
+    <div className="flex w-full items-center gap-2 overflow-x-auto no-scrollbar edge-fade-x">
       <span className="shrink-0 text-bone-dim text-[10px] pr-1">series</span>
       {SERIES.map(s => {
         const isActive = active?.id === s.id;

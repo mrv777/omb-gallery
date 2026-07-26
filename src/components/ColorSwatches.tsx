@@ -17,20 +17,32 @@ type Props = {
   onChange: (next: ColorFilter) => void;
   /** Compact omits the "ALL" pill (use the active swatch's untoggled state instead). */
   compact?: boolean;
+  /**
+   * Drop the "ALL" pill below `sm`. Costs nothing in reach — clicking the
+   * active swatch already clears back to all — and buys ~50px on the gallery's
+   * filter row, which is the difference between fitting a 390px phone and
+   * scrolling sideways.
+   */
+  hideAllOnMobile?: boolean;
 };
 
 /** The 5 OMB color swatches plus an "all" pill. Used in the gallery header
  * via FilterControls and in the SubpageShell header on /activity + /explorer. */
-const ColorSwatches = memo(function ColorSwatches({ color, onChange, compact }: Props) {
+const ColorSwatches = memo(function ColorSwatches({
+  color,
+  onChange,
+  compact,
+  hideAllOnMobile,
+}: Props) {
   return (
     <div className="flex items-center shrink-0">
       {!compact && (
         <button
           type="button"
           onClick={() => onChange('all')}
-          className={`h-10 px-1.5 sm:px-2.5 flex items-center text-[11px] tracking-[0.12em] transition-colors ${
-            color === 'all' ? 'text-bone' : 'text-bone-dim hover:text-bone'
-          }`}
+          className={`h-10 px-1.5 sm:px-2.5 items-center text-[11px] tracking-[0.12em] transition-colors ${
+            hideAllOnMobile ? 'hidden sm:flex' : 'flex'
+          } ${color === 'all' ? 'text-bone' : 'text-bone-dim hover:text-bone'}`}
           aria-label="Show all colors"
         >
           <span
@@ -48,7 +60,11 @@ const ColorSwatches = memo(function ColorSwatches({ color, onChange, compact }: 
           <button
             key={value}
             type="button"
-            onClick={() => onChange(active && compact ? 'all' : value)}
+            // Always a toggle. The aria-label below has claimed "Clear <color>
+            // filter" all along; re-selecting the active swatch used to be a
+            // no-op, which made that a lie — and on mobile, where the ALL pill
+            // is hidden, the swatch is the only way back to unfiltered.
+            onClick={() => onChange(active ? 'all' : value)}
             className="h-10 w-7 sm:w-9 flex items-center justify-center group"
             aria-label={active ? `Clear ${value} filter` : `Filter by ${value}`}
             aria-pressed={active}
