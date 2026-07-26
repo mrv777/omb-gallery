@@ -143,19 +143,19 @@ export const SERIES: readonly Series[] = [
     label: 'White border abstract',
     slug: 'white-border-abstract',
     blurb:
-      'A fifty-piece black-eye run of layered, chaotic portraits, each framed by the same irregular slime-like white border. Forty-nine have been identified; one remains to be found.',
-    status: 'partial',
+      'A fifty-piece black-eye run of layered, chaotic portraits, each framed by the same irregular slime-like white border.',
+    status: 'complete',
     declaredSize: 50,
     members: [
-      83307198, 83307280, 83308674, 83309450, 83309489, 83309901, 83310217, 83311096, 83311179,
-      83311182, 83311186, 83311209, 83311905, 83311919, 83313077, 83313390, 83313438, 83313447,
-      83313557, 83313586, 83313592, 83313617, 83313699, 83313715, 83313719, 83313909, 83313924,
-      83313930, 83313947, 83313951, 83314016, 83314020, 83314518, 83314526, 83314535, 83314562,
-      83314575, 83314936, 83314944, 83314966, 83314967, 83315112, 83316080, 83316081, 83316338,
-      83316379, 83316380, 83316401, 83316867,
+      83304388, 83307198, 83307280, 83308674, 83309450, 83309489, 83309901, 83310217, 83311096,
+      83311179, 83311182, 83311186, 83311209, 83311905, 83311919, 83313077, 83313390, 83313438,
+      83313447, 83313557, 83313586, 83313592, 83313617, 83313699, 83313715, 83313719, 83313909,
+      83313924, 83313930, 83313947, 83313951, 83314016, 83314020, 83314518, 83314526, 83314535,
+      83314562, 83314575, 83314936, 83314944, 83314966, 83314967, 83315112, 83316080, 83316081,
+      83316338, 83316379, 83316380, 83316401, 83316867,
     ],
     provenance:
-      'Seeded 2026-07-25 from 14 entries labelled "White border abstract" in this wiki\'s own catalogue notes, then expanded with an on-device visual-similarity sweep and maintainer review. 49 of the known 50 black-eye pieces are identified. #83316072 and #83316830 were explicitly rejected during review; the final member remains unresolved.',
+      'Seeded 2026-07-25 from 14 entries labelled "White border abstract" in this wiki\'s own catalogue notes, then expanded with an on-device visual-similarity sweep and maintainer review. Completed 2026-07-26 when the maintainer identified #83304388 as the final member. #83316072 and #83316830 were explicitly rejected during review.',
     seed: { pattern: 'white border abstract', in: ['description'] },
   },
   {
