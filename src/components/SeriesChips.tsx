@@ -16,15 +16,29 @@ import { SERIES, type Series } from '@/lib/series';
 type Props = {
   active: Series | null;
   onChange: (slug: string | null) => void;
+  /**
+   * `row` is the toolbar's single scrolling line. `wrap` is for containers with
+   * vertical room (the mobile filter sheet) — chips wrap and the "series"
+   * caption is dropped, because the section heading above already says it and a
+   * horizontal scroller nested in a vertical one is a gesture conflict.
+   */
+  layout?: 'row' | 'wrap';
 };
 
-const SeriesChips = memo(function SeriesChips({ active, onChange }: Props) {
+const SeriesChips = memo(function SeriesChips({ active, onChange, layout = 'row' }: Props) {
+  const wrap = layout === 'wrap';
   return (
-    // This row genuinely can't fit on a phone — chip labels are prose. Hide the
-    // scrollbar (it renders as a bright hairline under a 40px row) and fade the
-    // right edge instead, so "there is more" survives losing the bar.
-    <div className="flex w-full items-center gap-2 overflow-x-auto no-scrollbar edge-fade-x">
-      <span className="shrink-0 text-bone-dim text-[10px] pr-1">series</span>
+    // In `row`, this genuinely can't fit on a phone — chip labels are prose. Hide
+    // the scrollbar (it renders as a bright hairline under a 40px row) and fade
+    // the right edge instead, so "there is more" survives losing the bar.
+    <div
+      className={
+        wrap
+          ? 'flex w-full flex-wrap items-center gap-2'
+          : 'flex w-full items-center gap-2 overflow-x-auto no-scrollbar edge-fade-x'
+      }
+    >
+      {!wrap && <span className="shrink-0 text-bone-dim text-[10px] pr-1">series</span>}
       {SERIES.map(s => {
         const isActive = active?.id === s.id;
         return (
@@ -33,7 +47,11 @@ const SeriesChips = memo(function SeriesChips({ active, onChange }: Props) {
             type="button"
             onClick={() => onChange(isActive ? null : s.slug)}
             aria-pressed={isActive}
-            className={`shrink-0 border px-2 py-0.5 text-[10px] tracking-[0.08em] transition-colors ${
+            className={`shrink-0 border text-[10px] tracking-[0.08em] transition-colors ${
+              // Roomier in the sheet: these are the primary tap targets there,
+              // not a dense secondary row under a toolbar.
+              wrap ? 'px-3 py-2' : 'px-2 py-0.5'
+            } ${
               isActive
                 ? 'border-bone text-bone'
                 : 'border-ink-2 text-bone-dim hover:border-bone-dim hover:text-bone'

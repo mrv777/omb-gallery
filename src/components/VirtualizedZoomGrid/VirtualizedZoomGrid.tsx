@@ -306,10 +306,46 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     return () => scrollElement.removeEventListener('scroll', handleScroll);
   }, [handleScroll]);
 
-  // Two h-11 rows (nav/search, then filters) at every width — no breakpoint
-  // term, so this constant can't desync from the toolbar's actual CSS height.
-  const SERIES_ROW_H = 40;
-  const headerHeight = 88 + (seriesRowOpen ? SERIES_ROW_H : 0);
+  // Measured, not computed. The toolbar is one h-11 row below `sm` (filters
+  // live in MobileFilterSheet) and two or three above it, so any arithmetic
+  // here would need a breakpoint term — exactly the JS-vs-CSS desync this used
+  // to avoid by being a flat constant. A ResizeObserver makes the CSS the
+  // single source of truth instead, and picks up the series row and font
+  // loading for free.
+  //
+  // The initial guess is only what the first paint uses before the observer
+  // runs; it is corrected before anything can scroll. 88 on the server (the
+  // desktop two-row case) so SSR markup matches the common client.
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(() =>
+    typeof window !== 'undefined' && !window.matchMedia('(min-width: 640px)').matches ? 44 : 88
+  );
+
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const measure = () => setHeaderHeight(el.getBoundingClientRect().height);
+    // Synchronous, then observed. The observer catches everything in one place
+    // — font swap, breakpoint crossing, the series row — but its callbacks are
+    // delivered with the rendering steps, so a background tab never gets them.
+    // resize/orientationchange and the seriesRowOpen dep are the backstops that
+    // keep this correct without it.
+    measure();
+    // One deferred re-measure for the case where the first read lands before
+    // the stylesheet has fully applied — a timer, not rAF, because rAF is also
+    // starved in a background tab.
+    const settle = window.setTimeout(measure, 0);
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    window.addEventListener('resize', measure);
+    window.addEventListener('orientationchange', measure);
+    return () => {
+      window.clearTimeout(settle);
+      observer.disconnect();
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('orientationchange', measure);
+    };
+  }, [seriesRowOpen]);
 
   return (
     // Height comes from `.gallery-container` (100vh with a 100dvh override) —
@@ -317,10 +353,10 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     // place and a utility can't win over it.
     <div className="gallery-container flex flex-col relative">
       <div
+        ref={headerRef}
         className={`header-wrapper fixed top-0 left-0 right-0 z-50 bg-ink-1 border-b border-ink-2 transition-transform duration-300 ease-in-out ${
           headerVisible ? 'translate-y-0' : '-translate-y-full'
         }`}
-        style={{ height: headerHeight }}
       >
         <FilterControls
           colorFilter={colorFilter}
