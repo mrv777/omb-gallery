@@ -74,7 +74,7 @@ export const SERIES: readonly Series[] = [
     label: 'Fuck You sketches',
     slug: 'fuck-you-sketch',
     blurb:
-      'A set of fifty the artist numbered himself, with the index written onto the drawing — "FUCK YOU SKETCH 25/50 2025" and so on, legible in the artwork. That makes it the one series with a known denominator, and the only one whose completeness can be proved rather than asserted. All fifty are accounted for.',
+      'Sketches the artist numbered himself — "FUCK YOU SKETCH 25/50 2025", written onto the drawing. The one set here whose completeness can be proved rather than asserted.',
     status: 'complete',
     declaredSize: 50,
     members: [
@@ -146,7 +146,7 @@ export const SERIES: readonly Series[] = [
     label: 'White border abstract',
     slug: 'white-border-abstract',
     blurb:
-      'A fifty-piece black-eye run of layered, chaotic portraits, each framed by the same irregular slime-like white border.',
+      'A black-eye run of layered, chaotic portraits, each framed by the same irregular slime-like white border.',
     status: 'complete',
     declaredSize: 50,
     members: [
@@ -166,7 +166,7 @@ export const SERIES: readonly Series[] = [
     label: 'Pirates',
     slug: 'pirates',
     blurb:
-      'Fifty black-eye pirates wearing the same tricorn hat — skull and crossbones over an OMB band — across ships, treasure maps, spyglasses, hooks and sea monsters.',
+      'Black-eye pirates in the same tricorn hat — skull and crossbones over an OMB band — across ships, treasure maps, spyglasses and sea monsters.',
     status: 'complete',
     declaredSize: 50,
     members: [
@@ -186,7 +186,7 @@ export const SERIES: readonly Series[] = [
     label: 'Optimus robots',
     slug: 'optimus',
     blurb:
-      "Humanoid robots after Tesla's Optimus — working fast food, on the phone refusing a request, pouring oil into its own head. Grouped here by eye: unlike the Fuck You sketches there is no marker in the artwork tying them together, so this one is our reading, not the artist's declaration.",
+      "Humanoid robots after Tesla's Optimus — working fast food, refusing a request on the phone, pouring oil into its own head. Nothing in the artwork names the set; the grouping is ours.",
     status: 'complete',
     declaredSize: 50,
     members: [

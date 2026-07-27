@@ -27,9 +27,9 @@ function SeriesCard({ series }: { series: Series }) {
         <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-bone-dim">
           {statusLabel(series)}
           {/* Stated either way, not just as a warning on the unfinished ones.
-              The section lede promises that completed and still-open sets are
-              both marked, and with every set now catalogued in full an absent
-              suffix would be the only thing carrying that — i.e. nothing. */}
+              "We believe this list is finished" and "we are still working on
+              it" are different claims, and with every set currently catalogued
+              in full, silence would be the only thing distinguishing them. */}
           {series.status === 'partial' ? ' · incomplete' : ' · complete'}
         </span>
       </div>

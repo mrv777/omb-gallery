@@ -83,8 +83,9 @@ describe('series catalogue integrity', () => {
   it.each(SERIES.map(s => [s.slug, s] as const))(
     '%s: provenance says how the list was built',
     (_slug, series) => {
-      // Rendered verbatim on /history. An empty string there would present a
-      // hand-curated guess as if it were authoritative.
+      // Not rendered — it's the note for whoever extends the list. Leaving it
+      // empty would strand a hand-curated set with no record of how it was
+      // built, which is how a guess quietly becomes authoritative.
       expect(series.provenance.length).toBeGreaterThan(40);
     }
   );

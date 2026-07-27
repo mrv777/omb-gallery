@@ -372,7 +372,7 @@ export default function HistoryPage() {
         <Section
           id="series"
           title="named sub-series"
-          lede="OMB is 1/1 hand-drawn, so there is no generative trait metadata — not here, not on any marketplace. What does exist are recurring runs, and we catalogue them by hand from our own notes on the pieces. Completed and still-open sets are marked below."
+          lede="OMB is hand-drawn 1/1s, so there are no traits to filter on. What it has instead are recurring runs, catalogued here by hand."
         >
           <SeriesCards />
         </Section>
