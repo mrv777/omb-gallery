@@ -68,7 +68,10 @@ export function blockForSat(sat: number): BlockPosition | null {
  * `confidence` is load-bearing and must not be flattened. "Block 9's coinbase
  * funded the first ever Bitcoin transaction" is provable from the chain.
  * "Block 9 was mined by Satoshi" is an inference from the Patoshi nonce
- * pattern, and "block 78 was Hal Finney" is community attribution. The UI
+ * pattern, and "block 78 was Hal Finney" is community attribution. Note the
+ * community ALSO calls 78 the first non-Satoshi block, which Patoshi itself
+ * contradicts (12 and 64 precede it and are out of range) — don't reinstate
+ * that phrasing. The UI
  * renders `attributed` claims with a † and the source link; stating both in one
  * voice is the difference between a wiki and a Twitter thread.
  */
@@ -110,7 +113,7 @@ export const NOTABLE_BLOCKS: Readonly<Record<number, NotableBlock>> = {
     nickname: '',
     attributedMiner: 'Hal Finney',
     confidence: 'attributed',
-    note: 'The first block mined by someone other than Satoshi. Attributed to Hal Finney — the first person to receive a Bitcoin transaction — by Nullish, who located these satoshis and later sourced sats for OMB. The attribution is inferred from the block timestamp lining up with Finney\'s "Running bitcoin" tweet and his early correspondence with Satoshi, not proven on-chain.',
+    note: 'The earliest block credibly attributed to a named miner other than Satoshi — widely called the first such block, though blocks 12 and 64 precede it and also fall outside the Patoshi nonce range. Attributed to Hal Finney — the first person to receive a Bitcoin transaction — by Nullish, who located these satoshis and later sourced sats for OMB. The attribution is inferred from the block timestamp lining up with Finney\'s "Running bitcoin" tweet and his early correspondence with Satoshi, not proven on-chain.',
     source: {
       label: "Nullish — Ordinal sats from Hal Finney's first mined block",
       href: 'https://medium.com/@nullish/ordinal-sats-from-hal-finneys-first-mined-bitcoin-block-have-been-found-6636b3c4925e',

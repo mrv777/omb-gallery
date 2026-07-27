@@ -278,7 +278,9 @@ export default function HistoryPage() {
     chaseTiles.push({
       id: 'vintage-2009',
       headline: `${earliestVintageCount.toLocaleString()} on ${earliestVintage} sats`,
-      label: `blocks 9 and 78, mined in bitcoin's first nine days`,
+      // "first nine days" only holds on an inclusive calendar-day count —
+      // genesis to block 78 is 7.28 days elapsed. Eight is true either way.
+      label: `blocks 9 and 78, mined within eight days of genesis`,
       href: '#sats',
     });
   }

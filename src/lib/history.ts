@@ -37,13 +37,19 @@ export type OffChainFact = {
 
 const LEATHER: Citation = {
   label: 'Leather — Guide to Ordinal Maxi Biz',
-  // The /posts/ URL 301s here; link the destination so the citation doesn't
-  // depend on a redirect surviving.
-  href: 'https://app.leather.io/support/guide/guide-to-bitcoin-ordinals-collections-what-is-ordinal-maxi-biz',
+  // The /support/guide/ URL 301s here; link the destination so the citation
+  // doesn't depend on a redirect surviving.
+  href: 'https://app.leather.io/posts/guide-to-bitcoin-ordinals-collections-what-is-ordinal-maxi-biz',
 };
+/**
+ * Wayback, deliberately. The live URL now 301s to Xverse's /ordinals-wallet
+ * product page, which carries none of the OMB claims — a soft 404. Two entries
+ * here CORRECT this post, so the thing being corrected has to stay readable or
+ * the correction is unfalsifiable.
+ */
 const XVERSE: Citation = {
-  label: 'Xverse — What Is Ordinal Maxi Biz?',
-  href: 'https://www.xverse.app/blog/ordinals-maxi-biz-omb',
+  label: 'Xverse — What Is Ordinal Maxi Biz? (archived)',
+  href: 'https://web.archive.org/web/20260218002859/https://www.xverse.app/blog/ordinals-maxi-biz-omb',
 };
 const NFTNOW: Citation = {
   label: "nft now — Christie's announces first Ordinals auction",
@@ -63,7 +69,15 @@ const NFTCULTURE: Citation = {
   label: "NFT Culture — Christie's dives into Bitcoin Ordinals",
   href: 'https://www.nftculture.com/nft-news/christies-dives-into-bitcoin-ordinals-with-ordinal-maxi-biz-auction/',
 };
-/** The only write-up found that publishes the per-lot Christie's results. */
+/**
+ * The seller's own results page — primary, and the only source that ties each
+ * price to its lot number rather than listing them as a bag of figures.
+ */
+const CHRISTIES: Citation = {
+  label: "Christie's — Ordinal Maxi Biz (OMB), sale 23443, results",
+  href: 'https://onlineonly.christies.com/s/ordinal-maxi-biz-omb/lots/3717',
+};
+/** The only secondary write-up found that publishes the per-lot results. */
 const CRYPTOFLIES: Citation = {
   label: "Cryptoflies — Christie's OMB auction results, lot by lot",
   href: 'https://cryptoflies.com/christies-first-bitcoin-nft-auction-ordinal-maxi-biz-rakes-in-730k/',
@@ -95,7 +109,7 @@ export const OFFCHAIN_TIMELINE: readonly OffChainFact[] = [
     id: 'punk-burn',
     date: '2023-06',
     title: 'Two CryptoPunks burned for whitelist',
-    body: 'Bitcoin Bandits open a burn site in mid-June and two Punks leave Ethereum for good — #8611 first, then #9146, which had just sold for 54.49 ETH (~$94,000). It was not a blanket "burn and you are in": DeGods and Bitcoin Bandits received 33 whitelist spots each for the Green Eyes mint, many of them raffled off, and everyone else who took part got WLPublic. Corrected by the OMB community after this page first went up, and confirmed against contemporaneous reporting.',
+    body: 'Bitcoin Bandits open a burn site in mid-June and two Punks leave Ethereum for good — #8611 first, which had just sold for 54.49 ETH (~$94,000), then #9146 a few days later. It was not a blanket "burn and you are in": Leather\'s guide records 33 whitelist spots each for DeGods and Bitcoin Bandits on the Green Eyes mint, most of them raffled off, with everyone else who took part getting WLPublic. Corrected by the OMB community after this page first went up, and confirmed against contemporaneous reporting and the CryptoPunks contract.',
     source: NFTNOW_PUNKS,
     confidence: 'confirmed',
     corrects: XVERSE,
@@ -104,8 +118,8 @@ export const OFFCHAIN_TIMELINE: readonly OffChainFact[] = [
     id: 'christies',
     date: '2024-04',
     title: "Christie's first Ordinals auction — $730,800",
-    body: "Christie's runs its first-ever Bitcoin Ordinals auction, April 9–16, four lots curated by ZK Shark. Total realised: $730,800. Watch the figure people quote: $441,000 was LOT 1 alone. The other three went for $126,000, $88,200 and $75,600. Write-ups that report $441,000 as the whole sale are quoting one lot as if it were four.",
-    source: CRYPTOFLIES,
+    body: "Christie's runs its first Bitcoin Ordinals auction, 9–16 April 2024, four lots selected by creator ZK Shark. Total realised: $730,800 — lot 1 $441,000, lot 2 $88,200, lot 3 $75,600, lot 4 $126,000. Watch the figure people quote: $441,000 was LOT 1 alone, itself a four-piece red/blue/green/orange set, which is how it ends up repeated as though it were the whole sale.",
+    source: CHRISTIES,
     confidence: 'confirmed',
     corrects: NFTNOW,
   },
@@ -134,7 +148,7 @@ export const OPEN_QUESTIONS: readonly OpenQuestion[] = [
     id: 'block-attribution',
     question: 'Were blocks 9 and 78 really mined by Satoshi and Hal Finney?',
     whatWeKnow:
-      'Neither is provable from the chain. Block 9\'s coinbase demonstrably funded the first ever Bitcoin transaction — 10 BTC to Hal Finney in block 170 — and that part is fact. Attributing the mining of block 9 to Satoshi rests on the Patoshi nonce pattern. Block 78 is the first block mined by someone other than Satoshi, and the Finney attribution comes from Nullish, who traced it by lining the block timestamp up with Finney\'s "Running bitcoin" tweet and his early correspondence with Satoshi — a correlation, not a signature. Both are strong community consensus. We mark them † throughout.',
+      "Neither is provable from the chain. Block 9's coinbase demonstrably funded the first ever Bitcoin transaction — 10 BTC to Hal Finney in block 170 — and that part is fact. Attributing the mining of block 9 to Satoshi rests on the Patoshi nonce pattern. Block 78 is widely called the first block mined by someone other than Satoshi, and that part does not survive checking: blocks 12 and 64 both precede it and both fall outside the Patoshi nonce range, so the same heuristic that puts block 9 in Satoshi's hands rules them out of it too. Block 78 is better described as the earliest block credibly attributed to a named miner. The Finney attribution itself comes from Nullish, who traced it by lining the block timestamp up with Finney's \"Running bitcoin\" tweet and his early correspondence with Satoshi — a correlation, not a signature. We mark all of it † throughout.",
     sources: [
       {
         label: 'Patoshi pattern — Sergio Demian Lerner',
@@ -164,7 +178,7 @@ export function collectSources(
   return Array.from(byHref.values()).sort((a, b) => a.label.localeCompare(b.label));
 }
 
-export const EXTRA_SOURCES: readonly Citation[] = [NFTCULTURE, OMB_COMMUNITY];
+export const EXTRA_SOURCES: readonly Citation[] = [NFTCULTURE, OMB_COMMUNITY, CRYPTOFLIES];
 
 /**
  * Sort key for merging hand-written facts with chain-derived rows. Partial
