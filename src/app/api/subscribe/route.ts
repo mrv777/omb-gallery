@@ -123,6 +123,16 @@ export async function POST(req: NextRequest) {
   const eventMask = readEventMask(body, kind);
 
   const ip = clientIpKey(req.headers);
+  // A signed channel-binding cookie proves control of the destination, but it
+  // does not make repeated subscription writes free. Apply the same creation
+  // budget before both the cookie fast path and first-time onboarding.
+  const perIp = checkAndConsumePerIp('subscribe', ip, PER_MIN, PER_DAY);
+  if (!perIp.ok) {
+    return new NextResponse(JSON.stringify({ error: 'rate-limited' }), {
+      status: 429,
+      headers: { 'content-type': 'application/json', 'retry-after': String(perIp.retryAfterSec) },
+    });
+  }
 
   // Re-use any cookie binding for the requested channel. The cookie can hold
   // multiple Discord webhooks side by side, so the fast path resolution order
@@ -179,14 +189,6 @@ export async function POST(req: NextRequest) {
   }
 
   // No session — go through the full per-channel onboarding flow.
-  const perIp = checkAndConsumePerIp('subscribe', ip, PER_MIN, PER_DAY);
-  if (!perIp.ok) {
-    return new NextResponse(JSON.stringify({ error: 'rate-limited' }), {
-      status: 429,
-      headers: { 'content-type': 'application/json', 'retry-after': String(perIp.retryAfterSec) },
-    });
-  }
-
   if (channel === 'telegram') {
     if (!telegramConfigured()) return bad(503, 'not-configured');
     const { row, claimToken } = createPending({

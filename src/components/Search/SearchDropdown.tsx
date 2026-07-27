@@ -36,11 +36,12 @@ export default function SearchDropdown({
   onClose,
 }: Props) {
   const hasAnyResults =
-    results &&
-    (results.inscriptions.length ||
-      results.holders.length ||
-      results.users.length ||
-      results.events.length);
+    results != null &&
+    results.inscriptions.length +
+      results.holders.length +
+      results.users.length +
+      results.events.length >
+      0;
 
   return (
     <div
@@ -284,12 +285,7 @@ function InscriptionRow({ item }: { item: SearchResults['inscriptions'][number] 
             />
           ) : (
             /* eslint-disable-next-line @next/next/no-img-element */
-            <img
-              src={hit.thumbnail}
-              alt=""
-              loading="lazy"
-              className="w-full h-full object-cover"
-            />
+            <img src={hit.thumbnail} alt="" loading="lazy" className="w-full h-full object-cover" />
           ))}
       </span>
       <span className="font-mono text-xs text-bone tabular-nums truncate">
@@ -335,7 +331,12 @@ function UserRow({ item }: { item: SearchResults['users'][number] }) {
   return (
     <div className="grid grid-cols-[1.25rem_1fr_auto] items-center gap-2.5">
       <span className="block w-5 h-5 bg-ink-2 overflow-hidden rounded-sm">
-        <SafeImg src={item.avatar_url} alt="" loading="lazy" className="w-full h-full object-cover" />
+        <SafeImg
+          src={item.avatar_url}
+          alt=""
+          loading="lazy"
+          className="w-full h-full object-cover"
+        />
       </span>
       <span className="font-mono text-xs text-bone truncate">
         {showsName ? `@${item.username}` : truncateAddr(item.first_wallet ?? '', 6, 4)}

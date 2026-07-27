@@ -265,7 +265,11 @@ function buildDiscordDigest(
   const fields: DiscordEmbed['fields'] = [];
   if (digest.color) fields.push({ name: 'Color', value: digest.color, inline: true });
   fields.push({ name: 'Hops', value: String(digest.hops), inline: true });
-  fields.push({ name: 'Window', value: formatDuration(digest.endedAt - digest.startedAt), inline: true });
+  fields.push({
+    name: 'Window',
+    value: formatDuration(digest.endedAt - digest.startedAt),
+    inline: true,
+  });
   fields.push({ name: 'From', value: ownerDisplay(digest.firstOwner, matrica), inline: true });
   fields.push({ name: 'To', value: ownerDisplay(digest.lastOwner, matrica), inline: true });
   return [
@@ -517,7 +521,10 @@ async function dispatch(
     }
     const dead = r.error.kind === 'blocked';
     const retryable =
-      r.error.kind === 'config' || r.error.kind === 'rate-limit' || r.error.kind === 'network';
+      r.error.kind === 'config' ||
+      r.error.kind === 'rate-limit' ||
+      r.error.kind === 'network' ||
+      (r.error.kind === 'http' && r.error.status >= 500);
     if (!retryable) {
       recordDeliveryFailure(bucket.channel, bucket.channelTarget, dead);
     }

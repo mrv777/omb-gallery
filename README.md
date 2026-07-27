@@ -50,6 +50,25 @@ pnpm build
 pnpm start
 ```
 
+## Operational safety and marketplace contracts
+
+- Per-IP abuse controls trust `CF-Connecting-IP` / `X-Forwarded-For`
+  only when the origin rejects direct public traffic and accepts ingress
+  solely from the configured proxy. Enforce that at the firewall, with
+  Cloudflare Authenticated Origin Pulls, or with Cloudflare Tunnel;
+  application-level header parsing cannot authenticate the sender.
+- Satflow buying follows the documented
+  [`/v1/intent/secure-purchase`](https://docs.satflow.com/reference/post_intent-secure-purchase)
+  and
+  [`/v1/purchase/broadcast`](https://docs.satflow.com/reference/post_purchase-broadcast)
+  contracts. ORD.NET buying follows its documented
+  [wallet-binding preflight/submit flow](https://developers.ord.net/reference/buying/).
+  These links were last checked on 2026-07-26; update the contract
+  regression tests and this note together if an upstream contract changes.
+- `MARKETPLACE_MOCK_WALLET` and its public companion are development
+  conveniences that bypass wallet-signature verification. Both are
+  ignored when `NODE_ENV=production`.
+
 ## Tips
 
 If this project is useful to you, a small Bitcoin tip is appreciated:

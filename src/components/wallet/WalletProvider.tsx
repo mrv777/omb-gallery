@@ -28,7 +28,9 @@ type WalletContextValue = {
 
 const WalletContext = createContext<WalletContextValue | null>(null);
 const STORAGE_KEY = 'omb_market_wallet';
-const MOCK_WALLET_CLIENT = process.env.NEXT_PUBLIC_MARKETPLACE_MOCK_WALLET === 'true';
+const MOCK_WALLET_CLIENT =
+  process.env.NODE_ENV !== 'production' &&
+  process.env.NEXT_PUBLIC_MARKETPLACE_MOCK_WALLET === 'true';
 
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [wallet, setWallet] = useState<BuyerSessionState | null>(null);

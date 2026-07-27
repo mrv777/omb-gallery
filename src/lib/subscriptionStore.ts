@@ -76,7 +76,10 @@ function getStmts(): Stmts {
       )
       ON CONFLICT(channel, channel_target, kind, target_key) DO UPDATE SET
         status     = 'active',
-        event_mask = excluded.event_mask,
+        -- Re-subscribing is additive. Explicit removals go through the manage
+        -- endpoint's setEventMaskById statement; a one-click watch action must
+        -- not silently erase event types the user already selected there.
+        event_mask = (event_mask | excluded.event_mask),
         fail_count = 0
       RETURNING *
     `),

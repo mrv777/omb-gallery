@@ -30,7 +30,9 @@ export function marketplaceFixtureListingsEnabled(): boolean {
 }
 
 export function marketplaceMockWalletEnabled(): boolean {
-  return process.env.MARKETPLACE_MOCK_WALLET === 'true';
+  // This path mints a buyer session without wallet-signature verification.
+  // Never let a stale production environment flag turn it into an auth bypass.
+  return process.env.NODE_ENV !== 'production' && process.env.MARKETPLACE_MOCK_WALLET === 'true';
 }
 
 export function marketplaceEnabled(): boolean {

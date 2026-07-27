@@ -119,9 +119,10 @@ export type HolderEventsCursor = { ts: number; id: number };
  * sorted globally by (block_timestamp DESC, id DESC). Used by both the SSR
  * holder page (cursor=null, initial page) and the paginated API route.
  *
- * Per-wallet over-fetch is `limit * Math.max(2, wallets.length)` — for the
- * common single-wallet case that's `limit*2`; for multi-wallet aggregations
- * it scales so dedupe overlap can't truncate below `limit`.
+ * Per-wallet over-fetch is a fixed `limit * 4`. An event can match at most
+ * four distinct wallets in the aggregate (new owner, old owner, borrower,
+ * lender), and the SQL guards prevent duplicate roles for the same wallet.
+ * The fixed bound avoids O(limit * wallets²) work for large Matrica groups.
  */
 export function fetchHolderEventsPage(
   wallets: string[],
@@ -129,7 +130,7 @@ export function fetchHolderEventsPage(
   limit: number
 ): { events: EventRow[]; nextCursor: HolderEventsCursor | null } {
   const stmts = getStmts();
-  const perWallet = limit * Math.max(2, wallets.length);
+  const perWallet = limit * 4;
   const merged = new Map<number, EventRow>();
   for (const w of wallets) {
     const rows =

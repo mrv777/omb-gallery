@@ -2,11 +2,18 @@ import 'server-only';
 
 const V4 = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 
+function normalizeIpv4(raw: string): string | null {
+  if (!V4.test(raw)) return null;
+  const octets = raw.split('.').map(Number);
+  if (octets.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+  return octets.join('.');
+}
+
 function normalizeIpv6To64(raw: string): string | null {
   // IPv4-mapped (::ffff:1.2.3.4) → treat as v4
   if (/^::ffff:/i.test(raw)) {
-    const tail = raw.slice(7);
-    if (V4.test(tail)) return tail;
+    const mapped = normalizeIpv4(raw.slice(7));
+    if (mapped) return mapped;
   }
   const zone = raw.indexOf('%');
   const v6 = zone === -1 ? raw : raw.slice(0, zone);
@@ -31,7 +38,10 @@ function normalizeIpv6To64(raw: string): string | null {
 }
 
 // Build the rate-limit key for this request's client IP.
-// Hetzner origin sits behind Cloudflare; CF-Connecting-IP is trustworthy there.
+// IMPORTANT: forwarded headers are trustworthy only while the origin rejects
+// direct public traffic and accepts requests solely from the configured proxy.
+// DEPLOYMENT.md records that infrastructure requirement; parsing here cannot
+// authenticate who supplied a syntactically valid header.
 // v4 → full address. v6 → collapse to /64 prefix so an attacker can't cycle
 // addresses within one residential v6 block to bypass the per-IP bucket.
 export function clientIpKey(headers: Headers): string {
@@ -39,10 +49,13 @@ export function clientIpKey(headers: Headers): string {
   const xff = headers.get('x-forwarded-for')?.split(',')[0]?.trim();
   const raw = cf || xff || '';
   if (!raw) return 'unknown';
-  if (V4.test(raw)) return raw;
+  const v4 = normalizeIpv4(raw);
+  if (v4) return v4;
   if (raw.includes(':')) {
     const key = normalizeIpv6To64(raw);
     if (key) return key;
   }
-  return raw;
+  // Never let malformed attacker-controlled strings create unlimited distinct
+  // in-memory buckets. Invalid inputs share the fail-closed unknown bucket.
+  return 'unknown';
 }

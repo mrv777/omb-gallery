@@ -27,6 +27,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   try {
     if (fs.existsSync(tempDir)) {
       fs.rmSync(tempDir, { recursive: true, force: true });
@@ -101,6 +102,33 @@ async function subscribeDiscordTargets(...targets: string[]) {
     expect(created.ok).toBe(true);
   }
 }
+
+describe('subscription updates', () => {
+  it('unions event types when an existing watch is re-subscribed', async () => {
+    const store = await import('../src/lib/subscriptionStore');
+    const first = store.createActive({
+      channel: 'discord',
+      channelTarget: WEBHOOK_A,
+      kind: 'collection',
+      targetKey: 'omb',
+      eventMask: store.MASK_SOLD,
+      creatorIp: '127.0.0.1',
+    });
+    expect(first.ok).toBe(true);
+
+    const second = store.createActive({
+      channel: 'discord',
+      channelTarget: WEBHOOK_A,
+      kind: 'collection',
+      targetKey: 'omb',
+      eventMask: store.MASK_LISTED,
+      creatorIp: '127.0.0.1',
+    });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.row.event_mask).toBe(store.MASK_SOLD | store.MASK_LISTED);
+  });
+});
 
 describe('runNotifyFanout delivery dedupe', () => {
   it('does not resend an already-delivered event to a target while another target retries', async () => {
@@ -203,6 +231,46 @@ describe('runNotifyFanout delivery dedupe', () => {
     expect(result.events_dequeued).toBe(0);
     expect(result.events_deferred).toBe(1);
     expect(posts).toHaveLength(0);
+  });
+
+  it('retries Telegram server errors without striking the subscription', async () => {
+    vi.stubEnv('TELEGRAM_BOT_TOKEN', 'test-token');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            error_code: 500,
+            description: 'temporary Telegram server error',
+          }),
+          { status: 500, headers: { 'content-type': 'application/json' } }
+        );
+      })
+    );
+
+    const store = await import('../src/lib/subscriptionStore');
+    const created = store.createActive({
+      channel: 'telegram',
+      channelTarget: '123456789',
+      kind: 'collection',
+      targetKey: 'omb',
+      eventMask: store.MASK_LISTED,
+      creatorIp: '127.0.0.1',
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    enqueueListedEvent('listed:satflow:test-telegram-500');
+
+    const { runNotifyFanout } = await import('../src/lib/notify');
+    const result = await runNotifyFanout();
+    expect(result.events_deferred).toBe(1);
+
+    const row = dbModule
+      .getDb()
+      .prepare(`SELECT status, fail_count FROM subscriptions WHERE id = ?`)
+      .get(created.row.id) as { status: string; fail_count: number };
+    expect(row).toEqual({ status: 'active', fail_count: 0 });
   });
 
   it('drops stale listed events when the active listing has already changed', async () => {
@@ -447,9 +515,9 @@ describe('runNotifyFanout transfer-burst coalescing', () => {
     );
     expect(digests).toHaveLength(1);
     // Hops 4,5,6 were suppressed — the digest speaks for exactly those.
-    expect((digests[0] as { fields: Array<{ name: string; value: string }> }).fields).toContainEqual(
-      { name: 'Hops', value: '3', inline: true }
-    );
+    expect(
+      (digests[0] as { fields: Array<{ name: string; value: string }> }).fields
+    ).toContainEqual({ name: 'Hops', value: '3', inline: true });
     expect(countRows('notify_bursts')).toBe(0);
   });
 });

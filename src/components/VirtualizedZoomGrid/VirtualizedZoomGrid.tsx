@@ -209,16 +209,21 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
   }, [filteredImages.length]);
 
   // Reset current image if filtered images change and current image is out of bounds.
-  // Clamp to the last valid index so unfavoriting the last open piece slides to its
-  // neighbor rather than jumping back to zero.
+  // An empty result must also close the modal: leaving only isModalOpen=true keeps
+  // the global arrow-key handler active even though ImageModal renders nothing.
+  // Otherwise clamp to the last valid index so unfavoriting the last open piece
+  // slides to its neighbor rather than jumping back to zero.
   useEffect(() => {
-    if (currentImage < 0) return;
     if (filteredImages.length === 0) {
-      setCurrentImage(-1);
-    } else if (currentImage >= filteredImages.length) {
+      if (currentImage !== -1) setCurrentImage(-1);
+      if (isModalOpen) setIsModalOpen(false);
+      return;
+    }
+    if (currentImage < 0) return;
+    if (currentImage >= filteredImages.length) {
       setCurrentImage(filteredImages.length - 1);
     }
-  }, [filteredImages.length, currentImage]);
+  }, [filteredImages.length, currentImage, isModalOpen]);
 
   // Keyboard navigation
   useEffect(() => {
