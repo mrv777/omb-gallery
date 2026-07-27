@@ -93,7 +93,10 @@ export const OFFCHAIN_TIMELINE: readonly OffChainFact[] = [
     id: 'origin',
     date: '2023-02',
     title: 'ZK Shark quits finance; Tony Tafuro starts drawing',
-    body: 'Ordinal Maxi Biz is built by the pseudonymous ZK Shark, a former Wall Street professional who left his job to work on it full time, with artist Tony Tafuro drawing every head by hand and further artwork from berkin bags. Nullish — the sat-hunter who located and secured the block-78 satoshis in the first place — sourced the sats that later drops were inscribed on.',
+    // "Former Wall Street professional" is not what the source says — Leather
+    // says only "finance job". The Wall Street version traces to nftpricefloor
+    // and gets copied downstream. Don't upgrade the claim; we can't source it.
+    body: 'Ordinal Maxi Biz is built by the pseudonymous ZK Shark, who quit his finance job to work on it full time, with artist Tony Tafuro drawing every head by hand and further artwork from berkin bags. Nullish — the sat-hunter who located and secured the block-78 satoshis in the first place — sourced the sats that later drops were inscribed on.',
     source: LEATHER,
     confidence: 'confirmed',
   },
