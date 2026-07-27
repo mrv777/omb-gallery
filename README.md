@@ -56,7 +56,10 @@ pnpm start
   only when the origin rejects direct public traffic and accepts ingress
   solely from the configured proxy. Enforce that at the firewall, with
   Cloudflare Authenticated Origin Pulls, or with Cloudflare Tunnel;
-  application-level header parsing cannot authenticate the sender.
+  application-level header parsing cannot authenticate the sender. Production
+  has enforced Cloudflare-only web ingress since 2026-07-27 via the host's
+  `omb-public-ingress.service`; direct origin access and public ports 8001/8080
+  are blocked, while Coolify administration ports are intentionally unchanged.
 - Satflow buying follows the documented
   [`/v1/intent/secure-purchase`](https://docs.satflow.com/reference/post_intent-secure-purchase)
   and
