@@ -27,8 +27,9 @@
 //
 // Seeding off (2) is fine; it's how these sets were found. Presenting (2) as
 // (1) is not. Every entry records which it was in `provenance` (an internal
-// note, not rendered), and `status: 'partial'` tells readers we know we're
-// missing some.
+// note, not rendered). All four sets are now catalogued in full; `status`
+// stays in the type so a newly-seeded set can still say so while it is being
+// built out.
 //
 // To extend or finish a set: `pnpm series-scout --seed <term>` to find the
 // band, `--band a-b` for a slideshow link that makes eyeballing it quick, then
@@ -73,16 +74,16 @@ export const SERIES: readonly Series[] = [
     label: 'Fuck You sketches',
     slug: 'fuck-you-sketch',
     blurb:
-      'A set of fifty the artist numbered himself, with the index written onto the drawing — "FUCK YOU SKETCH 25/50 2025" and so on, legible in the artwork. That makes it the one series with a known denominator, and the only one where you can prove exactly what is still missing.',
-    status: 'partial',
+      'A set of fifty the artist numbered himself, with the index written onto the drawing — "FUCK YOU SKETCH 25/50 2025" and so on, legible in the artwork. That makes it the one series with a known denominator, and the only one whose completeness can be proved rather than asserted. All fifty are accounted for.',
+    status: 'complete',
     declaredSize: 50,
     members: [
       83294043, 83294044, 83294045, 83294074, 83294091, 83295229, 83295230, 83295236, 83295243,
       83295258, 83295266, 83295267, 83295289, 83295293, 83295313, 83295319, 83295492, 83295499,
       83295502, 83295534, 83295541, 83295555, 83295558, 83295562, 83295630, 83295640, 83295664,
-      83295670, 83295686, 83295759, 83295822, 83295844, 83295928, 83296235, 83296258, 83296418,
-      83296421, 83296835, 83297136, 83297158, 83297346, 83297350, 83297524, 83297561, 83298066,
-      83301802, 83308591, 83308608,
+      83295670, 83295686, 83295759, 83295821, 83295822, 83295844, 83295928, 83296235, 83296258,
+      83296418, 83296421, 83296835, 83297136, 83297158, 83297346, 83297350, 83297524, 83297561,
+      83298066, 83301802, 83308591, 83308608, 83310260,
     ],
     memberIndex: {
       83294043: 25,
@@ -115,6 +116,7 @@ export const SERIES: readonly Series[] = [
       83295670: 47,
       83295686: 50,
       83295759: 23,
+      83295821: 22,
       83295822: 41,
       83295844: 15,
       83295928: 45,
@@ -133,9 +135,10 @@ export const SERIES: readonly Series[] = [
       83301802: 8,
       83308591: 3,
       83308608: 34,
+      83310260: 9,
     },
     provenance:
-      'Seeded 2026-07-24 from this wiki\'s own catalogue notes, which record the "N/50" written on each drawing. Expanded 2026-07-25 with an on-device visual sweep and direct review of the artwork. 48 of the declared 50 are now identified, all black eyes, clustered in #83294043–#83308608; indices 9 and 22 have not yet been located.',
+      'Seeded 2026-07-24 from this wiki\'s own catalogue notes, which record the "N/50" written on each drawing. Expanded 2026-07-25 with an on-device visual sweep and direct review of the artwork. Completed 2026-07-26 when the maintainer identified #83295821 as 22/50 and #83310260 as 9/50.',
     seed: { pattern: 'fuck you sketch', in: ['description'] },
   },
   {
@@ -163,17 +166,19 @@ export const SERIES: readonly Series[] = [
     label: 'Pirates',
     slug: 'pirates',
     blurb:
-      'Tricorn hats, ships, spyglasses, hooks and one bitcoin earring. The same hat — skull and crossbones over an OMB band — recurs across nearly the whole run, which is what marks this as a set rather than a motif that happened to come round twice.',
-    status: 'partial',
-    declaredSize: null,
+      'Fifty black-eye pirates wearing the same tricorn hat — skull and crossbones over an OMB band — across ships, treasure maps, spyglasses, hooks and sea monsters.',
+    status: 'complete',
+    declaredSize: 50,
     members: [
-      60569771, 83296231, 83298016, 83301817, 83302969, 83304370, 83304609, 83307199, 83308657,
-      83309456, 83309884, 83309905, 83310004, 83310290, 83310355, 83311047, 83311067, 83311086,
-      83311158, 83311213, 83311351, 83311921, 83311939, 83311965, 83312965, 83313589, 83313913,
-      83314539,
+      83295233, 83295475, 83295485, 83295489, 83295510, 83295532, 83295660, 83295680, 83296231,
+      83296234, 83296385, 83296414, 83297388, 83297511, 83297958, 83298016, 83299033, 83299974,
+      83301778, 83301817, 83302969, 83302986, 83304370, 83304609, 83307199, 83308592, 83308657,
+      83309456, 83309466, 83309505, 83309884, 83309905, 83310004, 83310278, 83310290, 83310341,
+      83310355, 83311047, 83311067, 83311086, 83311158, 83311213, 83311351, 83311921, 83311939,
+      83313541, 83313589, 83313913, 83315127, 83315128,
     ],
     provenance:
-      'Seeded 2026-07-24 from this wiki\'s own catalogue notes containing "pirate", then confirmed by eye against the shared hat. 27 black eyes clustered in #83296231–#83314539 plus one earlier orange (#60569771). Open-ended — pieces whose note is blank or does not use the word have not been reviewed.',
+      'Seeded 2026-07-24 from this wiki\'s own catalogue notes containing "pirate", then rebuilt from the maintainer\'s same-hat list on 2026-07-26. The completed set contains 50 black eyes. #60569771, #83311965, #83312965, and #83314539 were explicitly excluded because they do not wear the matching OMB pirate hat.',
     seed: { pattern: 'pirate', in: ['description'] },
   },
   {
@@ -182,16 +187,18 @@ export const SERIES: readonly Series[] = [
     slug: 'optimus',
     blurb:
       "Humanoid robots after Tesla's Optimus — working fast food, on the phone refusing a request, pouring oil into its own head. Grouped here by eye: unlike the Fuck You sketches there is no marker in the artwork tying them together, so this one is our reading, not the artist's declaration.",
-    status: 'partial',
-    declaredSize: null,
+    status: 'complete',
+    declaredSize: 50,
     members: [
       83293807, 83294081, 83294082, 83295252, 83295260, 83295275, 83295306, 83295491, 83295498,
-      83295503, 83295540, 83295560, 83295634, 83295643, 83295691, 83295695, 83295746, 83295756,
-      83295815, 83295915, 83295936, 83296271, 83296354, 83296373, 83296392, 83296420, 83296764,
-      83296826, 83299046, 83299885, 83299973, 83301395, 83301785, 83308300, 83309471,
+      83295503, 83295540, 83295560, 83295634, 83295643, 83295691, 83295693, 83295695, 83295704,
+      83295746, 83295749, 83295756, 83295770, 83295787, 83295815, 83295864, 83295915, 83295936,
+      83296271, 83296279, 83296354, 83296373, 83296392, 83296420, 83296427, 83296764, 83296826,
+      83299046, 83299066, 83299885, 83299973, 83301395, 83301404, 83301785, 83302985, 83304387,
+      83307291, 83307329, 83308300, 83308675, 83309471,
     ],
     provenance:
-      'Seeded 2026-07-24 from this wiki\'s own "Optimus" / "Tesla" tags. Expanded 2026-07-25 with an on-device visual-similarity sweep, contact-sheet review, and maintainer corrections. 35 black-eye robots are currently catalogued.',
+      'Seeded 2026-07-24 from this wiki\'s own "Optimus" / "Tesla" tags. Expanded 2026-07-25 with an on-device visual-similarity sweep and contact-sheet review, then completed from the maintainer\'s 50-robot list on 2026-07-26.',
     seed: { pattern: 'optimus|tesla', in: ['tags'] },
   },
 ];

@@ -26,7 +26,11 @@ function SeriesCard({ series }: { series: Series }) {
         <h3 className="font-mono text-sm text-bone uppercase tracking-[0.08em]">{series.label}</h3>
         <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-bone-dim">
           {statusLabel(series)}
-          {series.status === 'partial' && ' · incomplete'}
+          {/* Stated either way, not just as a warning on the unfinished ones.
+              The section lede promises that completed and still-open sets are
+              both marked, and with every set now catalogued in full an absent
+              suffix would be the only thing carrying that — i.e. nothing. */}
+          {series.status === 'partial' ? ' · incomplete' : ' · complete'}
         </span>
       </div>
 
@@ -56,8 +60,8 @@ function SeriesCard({ series }: { series: Series }) {
 
       {/* series.provenance is deliberately NOT rendered — how a list was seeded
           is maintainer methodology, and on a public card it buried the art
-          under a paragraph of process. The status pill above ("27 / 50
-          catalogued · incomplete") carries the honesty the reader needs. */}
+          under a paragraph of process. The status pill above ("50 / 50
+          catalogued · complete") carries the honesty the reader needs. */}
 
       <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1">
         <Link
