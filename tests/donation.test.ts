@@ -33,7 +33,7 @@ describe('donation amount and BIP21 helpers', () => {
   it('renders amount-bearing BIP21 URIs with exact BTC precision and encoded metadata', () => {
     const uri = buildDonationUri(10_000);
     expect(uri).toBe(
-      `bitcoin:${DONATION_CONFIG.address}?amount=0.00010000&label=OMB+Archive&message=Support+the+archive`
+      `bitcoin:${DONATION_CONFIG.address}?amount=0.00010000&label=OMB+Archive&message=Support+the+site`
     );
     expect(satsToBtc(100_000_000)).toBe('1.00000000');
     expect(satsToBtc(2_100_000_000_000_000)).toBe('21000000.00000000');

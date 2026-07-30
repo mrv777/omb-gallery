@@ -138,13 +138,13 @@ export default function DonationDialog({ onClose }: { onClose: () => void }) {
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 id="donation-title" className="text-lg text-bone sm:text-xl">
-              support the archive
+              support the site
             </h2>
             <p
               id="donation-description"
               className="mt-2 max-w-xl text-[11px] normal-case leading-relaxed tracking-normal text-bone-dim"
             >
-              Donations help cover indexing, hosting, and continued development of the OMB Archive.
+              Donations help cover the site&apos;s indexing, hosting, and continued development.
             </p>
           </div>
           <button
@@ -357,7 +357,7 @@ function SuccessState({ txid, onClose }: { txid: string; onClose: () => void }) 
   const txUrl = `https://mempool.space/tx/${txid}`;
   return (
     <div className="mt-8 border border-accent-green/50 bg-accent-green/5 p-5">
-      <h3 className="text-accent-green">thank you for supporting the archive</h3>
+      <h3 className="text-accent-green">thank you for supporting the site</h3>
       <p className="mt-3 text-[10px] normal-case tracking-normal text-bone-dim">
         Your wallet broadcast the transaction.
       </p>

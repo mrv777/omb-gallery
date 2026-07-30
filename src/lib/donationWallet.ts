@@ -116,7 +116,7 @@ async function connectWallet(request: DonationRequest, providerId: string): Prom
     'wallet_connect',
     {
       addresses: [AddressPurpose.Payment],
-      message: 'Support OMB Archive.',
+      message: 'Support the OMB site.',
       network: BitcoinNetworkType.Mainnet,
     },
     providerId
