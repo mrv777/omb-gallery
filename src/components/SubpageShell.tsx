@@ -2,7 +2,8 @@ import type { ReactNode } from 'react';
 import HelpButton from './HelpButton';
 import MobileMenu from './MobileMenu';
 import DesktopNav from './DesktopNav';
-import FirehoseSubscribe from './FirehoseSubscribe';
+import DonationTrigger from './Donation/DonationTrigger';
+import SiteFooter from './SiteFooter';
 import SearchBar from './Search/SearchBar';
 import type { ColorFilter } from '@/lib/types';
 import { type NavKey } from '@/lib/nav';
@@ -36,45 +37,15 @@ export default function SubpageShell({ active, color = 'all', headerControls, ch
             {headerControls}
             {/* Matches MobileMenu's breakpoint — below `nav-full` the sheet carries
                 own help item, and showing both would duplicate it. */}
-            <div className="hidden nav-full:block">
+            <div className="hidden nav-full:flex">
+              <DonationTrigger variant="header" />
               <HelpButton />
             </div>
           </div>
         </div>
       </header>
       <main className="pt-6">{children}</main>
-      <footer className="px-4 sm:px-6 py-8 font-mono text-[10px] tracking-[0.08em] uppercase text-bone-dim border-t border-ink-2 mt-8">
-        <div className="mb-4">
-          <FirehoseSubscribe />
-        </div>
-        on-chain data via ord · marketplace data via{' '}
-        <a
-          href="https://www.satflow.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hover:text-bone transition-colors"
-        >
-          satflow
-        </a>{' '}
-        +{' '}
-        <a
-          href="https://ord.net"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hover:text-bone transition-colors"
-        >
-          ord.net
-        </a>{' '}
-        · wallet identity via{' '}
-        <a
-          href="https://matrica.io"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hover:text-bone transition-colors"
-        >
-          matrica
-        </a>
-      </footer>
+      <SiteFooter className="mt-8" />
     </div>
   );
 }

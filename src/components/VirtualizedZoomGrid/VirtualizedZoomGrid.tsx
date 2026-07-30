@@ -19,6 +19,7 @@ import VirtualRow from './VirtualRow';
 import GridHoverPreview from './GridHoverPreview';
 import { useZoomLevel } from './useZoomLevel';
 import { useGridDimensions } from './useGridDimensions';
+import SiteFooter from '../SiteFooter';
 
 interface VirtualizedZoomGridProps {
   images: GalleryImage[];
@@ -63,8 +64,10 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
 
   // Container ref and dimensions
   const parentRef = useRef<HTMLDivElement>(null);
+  const galleryFooterRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const { width: containerWidth } = useGridDimensions(parentRef);
+  const [galleryFooterHeight, setGalleryFooterHeight] = useState(220);
 
   // Debounced search — also writes the URL so the filter is shareable, but
   // through a ref so each new searchParams snapshot doesn't cancel the
@@ -352,6 +355,21 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
     };
   }, [seriesRowOpen]);
 
+  // The footer is outside the virtual row count because its height is unrelated
+  // to a square image row. Measure it independently and add that height to the
+  // scroll canvas so the final image row and the full footer are both reachable.
+  useEffect(() => {
+    const footer = galleryFooterRef.current;
+    if (!footer) return;
+    const measure = () => setGalleryFooterHeight(Math.ceil(footer.getBoundingClientRect().height));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(footer);
+    return () => observer.disconnect();
+  }, []);
+
+  const virtualRowsHeight = rowVirtualizer.getTotalSize();
+
   return (
     // Height comes from `.gallery-container` (100vh with a 100dvh override) —
     // deliberately not `h-screen` here, so the dvh fallback pair lives in one
@@ -400,7 +418,7 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
         >
           <div
             style={{
-              height: rowVirtualizer.getTotalSize(),
+              height: virtualRowsHeight + galleryFooterHeight,
               width: '100%',
               position: 'relative',
             }}
@@ -425,6 +443,17 @@ export default function VirtualizedZoomGrid({ images }: VirtualizedZoomGridProps
                 }}
               />
             ))}
+            <div
+              ref={galleryFooterRef}
+              style={{
+                position: 'absolute',
+                top: virtualRowsHeight,
+                left: 0,
+                width: '100%',
+              }}
+            >
+              <SiteFooter />
+            </div>
           </div>
         </div>
       </ZoomGestureHandler>

@@ -7,6 +7,7 @@ import { HelpDialog } from './HelpButton';
 import { useColorFilter } from '@/lib/useColorFilter';
 import { appendColorParam } from '@/lib/colorFilter';
 import { NAV_ITEMS, type NavKey } from '@/lib/nav';
+import { useDonation } from './Donation/DonationProvider';
 
 export default function MobileMenu({ active }: { active?: NavKey } = {}) {
   const [open, setOpen] = useState(false);
@@ -14,6 +15,7 @@ export default function MobileMenu({ active }: { active?: NavKey } = {}) {
   const [mounted, setMounted] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const { color } = useColorFilter();
+  const { openDonation } = useDonation();
 
   useEffect(() => {
     setMounted(true);
@@ -68,6 +70,17 @@ export default function MobileMenu({ active }: { active?: NavKey } = {}) {
             </Link>
           );
         })}
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            setOpen(false);
+            openDonation(triggerRef.current);
+          }}
+          className="flex h-12 w-full items-center px-5 text-bone-dim transition-colors hover:text-bone"
+        >
+          <span className="border border-transparent px-1.5 py-0.5">support</span>
+        </button>
         <button
           type="button"
           role="menuitem"

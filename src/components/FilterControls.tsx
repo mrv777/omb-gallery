@@ -12,6 +12,7 @@ import MobileFilterSheet from './MobileFilterSheet';
 import DesktopNav from './DesktopNav';
 import NotificationButton, { BellIcon } from './NotificationButton/NotificationButton';
 import { Tooltip } from './ui/Tooltip';
+import DonationTrigger from './Donation/DonationTrigger';
 
 interface FilterControlsProps {
   colorFilter: ColorFilter;
@@ -211,7 +212,8 @@ const FilterControls = memo(function FilterControls({
         />
         {/* Below `nav-full` the hamburger sheet carries its own help item, so showing
             this one too would duplicate it. */}
-        <div className="hidden nav-full:block">
+        <div className="hidden nav-full:flex">
+          <DonationTrigger variant="header" />
           <HelpButton />
         </div>
       </div>
