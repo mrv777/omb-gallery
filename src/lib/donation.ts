@@ -1,5 +1,5 @@
 export const DONATION_CONFIG = Object.freeze({
-  address: 'bc1q0k2wu6wn276fccpjemvkj889q4g8eltwz2kjtc',
+  address: 'bc1qfrt77mfrcrvjxcq7ahcgtm7w4czl6eftk4jk2c',
   label: 'OMB Archive',
   message: 'Support the site',
   presetSats: [10_000, 50_000, 100_000] as const,

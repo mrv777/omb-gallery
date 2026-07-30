@@ -77,7 +77,7 @@ pnpm start
 If this project is useful to you, a small Bitcoin tip is appreciated:
 
 ```
-bc1q0k2wu6wn276fccpjemvkj889q4g8eltwz2kjtc
+bc1qfrt77mfrcrvjxcq7ahcgtm7w4czl6eftk4jk2c
 ```
 
 ## License
