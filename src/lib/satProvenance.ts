@@ -103,9 +103,12 @@ export const NOTABLE_BLOCKS: Readonly<Record<number, NotableBlock>> = {
     attributedMiner: 'Satoshi Nakamoto',
     confidence: 'attributed',
     note: "Block 9's coinbase funded the first ever Bitcoin transaction — 10 BTC to Hal Finney in block 170. The block itself is attributed to Satoshi via the Patoshi nonce pattern rather than proven on-chain.",
+    // The 2020 post, not the 2013 one: the per-block nonce criterion that
+    // covers block 9 specifically is stated there; 2013 only has the
+    // aggregate extranonce slopes.
     source: {
-      label: 'Patoshi pattern — Sergio Demian Lerner',
-      href: 'https://bitslog.com/2013/04/17/the-well-deserved-fortune-of-satoshi-nakamoto/',
+      label: 'The Patoshi Mining Machine — Sergio Demian Lerner (2020)',
+      href: 'https://bitslog.com/2020/08/22/the-patoshi-mining-machine/',
     },
   },
   78: {

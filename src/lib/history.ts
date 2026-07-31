@@ -37,8 +37,11 @@ export type OffChainFact = {
 
 const LEATHER: Citation = {
   label: 'Leather — Guide to Ordinal Maxi Biz',
-  // The /support/guide/ URL 301s here; link the destination so the citation
-  // doesn't depend on a redirect surviving.
+  // Leather has shuffled this guide between /posts/, /support/guide/ and
+  // /support/ paths over time. The /posts/ path serves it directly (200, no
+  // redirect) as of 2026-07-30. One caution when leaning on it: its own
+  // per-color breakdown (100/200/1900/3000) contradicts its 5,141 headline —
+  // fine for the narrative claims we cite it for, never for counts.
   href: 'https://app.leather.io/posts/guide-to-bitcoin-ordinals-collections-what-is-ordinal-maxi-biz',
 };
 /**
@@ -87,15 +90,26 @@ const NFTNOW_PUNKS: Citation = {
   label: 'nft now — Why are people burning CryptoPunks for Ordinals?',
   href: 'https://nftnow.com/features/why-are-people-burning-cryptopunks-for-ordinals-nfts/',
 };
+/**
+ * The only source found that states the exact launch date. The Xverse post
+ * this entry used to cite says only "created in 2023" — no date at all — and
+ * Leather corroborates just the month ("in March of last year").
+ */
+const NFTPRICEFLOOR: Citation = {
+  label: 'NFT Price Floor — Ordinal Maxi Biz',
+  href: 'https://nftpricefloor.com/omb',
+};
 
 export const OFFCHAIN_TIMELINE: readonly OffChainFact[] = [
   {
     id: 'origin',
     date: '2023-02',
     title: 'ZK Shark quits finance; Tony Tafuro starts drawing',
-    // "Former Wall Street professional" is not what the source says — Leather
-    // says only "finance job". The Wall Street version traces to nftpricefloor
-    // and gets copied downstream. Don't upgrade the claim; we can't source it.
+    // We stick to Leather's phrasing ("finance job"). The Wall Street version
+    // IS first-party sourceable now — ZK Shark's own Substack
+    // (zkshark.substack.com/p/ordinals-inscriptions-and-rare-sats) says
+    // "resigned from my finance day job" and "trader on wall st" — so upgrade
+    // it with that citation if we ever want to; never on nftpricefloor alone.
     body: 'Ordinal Maxi Biz is built by the pseudonymous ZK Shark, who quit his finance job to work on it full time, with artist Tony Tafuro drawing every head by hand and further artwork from berkin bags. Nullish — the sat-hunter who located and secured the block-78 satoshis in the first place — sourced the sats that later drops were inscribed on.',
     source: LEATHER,
     confidence: 'confirmed',
@@ -105,14 +119,17 @@ export const OFFCHAIN_TIMELINE: readonly OffChainFact[] = [
     date: '2023-03-12',
     title: 'Public launch',
     body: 'The collection is announced. Note the chain disagrees slightly with the press: the red eyes were already inscribed a month earlier, starting 2023-02-14.',
-    source: XVERSE,
+    // NFT Price Floor is the only reachable source stating March 12 exactly;
+    // Leather corroborates the month. Don't cite Xverse here — its archived
+    // post says only "created in 2023".
+    source: NFTPRICEFLOOR,
     confidence: 'reported',
   },
   {
     id: 'punk-burn',
     date: '2023-06',
     title: 'Two CryptoPunks burned for whitelist',
-    body: 'Bitcoin Bandits open a burn site in mid-June and two Punks leave Ethereum for good — #8611 first, which had just sold for 54.49 ETH (~$94,000), then #9146 a few days later. It was not a blanket "burn and you are in": Leather\'s guide records 33 whitelist spots each for DeGods and Bitcoin Bandits on the Green Eyes mint, most of them raffled off, with everyone else who took part getting WLPublic. Corrected by the OMB community after this page first went up, and confirmed against contemporaneous reporting and the CryptoPunks contract.',
+    body: 'Bitcoin Bandits open a burn site on June 15 — the standing offer was an allowlist spot for anyone who burned a Punk — and two Punks leave Ethereum for good: #8611 first, which had just sold for 54.49 ETH (~$94,000), then #9146 a few days later. In practice only those two community-funded burns happened, and the concrete Green Eyes allocation was 33 whitelist spots each for DeGods and Bitcoin Bandits, many of them raffled off. Community recollection adds a public-whitelist tier for everyone else who took part; the original mint checker is offline, so no published source records that detail. Corrected by the OMB community after this page first went up, and confirmed against contemporaneous reporting and the CryptoPunks contract.',
     source: NFTNOW_PUNKS,
     confidence: 'confirmed',
     corrects: XVERSE,
@@ -154,8 +171,15 @@ export const OPEN_QUESTIONS: readonly OpenQuestion[] = [
       "Neither is provable from the chain. Block 9's coinbase demonstrably funded the first ever Bitcoin transaction — 10 BTC to Hal Finney in block 170 — and that part is fact. Attributing the mining of block 9 to Satoshi rests on the Patoshi nonce pattern. Block 78 is widely called the first block mined by someone other than Satoshi, and that part does not survive checking: blocks 12 and 64 both precede it and both fall outside the Patoshi nonce range, so the same heuristic that puts block 9 in Satoshi's hands rules them out of it too. Block 78 is better described as the earliest block credibly attributed to a named miner. The Finney attribution itself comes from Nullish, who traced it by lining the block timestamp up with Finney's \"Running bitcoin\" tweet and his early correspondence with Satoshi — a correlation, not a signature. We mark all of it † throughout.",
     sources: [
       {
-        label: 'Patoshi pattern — Sergio Demian Lerner',
+        label: 'Patoshi pattern — Sergio Demian Lerner (2013, original extranonce analysis)',
         href: 'https://bitslog.com/2013/04/17/the-well-deserved-fortune-of-satoshi-nakamoto/',
+      },
+      // The 2013 post establishes the aggregate pattern; the per-block nonce
+      // criterion (last byte in [0-9]∪[19-58]) that puts block 9 in and
+      // blocks 12/64/78 out comes from Lerner's later work.
+      {
+        label: 'The Patoshi Mining Machine — Sergio Demian Lerner (2020)',
+        href: 'https://bitslog.com/2020/08/22/the-patoshi-mining-machine/',
       },
       {
         label: "Nullish — Ordinal sats from Hal Finney's first mined block",

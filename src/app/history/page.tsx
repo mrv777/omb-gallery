@@ -275,12 +275,30 @@ export default function HistoryPage() {
     href: '#drops',
   });
   if (earliestVintage) {
+    // The headline counts every sat with this vintage, but the uniform-drop
+    // blocks (9 and 78) don't account for all of them — one hunted red
+    // (block 30,917, Dec 2009) shares the year. Say so instead of silently
+    // attributing the whole count to two blocks.
+    const earliestBucketCount = buckets
+      .filter(
+        b =>
+          b.minedAt != null &&
+          String(new Date(b.minedAt * 1000).getUTCFullYear()) === earliestVintage
+      )
+      .reduce((n, b) => n + b.count, 0);
+    const earliestExtras = earliestVintageCount - earliestBucketCount;
     chaseTiles.push({
       id: 'vintage-2009',
       headline: `${earliestVintageCount.toLocaleString()} on ${earliestVintage} sats`,
       // "first nine days" only holds on an inclusive calendar-day count —
       // genesis to block 78 is 7.28 days elapsed. Eight is true either way.
-      label: `blocks 9 and 78, mined within eight days of genesis`,
+      label: `blocks 9 and 78, mined within eight days of genesis${
+        earliestExtras > 0
+          ? ` — plus ${earliestExtras.toLocaleString()} hunted red${
+              earliestExtras === 1 ? '' : 's'
+            } from later in ${earliestVintage}`
+          : ''
+      }`,
       href: '#sats',
     });
   }
@@ -302,7 +320,9 @@ export default function HistoryPage() {
     chaseTiles.push({
       id: 'finney',
       headline: `${blueCount} on block 78`,
-      label: '†mined by Hal Finney, the first person to receive bitcoin',
+      // "recipient of the first bitcoin transaction", not "first person to
+      // receive bitcoin" — miners received coinbase rewards before block 170.
+      label: '†mined by Hal Finney, recipient of the first bitcoin transaction',
       href: '/?color=blue',
     });
   }
