@@ -171,7 +171,7 @@ export const SERIES: readonly Series[] = [
     label: 'Pirates',
     slug: 'pirates',
     blurb:
-      'Black-eye pirates in the same tricorn hat — skull and crossbones over an OMB band — across ships, treasure maps, spyglasses and sea monsters.',
+      'A 50-piece black-eye run defined by the same tricorn hat — skull and crossbones above the OMB hatband — across ships, treasure maps, spyglasses and sea monsters.',
     status: 'complete',
     declaredSize: 50,
     members: [
@@ -191,7 +191,7 @@ export const SERIES: readonly Series[] = [
     label: 'Cowboys',
     slug: 'cowboys',
     blurb:
-      'Black-eye cowboys in the same wide-brimmed hat, its band pinned with a tiny OMB skull, across stark frontier scenes and portraits.',
+      'A 50-piece black-eye run defined by the same wide-brimmed cowboy hat with its small OMB skull pin, across stark frontier scenes and portraits.',
     status: 'complete',
     declaredSize: 50,
     members: [
