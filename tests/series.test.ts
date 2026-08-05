@@ -94,12 +94,14 @@ describe('series catalogue integrity', () => {
     // Not every member has to match (some get added by eye), but a seed that
     // matches nothing means the pattern rotted and --diff is now useless.
     for (const series of SERIES) {
-      const re = new RegExp(series.seed.pattern, 'i');
+      const seed = series.seed;
+      if (!seed) continue;
+      const re = new RegExp(seed.pattern, 'i');
       const matched = series.members.filter(n => {
         const rec = REAL.get(n);
         if (!rec) return false;
-        if (series.seed.in.includes('description') && re.test(rec.description)) return true;
-        if (series.seed.in.includes('tags') && rec.tags.some(t => re.test(t))) return true;
+        if (seed.in.includes('description') && re.test(rec.description)) return true;
+        if (seed.in.includes('tags') && rec.tags.some(t => re.test(t))) return true;
         return false;
       });
       expect(matched.length, `${series.slug} seed matches nothing`).toBeGreaterThan(0);

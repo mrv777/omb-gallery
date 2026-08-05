@@ -27,7 +27,7 @@ export function loadImages(): GalleryImage[] {
       const number = parseInt(filename, 10);
       // Curated sub-series names, so typing "pirate" in the existing search box
       // finds the catalogued set as well as any description that happens to
-      // mention one. Empty for the ~8,930 pieces in no series.
+      // mention one. Empty for the great majority of pieces in no series.
       const seriesTokens = searchTokensForNumber(number);
 
       images.push({

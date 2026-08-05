@@ -9,7 +9,7 @@
 // membership is hand-curated and belongs in a diff a human can review. That
 // 888 KB JSON is generated (scripts/update-descriptions.js writes into it) and
 // ships to every gallery visitor; adding curation there produces unreviewable
-// diffs and grows the payload. ~120 integers here cost nothing.
+// diffs and grows the payload. ~250 integers here cost nothing.
 //
 // HONESTY — READ BEFORE WRITING ANY COPY HERE:
 // OMB is 1/1 hand-drawn. There is no generative trait metadata to read, here or
@@ -27,7 +27,7 @@
 //
 // Seeding off (2) is fine; it's how these sets were found. Presenting (2) as
 // (1) is not. Every entry records which it was in `provenance` (an internal
-// note, not rendered). All four sets are now catalogued in full; `status`
+// note, not rendered). The established sets are catalogued in full; `status`
 // stays in the type so a newly-seeded set can still say so while it is being
 // built out.
 //
@@ -35,7 +35,12 @@
 // band, `--band a-b` for a slideshow link that makes eyeballing it quick, then
 // paste numbers below and re-run `--diff`. See scripts/series-scout.mjs.
 
-export type SeriesId = 'fuck-you-sketch' | 'white-border-abstract' | 'optimus' | 'pirates';
+export type SeriesId =
+  | 'fuck-you-sketch'
+  | 'white-border-abstract'
+  | 'optimus'
+  | 'pirates'
+  | 'cowboys';
 
 export type SeriesSeed = {
   /** Case-insensitive regex source used to find candidates. */
@@ -64,8 +69,8 @@ export type Series = {
    * `status` pill communicates incompleteness to readers instead.
    */
   provenance: string;
-  /** How to re-find candidates. Consumed by scripts/series-scout.mjs. */
-  seed: SeriesSeed;
+  /** How to re-find candidates. Omitted for maintainer-supplied lists without catalogue metadata. */
+  seed?: SeriesSeed;
 };
 
 export const SERIES: readonly Series[] = [
@@ -182,6 +187,25 @@ export const SERIES: readonly Series[] = [
     seed: { pattern: 'pirate', in: ['description'] },
   },
   {
+    id: 'cowboys',
+    label: 'Cowboys',
+    slug: 'cowboys',
+    blurb:
+      'Black-eye cowboys in the same wide-brimmed hat, its band pinned with a tiny OMB skull, across stark frontier scenes and portraits.',
+    status: 'complete',
+    declaredSize: 50,
+    members: [
+      83293817, 83293892, 83294046, 83294076, 83295259, 83295750, 83295766, 83296398, 83296757,
+      83296789, 83296834, 83296843, 83297117, 83297175, 83298040, 83298054, 83299906, 83299914,
+      83299950, 83299953, 83301760, 83307202, 83307218, 83307282, 83307337, 83308286, 83308673,
+      83308679, 83309455, 83309475, 83309482, 83309498, 83309864, 83309976, 83309992, 83310230,
+      83310292, 83310430, 83311109, 83311203, 83311211, 83311255, 83313549, 83313555, 83313580,
+      83313591, 83314937, 83314947, 83314961, 83316385,
+    ],
+    provenance:
+      "Added 2026-08-05 from the maintainer's complete 50-piece cowboy list. The catalogue records have no descriptions or tags, so this set intentionally has no scout seed.",
+  },
+  {
     id: 'optimus',
     label: 'Optimus robots',
     slug: 'optimus',
@@ -231,7 +255,7 @@ export function seriesMemberSet(id: SeriesId): ReadonlySet<number> {
   return set;
 }
 
-// Built once at module load — ~120 entries total.
+// Built once at module load — ~250 entries total.
 const BY_NUMBER = (() => {
   const m = new Map<number, Series[]>();
   for (const s of SERIES) {

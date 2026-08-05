@@ -171,6 +171,12 @@ function cmdMissing(series) {
 }
 
 function cmdDiff(all, series) {
+  if (!series.seed) {
+    console.log(
+      `\n${series.label} has no catalogue-metadata seed — membership came from a maintainer-supplied list.`
+    );
+    return;
+  }
   const members = new Set(series.members);
   const hits = all.filter(r => matches(r, series.seed));
   const hitNums = new Set(hits.map(h => h.number));
@@ -293,6 +299,12 @@ if (args.band) {
   cmdDiff(all, series);
 } else {
   const seed = args.seed ? { pattern: args.seed, in: ['description', 'tags'] } : series.seed;
+  if (!seed) {
+    console.error(
+      `series "${series.slug}" has no catalogue-metadata seed; pass --seed <term> or use --band`
+    );
+    process.exit(2);
+  }
   const label = series ? series.label : 'ad-hoc';
   cmdSeed(all, seed, label, new Set(series?.members ?? []));
 }
