@@ -2139,6 +2139,7 @@ async function runMatricaTick(opts: { limit: number }): Promise<TickResult> {
             wallet_addr,
             matrica_user_id: profile.user_id,
             checked_at: nowSec,
+            is_shell: profile.is_shell ? 1 : 0,
           });
         });
         tx();
@@ -2148,6 +2149,9 @@ async function runMatricaTick(opts: { limit: number }): Promise<TickResult> {
           wallet_addr,
           matrica_user_id: null,
           checked_at: nowSec,
+          // Irrelevant on this path — the NULL arm of the CASE already
+          // defends the existing link — but the param must be bound.
+          is_shell: 0,
         });
         unlinked++;
       }

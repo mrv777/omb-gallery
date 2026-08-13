@@ -3144,19 +3144,29 @@ export function getStmts(): Stmts {
 
     // Upsert a link. matrica_user_id is NULL when Matrica returned 400
     // "Wallet not found" — we still write the row so we don't re-probe.
-    // Strictly additive: once a wallet has a non-null matrica_user_id, the
-    // poller never overwrites it — not on a NULL response (user unlinked from
-    // their profile) and not on a different non-null user_id (Matrica returns
-    // an auto-shell user when an unlinked wallet is queried, with username =
-    // wallet_addr + suffix). Re-linking a wallet to a different real user
-    // requires manual SQL intervention; see "manual unlink" note below.
+    //
+    // An existing link is defended against the two answers that are weaker
+    // than what we already hold, and only those:
+    //   - NULL          — the user unlinked, or Matrica lost the mapping.
+    //   - @is_shell = 1 — Matrica synthesized a placeholder user for an
+    //                     unclaimed wallet (username = a raw address).
+    // A real, claimed user always wins, including over a *different* real
+    // user. Wallets genuinely move between Matrica accounts, and the earlier
+    // "first non-null id is permanent" rule silently pinned them forever: a
+    // 2026-08 audit of all 4,979 OMB-holding wallets against the live API
+    // found 7 stranded this way (12 OMBs across 10 profiles), each re-probed
+    // daily and each time discarding the correct answer. The same audit found
+    // 6 wallets where Matrica had regressed to a shell — hence the guard
+    // above, which is the half of the old rule worth keeping.
     upsertWalletLink: db.prepare(`
       INSERT INTO wallet_links (wallet_addr, matrica_user_id, checked_at)
       VALUES (@wallet_addr, @matrica_user_id, @checked_at)
       ON CONFLICT(wallet_addr) DO UPDATE SET
         matrica_user_id = CASE
-          WHEN wallet_links.matrica_user_id IS NULL THEN excluded.matrica_user_id
-          ELSE wallet_links.matrica_user_id
+          WHEN wallet_links.matrica_user_id IS NOT NULL
+               AND (excluded.matrica_user_id IS NULL OR @is_shell = 1)
+            THEN wallet_links.matrica_user_id
+          ELSE excluded.matrica_user_id
         END,
         checked_at      = excluded.checked_at
     `),

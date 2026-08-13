@@ -1,4 +1,5 @@
 import 'server-only';
+import { looksLikeAddress } from '@/lib/format';
 
 const MATRICA_BASE = (process.env.MATRICA_BASE_URL ?? 'https://api.matrica.io').replace(/\/+$/, '');
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -30,6 +31,15 @@ export type MatricaWalletProfile = {
   avatar_url: string | null;
   /** Network the address is on — e.g. "BTC", "SOL". */
   network: string;
+  /**
+   * True when this is one of Matrica's auto-shell users rather than a claimed
+   * account. Matrica synthesizes a placeholder user for any wallet nobody has
+   * linked, with `username` set to a raw address (the queried one, sometimes
+   * with a short suffix, occasionally a different address entirely). A shell
+   * answer must never displace a link we already hold — see `upsertWalletLink`
+   * in src/lib/db.ts.
+   */
+  is_shell: boolean;
   raw_json: string;
 };
 
@@ -96,6 +106,9 @@ function normalizeWalletProfile(addr: string, json: unknown): MatricaWalletProfi
     username,
     avatar_url,
     network,
+    // Same heuristic the UI uses to decide "handle or raw address?" — an
+    // address-shaped display name is exactly what an unclaimed wallet returns.
+    is_shell: looksLikeAddress(username),
     raw_json: JSON.stringify(json),
   };
 }
