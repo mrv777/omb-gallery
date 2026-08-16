@@ -184,6 +184,7 @@ function WalletPickerDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="wallet-picker-title"
+        data-wallet-integration="drey-0.11.0"
         className="max-h-[calc(100dvh-2rem)] w-full max-w-[420px] overflow-y-auto border border-ink-2 bg-ink-0 p-4 font-mono uppercase tracking-[0.08em] shadow-[0_20px_60px_rgba(0,0,0,0.85)] sm:max-h-[calc(100dvh-3rem)]"
         onClick={event => event.stopPropagation()}
       >

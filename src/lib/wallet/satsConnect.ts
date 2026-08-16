@@ -103,7 +103,7 @@ export function getSatsWalletOptions(): SatsWalletOption[] {
 }
 
 export function dreyMarketplaceEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_DREY_MARKETPLACE_ENABLED === 'true';
+  return process.env.NEXT_PUBLIC_DREY_MARKETPLACE_ENABLED?.trim() === 'true';
 }
 
 export function listenForDreyInitialization(listener: () => void): () => void {
