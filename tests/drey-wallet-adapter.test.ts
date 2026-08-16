@@ -16,6 +16,7 @@ vi.mock('sats-connect', () => ({
 
 import {
   DREY_MIN_BUY_VERSION,
+  DREY_PROVIDER_ICON,
   connectSatsWallet,
   getSatsWalletOptions,
   isDreyBuySupported,
@@ -74,7 +75,11 @@ describe('Drey wallet adapter', () => {
     const options = getSatsWalletOptions();
     expect(options.map(option => option.id)).toEqual(['drey', 'XverseProviders.BitcoinProvider']);
     expect(options.filter(option => option.id === 'drey')).toHaveLength(1);
-    expect(options[0]).toMatchObject({ name: 'Drey', isInstalled: true });
+    expect(options[0]).toMatchObject({
+      name: 'Drey',
+      icon: DREY_PROVIDER_ICON,
+      isInstalled: true,
+    });
   });
 
   it('refreshes discovery when late Drey injection announces initialization', () => {

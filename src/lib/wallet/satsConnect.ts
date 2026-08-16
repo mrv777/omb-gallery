@@ -17,8 +17,7 @@ export const DREY_MIN_BUY_VERSION = '0.11.0';
 export const DREY_INITIALIZED_EVENT = 'drey#initialized';
 export const DREY_CHROME_STORE_URL =
   'https://chromewebstore.google.com/detail/drey/kngidlmmbfmnoeimngkajdlbdenlhgof';
-export const DREY_PROVIDER_ICON =
-  'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22128%22 height=%22128%22 viewBox=%220 0 128 128%22%3E%3Crect width=%22128%22 height=%22128%22 rx=%2228%22 fill=%22%23050505%22/%3E%3Ccircle cx=%2264%22 cy=%2264%22 r=%2245%22 fill=%22none%22 stroke=%22%23fff%22 stroke-width=%228%22/%3E%3Cpath d=%22M18 55c4-19 20-33 39-35 22-2 42 12 49 32 5 15 2 32-7 44V62c0-7-6-13-13-13H57c-9 0-16 7-16 16v19c-7-8-9-20-5-30 3-7 9-12 4-15-5-4-14 0-22 16Z%22 fill=%22%23fff%22/%3E%3Crect x=%2254%22 y=%2260%22 width=%2218%22 height=%2218%22 rx=%224%22 fill=%22%23fff%22/%3E%3Crect x=%2277%22 y=%2260%22 width=%2218%22 height=%2218%22 rx=%224%22 fill=%22%23fff%22/%3E%3Crect x=%2254%22 y=%2283%22 width=%2218%22 height=%2218%22 rx=%224%22 fill=%22%23fff%22/%3E%3Crect x=%2277%22 y=%2283%22 width=%2218%22 height=%2218%22 rx=%224%22 fill=%22%23fff%22/%3E%3C/svg%3E';
+export const DREY_PROVIDER_ICON = '/wallets/drey.svg';
 
 export type ConnectedWallet = {
   ordAddr: string;
@@ -77,7 +76,12 @@ export function getSatsWalletOptions(): SatsWalletOption[] {
     merged.set(provider.id, {
       id: provider.id,
       name: typeof provider.name === 'string' ? provider.name : provider.id,
-      icon: typeof provider.icon === 'string' ? provider.icon : '',
+      icon:
+        provider.id === DREY_PROVIDER_ID
+          ? DREY_PROVIDER_ICON
+          : typeof provider.icon === 'string'
+            ? provider.icon
+            : '',
       isInstalled:
         provider.id === DREY_PROVIDER_ID ? hasDreyProvider() : Boolean(provider.isInstalled),
       installUrl: providerInstallUrl(provider as SupportedWallet),
