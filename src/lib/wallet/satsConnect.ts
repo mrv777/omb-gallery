@@ -17,7 +17,7 @@ export const DREY_MIN_BUY_VERSION = '0.11.0';
 export const DREY_INITIALIZED_EVENT = 'drey#initialized';
 export const DREY_CHROME_STORE_URL =
   'https://chromewebstore.google.com/detail/drey/kngidlmmbfmnoeimngkajdlbdenlhgof';
-export const DREY_PROVIDER_ICON = '/wallets/drey.svg';
+export const DREY_PROVIDER_ICON = '/wallets/drey.png';
 
 export type ConnectedWallet = {
   ordAddr: string;

@@ -171,7 +171,10 @@ export function verifyBuyerSignature(args: {
   signature: string;
 }): boolean {
   try {
-    return Verifier.verifySignature(args.address, args.message, args.signature) === true;
+    const signature = args.signature.startsWith('smp')
+      ? args.signature.slice('smp'.length)
+      : args.signature;
+    return Verifier.verifySignature(args.address, args.message, signature) === true;
   } catch {
     return false;
   }

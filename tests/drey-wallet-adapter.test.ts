@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 const sats = vi.hoisted(() => ({
   getSupportedWallets: vi.fn(),
@@ -68,6 +70,13 @@ describe('Drey wallet adapter', () => {
         isInstalled: true,
       },
     ]);
+  });
+
+  it('ships the exact production extension icon', () => {
+    const icon = readFileSync(new URL('../public/wallets/drey.png', import.meta.url));
+    expect(createHash('sha256').update(icon).digest('hex')).toBe(
+      '08030f86820a2fef49896ca5894a9b91f181709862eefabcd7fed5b713469c34'
+    );
   });
 
   it('merges both discovery registries, suppresses duplicates, and keeps Drey first', () => {
