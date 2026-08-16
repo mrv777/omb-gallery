@@ -39,6 +39,24 @@ export default function ConnectWalletButton({ compact = false }: { compact?: boo
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [pickerOpen]);
 
+  useEffect(() => {
+    if (!pickerOpen) return;
+    let active = true;
+    const refresh = () => {
+      void import('@/lib/wallet/satsConnect').then(module => {
+        if (active) setWalletOptions(module.getSatsWalletOptions());
+      });
+    };
+    let unsubscribe: () => void = () => undefined;
+    void import('@/lib/wallet/satsConnect').then(module => {
+      if (active) unsubscribe = module.listenForDreyInitialization(refresh);
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [pickerOpen]);
+
   if (wallet) {
     return (
       <div ref={menuRef} className="relative flex items-center gap-2">
@@ -232,20 +250,27 @@ function WalletIcon({ option, dim = false }: { option: SatsWalletOption; dim?: b
 }
 
 function UnavailableWalletOption({ option }: { option: SatsWalletOption }) {
+  const dreyMobile =
+    option.id === 'drey' &&
+    typeof window !== 'undefined' &&
+    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  const href = dreyMobile
+    ? `https://squirrelsystems.net/browser?url=${encodeURIComponent(window.location.href)}`
+    : option.installUrl;
   const content = (
     <>
       <WalletIcon option={option} dim />
       <span className="truncate">{option.name}</span>
-      <span className="text-[9px]">{option.installUrl ? 'install' : 'missing'}</span>
+      <span className="text-[9px]">{dreyMobile ? 'open' : href ? 'install' : 'missing'}</span>
     </>
   );
   const className =
     'grid h-14 w-full grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 border border-ink-2 px-3 text-left text-[11px] text-bone-dim transition-colors hover:border-bone-dim hover:text-bone';
-  if (!option.installUrl) {
+  if (!href) {
     return <div className={`${className} cursor-not-allowed opacity-60`}>{content}</div>;
   }
   return (
-    <a href={option.installUrl} target="_blank" rel="noopener noreferrer" className={className}>
+    <a href={href} target="_blank" rel="noopener noreferrer" className={className}>
       {content}
     </a>
   );

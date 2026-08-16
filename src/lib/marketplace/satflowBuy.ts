@@ -20,7 +20,7 @@ const DEFAULT_EXTRACTION_FEE_RATE =
   process.env.SATFLOW_PURCHASE_EXTRACTION_FEE_RATE ?? DEFAULT_FEE_RATE;
 
 type SatflowFeeRate = 'fastestFee' | 'halfHourFee' | 'hourFee' | 'minimumFee' | number;
-type SatflowSecureStage = 'payment-prep' | 'purchase' | 'bulk';
+export type SatflowSecureStage = 'payment-prep' | 'purchase' | 'bulk';
 
 type SatflowSecurePurchaseRequest = {
   inscriptionIds: string[];
@@ -64,6 +64,7 @@ export type SatflowPurchaseIntent = {
   signInputs?: Record<string, number[]>;
   psbts: PurchasePsbtToSign[];
   step: string;
+  secureStage: SatflowSecureStage;
   preflightJson: string;
   raw: unknown;
 };
@@ -74,6 +75,7 @@ export type SatflowNextSigningStep = {
   signInputs?: Record<string, number[]>;
   psbts: PurchasePsbtToSign[];
   step: string;
+  secureStage: SatflowSecureStage;
   preflightJson: string;
   raw: unknown;
 };
@@ -143,6 +145,7 @@ export async function createSatflowPurchaseIntent(
     signInputs: intent.psbts[0].sign_inputs,
     psbts: intent.psbts,
     step: `satflow-${intent.stage}`,
+    secureStage: intent.stage,
     preflightJson: JSON.stringify(intent.preflight),
     raw,
   };
@@ -181,6 +184,7 @@ export async function broadcastSatflowPurchase(
       signInputs: next.psbts[0].sign_inputs,
       psbts: next.psbts,
       step: `satflow-${next.stage}`,
+      secureStage: next.stage,
       preflightJson: JSON.stringify(next.preflight),
       raw,
     };

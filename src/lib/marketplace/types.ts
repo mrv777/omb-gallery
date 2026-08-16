@@ -83,6 +83,37 @@ export type PurchasePsbtToSign = {
   psbt: string;
   sign_inputs?: Record<string, number[]>;
   label?: string;
+  marketplace_context?: MarketplaceContext;
+};
+
+export type MarketplaceContext = {
+  version: 1;
+  marketplaceId: 'ordnet' | 'satflow';
+  templateVersion: string;
+  action: 'buy' | 'secure_buy';
+  role: 'buyer';
+  assetKind: 'inscription';
+  workflowId: string;
+  step: number;
+  stepCount: number;
+  stage?: 'payment-prep' | 'purchase';
+  identifiers: {
+    listingId: string;
+    inscriptionId: string;
+    preflightHandle?: string;
+    purchaseAnchorUtxoId?: string;
+  };
+  economics: {
+    priceSats: string;
+    totalSats: string;
+    buyerDebitSats: string;
+    assetDestination: string;
+  };
+  selectedInputIndexes: number[];
+  revision?: string;
+  expectedTxids?: string[];
+  expiresAt: number;
+  broadcaster: 'site';
 };
 
 export type CreateIntentResponse = {

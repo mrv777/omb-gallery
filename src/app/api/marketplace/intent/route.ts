@@ -13,8 +13,18 @@ import {
 } from '@/lib/marketplace/listings';
 import { marketplaceRateLimit, requireMarketplaceEnabled } from '@/lib/marketplace/apiGuards';
 import { mockIntentResponse, mockListing } from '@/lib/marketplace/mock';
-import { createOrdnetPurchaseIntent, ordnetErrorResponse } from '@/lib/ordnet';
-import { createSatflowPurchaseIntent, satflowBuyErrorResponse } from '@/lib/marketplace/satflowBuy';
+import {
+  createOrdnetPurchaseIntent,
+  ordnetErrorResponse,
+  type OrdnetPurchaseIntent,
+} from '@/lib/ordnet';
+import {
+  createSatflowPurchaseIntent,
+  satflowBuyErrorResponse,
+  type SatflowPurchaseIntent,
+} from '@/lib/marketplace/satflowBuy';
+import { withOrdnetDreyContext, withSatflowDreyContexts } from '@/lib/marketplace/dreyContext';
+import type { PurchasePsbtToSign } from '@/lib/marketplace/types';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -23,6 +33,7 @@ type Body = {
   inscription_number?: unknown;
   marketplace?: unknown;
   listing_id?: unknown;
+  provider_id?: unknown;
 };
 
 export async function POST(req: NextRequest) {
@@ -54,6 +65,7 @@ export async function POST(req: NextRequest) {
     );
   }
   const requestedSource = marketplace && listingId ? { marketplace, listingId } : undefined;
+  const wantsDreyContext = body?.provider_id === 'drey';
 
   const mockPurchase = marketplaceMockEnabled();
   const listing = marketplaceFixtureListingsEnabled()
@@ -111,11 +123,47 @@ export async function POST(req: NextRequest) {
       preflight_json: preflightJson,
       is_mock: false,
     });
+    const basePsbts: PurchasePsbtToSign[] =
+      maybePsbts && maybePsbts.length > 0
+        ? maybePsbts
+        : [
+            {
+              psbt: intent.psbt,
+              sign_inputs: intent.signInputs,
+              label: typeof maybeStep === 'string' ? maybeStep : undefined,
+            },
+          ];
+    const responsePsbts = wantsDreyContext
+      ? isOrdnetMarketplace(listing.marketplace)
+        ? [
+            withOrdnetDreyContext({
+              item: basePsbts[0]!,
+              intentId,
+              listing,
+              buyerOrdAddr: session.ord_addr,
+              buyerPayAddr: session.pay_addr,
+              purchaseAnchorUtxoId: (intent as OrdnetPurchaseIntent).raw.purchaseAnchorUtxoId,
+              expectedTxids: [
+                (intent as OrdnetPurchaseIntent).raw.expectedSettlementTxid,
+                ...(intent as OrdnetPurchaseIntent).raw.expectedListingTransferTxids,
+              ],
+            }),
+          ]
+        : withSatflowDreyContexts({
+            psbts: basePsbts,
+            intentId,
+            listing,
+            buyerOrdAddr: session.ord_addr,
+            buyerPayAddr: session.pay_addr,
+            stage: (intent as SatflowPurchaseIntent).secureStage,
+            preflightJson: preflightJson ?? '',
+          })
+      : toWirePsbts(maybePsbts);
     return NextResponse.json({
       intent_id: intentId,
       psbt: intent.psbt,
       sign_inputs: intent.signInputs,
-      psbts: toWirePsbts(maybePsbts),
+      psbts: responsePsbts,
       step: typeof maybeStep === 'string' ? maybeStep : undefined,
       listing,
       mock: false,
@@ -139,9 +187,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-function toWirePsbts(
-  psbts: Array<{ psbt: string; sign_inputs?: Record<string, number[]>; label?: string }> | undefined
-) {
+function toWirePsbts(psbts: PurchasePsbtToSign[] | undefined) {
   return psbts && psbts.length > 0 ? psbts : undefined;
 }
 

@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { ConnectedWallet } from '@/lib/wallet/satsConnect';
+import type { MarketplaceContext } from '@/lib/marketplace/types';
 
 type BuyerSessionState = ConnectedWallet & {
   acceptedTermsAt: number | null;
@@ -23,7 +24,11 @@ type WalletContextValue = {
   disconnect: () => Promise<void>;
   acceptTerms: () => Promise<void>;
   signMessage: (address: string, message: string) => Promise<string>;
-  signPsbt: (psbt: string, signInputs?: Record<string, number[]>) => Promise<string>;
+  signPsbt: (
+    psbt: string,
+    signInputs?: Record<string, number[]>,
+    marketplaceContext?: MarketplaceContext
+  ) => Promise<string>;
 };
 
 const WalletContext = createContext<WalletContextValue | null>(null);
@@ -53,7 +58,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       window.localStorage.removeItem(STORAGE_KEY);
       return;
     }
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    writeCachedWallet(next);
   }, []);
 
   const connect = useCallback(
@@ -85,10 +90,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     await fetch('/api/marketplace/session', { method: 'DELETE' }).catch(() => null);
     if (!MOCK_WALLET_CLIENT) {
       const walletModule = await import('@/lib/wallet/satsConnect');
-      await walletModule.disconnectSatsWallet().catch(() => null);
+      await walletModule.disconnectSatsWallet(wallet?.providerId).catch(() => null);
     }
     persist(null);
-  }, [persist]);
+  }, [persist, wallet?.providerId]);
 
   const acceptTerms = useCallback(async () => {
     const res = await fetch('/api/marketplace/session', {
@@ -100,21 +105,33 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     if (!res.ok || !json?.session) {
       throw new Error(json && 'error' in json ? String(json.error) : 'Could not accept terms');
     }
-    const next = sessionResponseToState(json.session);
+    const next = sessionResponseToState(json.session, wallet);
     persist(next);
-  }, [persist]);
+  }, [persist, wallet]);
 
-  const signPsbt = useCallback(async (psbt: string, signInputs?: Record<string, number[]>) => {
-    const { signPurchasePsbt } = await import('@/lib/wallet/satsConnect');
-    const signed = await signPurchasePsbt({ psbt, signInputs });
-    return signed.signedPsbt;
-  }, []);
+  const signPsbt = useCallback(
+    async (
+      psbt: string,
+      signInputs?: Record<string, number[]>,
+      marketplaceContext?: MarketplaceContext
+    ) => {
+      if (!wallet) throw new Error('Reconnect your wallet before signing.');
+      const { signPurchasePsbt } = await import('@/lib/wallet/satsConnect');
+      const signed = await signPurchasePsbt({ wallet, psbt, signInputs, marketplaceContext });
+      return signed.signedPsbt;
+    },
+    [wallet]
+  );
 
-  const signMessage = useCallback(async (address: string, message: string) => {
-    if (MOCK_WALLET_CLIENT) return 'mock-signature';
-    const { signBuyerMessage } = await import('@/lib/wallet/satsConnect');
-    return signBuyerMessage(address, message);
-  }, []);
+  const signMessage = useCallback(
+    async (address: string, message: string) => {
+      if (MOCK_WALLET_CLIENT) return 'mock-signature';
+      if (!wallet) throw new Error('Reconnect your wallet before signing.');
+      const { signBuyerMessage } = await import('@/lib/wallet/satsConnect');
+      return signBuyerMessage(wallet, address, message);
+    },
+    [wallet]
+  );
 
   const value = useMemo(
     () => ({ wallet, connecting, error, connect, disconnect, acceptTerms, signMessage, signPsbt }),
@@ -130,14 +147,14 @@ export function useWallet(): WalletContextValue {
   return ctx;
 }
 
-async function refreshSession(): Promise<BuyerSessionState | null> {
+async function refreshSession(cached: BuyerSessionState | null): Promise<BuyerSessionState | null> {
   const res = await fetch('/api/marketplace/session').catch(() => null);
   if (!res?.ok) return null;
   const json = (await res.json().catch(() => null)) as SessionResponse | null;
   if (!json?.session) return null;
-  const next = sessionResponseToState(json.session);
+  const next = sessionResponseToState(json.session, cached);
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    writeCachedWallet(next);
   } catch {
     // ignore
   }
@@ -146,14 +163,30 @@ async function refreshSession(): Promise<BuyerSessionState | null> {
 
 async function initializeWallet(): Promise<BuyerSessionState | null> {
   const cached = readCachedWallet();
-  const refreshed = await refreshSession();
+  if (cached?.providerId === 'drey') {
+    const walletModule = await import('@/lib/wallet/satsConnect');
+    if (!(await walletModule.probeDreyConnection(cached))) {
+      window.localStorage.removeItem(STORAGE_KEY);
+      return null;
+    }
+  }
+  const refreshed = await refreshSession(cached);
   return refreshed ?? cached;
 }
 
 function readCachedWallet(): BuyerSessionState | null {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as BuyerSessionState) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as BuyerSessionState | { version: 2; wallet: BuyerSessionState };
+    if ('version' in parsed && parsed.version === 2) return parsed.wallet;
+    if (!('ordAddr' in parsed)) return null;
+    return {
+      ...parsed,
+      providerId: parsed.providerId ?? 'unknown',
+      providerVersion: parsed.providerVersion ?? null,
+      providerPlatform: parsed.providerPlatform ?? null,
+    };
   } catch {
     window.localStorage.removeItem(STORAGE_KEY);
     return null;
@@ -176,12 +209,12 @@ async function createMockSession(connected: ConnectedWallet): Promise<BuyerSessi
   if (!res.ok || !json?.session) {
     throw new Error(json && 'error' in json ? String(json.error) : 'Mock wallet session failed');
   }
-  return sessionResponseToState(json.session);
+  return sessionResponseToState(json.session, connected);
 }
 
 async function createSignedSession(
   connected: ConnectedWallet,
-  signBuyerMessage: (address: string, message: string) => Promise<string>
+  signBuyerMessage: (wallet: ConnectedWallet, address: string, message: string) => Promise<string>
 ): Promise<BuyerSessionState> {
   const nonceRes = await fetch(
     `/api/marketplace/session?ord_addr=${encodeURIComponent(connected.ordAddr)}&pay_addr=${encodeURIComponent(connected.payAddr ?? '')}`
@@ -193,7 +226,7 @@ async function createSignedSession(
   if (!nonceRes.ok || !nonceJson?.message) {
     throw new Error(nonceJson?.error ?? 'Could not create sign-in challenge');
   }
-  const signature = await signBuyerMessage(connected.ordAddr, nonceJson.message);
+  const signature = await signBuyerMessage(connected, connected.ordAddr, nonceJson.message);
   const res = await fetch('/api/marketplace/session', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -210,7 +243,7 @@ async function createSignedSession(
   if (!res.ok || !json?.session) {
     throw new Error(json && 'error' in json ? String(json.error) : 'Wallet sign-in failed');
   }
-  return sessionResponseToState(json.session);
+  return sessionResponseToState(json.session, connected);
 }
 
 type SessionResponse = {
@@ -225,15 +258,23 @@ type SessionResponse = {
 };
 
 function sessionResponseToState(
-  session: NonNullable<SessionResponse['session']>
+  session: NonNullable<SessionResponse['session']>,
+  provider: ConnectedWallet | null
 ): BuyerSessionState {
   return {
     ordAddr: session.ord_addr,
     payAddr: session.pay_addr,
     ordPubkey: session.ord_pubkey,
     payPubkey: session.pay_pubkey,
+    providerId: provider?.providerId ?? 'unknown',
+    providerVersion: provider?.providerVersion ?? null,
+    providerPlatform: provider?.providerPlatform ?? null,
     acceptedTermsAt: session.accepted_terms_at,
   };
+}
+
+function writeCachedWallet(wallet: BuyerSessionState): void {
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, wallet }));
 }
 
 function walletErrorMessage(err: unknown): string {

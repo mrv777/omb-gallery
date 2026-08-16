@@ -17,6 +17,7 @@ import { marketplaceRateLimit, requireMarketplaceEnabled } from '@/lib/marketpla
 import { mockBroadcast } from '@/lib/marketplace/mock';
 import { broadcastOrdnetPurchase, ordnetErrorResponse } from '@/lib/ordnet';
 import { broadcastSatflowPurchase, satflowBuyErrorResponse } from '@/lib/marketplace/satflowBuy';
+import { withSatflowDreyContexts } from '@/lib/marketplace/dreyContext';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -25,6 +26,7 @@ type Body = {
   intent_id?: unknown;
   signed_psbt?: unknown;
   signed_psbts?: unknown;
+  provider_id?: unknown;
 };
 
 export async function POST(req: NextRequest) {
@@ -47,6 +49,7 @@ export async function POST(req: NextRequest) {
       : signedPsbt
         ? [signedPsbt]
         : [];
+  const wantsDreyContext = body?.provider_id === 'drey';
   if (!Number.isFinite(intentId) || intentId <= 0 || signedPsbts.length === 0) {
     return NextResponse.json({ error: 'intent_id and signed_psbt required' }, { status: 400 });
   }
@@ -83,11 +86,26 @@ export async function POST(req: NextRequest) {
     const result = await broadcastSatflowPurchase(intent, signedPsbts);
     if (result.type === 'next') {
       updateIntentPreflightJson(intentId, result.preflightJson);
+      const responsePsbts = wantsDreyContext
+        ? withSatflowDreyContexts({
+            psbts: result.psbts,
+            intentId,
+            listing: {
+              listing_id: intent.listing_id ?? '',
+              inscription_id: intent.inscription_id,
+              price_sats: intent.price_sats,
+            },
+            buyerOrdAddr: intent.buyer_ord_addr,
+            buyerPayAddr: intent.buyer_pay_addr,
+            stage: result.secureStage,
+            preflightJson: result.preflightJson,
+          })
+        : result.psbts;
       return NextResponse.json({
         intent_id: intentId,
         psbt: result.psbt,
         sign_inputs: result.signInputs,
-        psbts: result.psbts,
+        psbts: responsePsbts,
         step: result.step,
         mock: false,
       });

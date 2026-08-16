@@ -46,6 +46,15 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
     setBusy(true);
     setError(null);
     try {
+      if (wallet?.providerId === 'drey') {
+        const { DREY_MIN_BUY_VERSION, isDreyBuySupported } =
+          await import('@/lib/wallet/satsConnect');
+        if (!isDreyBuySupported(wallet)) {
+          throw new Error(
+            `Drey ${DREY_MIN_BUY_VERSION} or newer is required to buy. Update Drey, then reconnect.`
+          );
+        }
+      }
       const intentJson = await createIntentWithOrdnetRetry(listing, selectedOption);
       const broadcastJson = await completeSigningFlow(intentJson);
       onSuccess({
@@ -74,6 +83,7 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
           intent_id: intentJson.intent_id,
           signed_psbt: signedPsbts[0],
           signed_psbts: signedPsbts,
+          provider_id: wallet?.providerId,
         }),
       });
       const broadcastJson = (await broadcastRes.json().catch(() => null)) as
@@ -102,7 +112,7 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
     const psbts = normalizeStepPsbts(step);
     const signed: string[] = [];
     for (const item of psbts) {
-      signed.push(await signPsbt(item.psbt, item.sign_inputs));
+      signed.push(await signPsbt(item.psbt, item.sign_inputs, item.marketplace_context));
     }
     return signed;
   }
@@ -137,6 +147,7 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
         inscription_number: inscriptionNumber,
         marketplace: option.marketplace,
         listing_id: option.listing_id,
+        provider_id: wallet?.providerId,
       }),
     });
     const body = (await res.json().catch(() => null)) as
