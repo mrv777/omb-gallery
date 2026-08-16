@@ -11,6 +11,7 @@ import type {
 } from '@/lib/marketplace/types';
 import { useWallet } from '@/components/wallet/WalletProvider';
 import ConnectWalletButton from '@/components/wallet/ConnectWalletButton';
+import { bip322SignatureToHex } from '@/lib/wallet/bip322Signature';
 import MarketplacePip from './MarketplacePip';
 import TermsCheckbox from './TermsCheckbox';
 
@@ -168,7 +169,7 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
       verifications.push({
         challenge_id: challenge.challenge_id,
         address: challenge.address,
-        signature: signatureToHex(signature),
+        signature: bip322SignatureToHex(signature),
       });
     }
     const verifyRes = await fetch('/api/marketplace/ordnet/session', {
@@ -389,16 +390,6 @@ function intentErrorMessage(body: IntentErrorBody): string {
     parts.push(`network ${formatBtcPreciseCompact(quote.network_fee_sats)}`);
   }
   return `${base}. API quote: ${parts.join(', ')}.`;
-}
-
-function signatureToHex(signature: string): string {
-  if (/^(?:[0-9a-fA-F]{2})+$/.test(signature)) return signature;
-  const raw = atob(signature);
-  let out = '';
-  for (let i = 0; i < raw.length; i++) {
-    out += raw.charCodeAt(i).toString(16).padStart(2, '0');
-  }
-  return out;
 }
 
 function optionKey(
