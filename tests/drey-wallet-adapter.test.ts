@@ -59,7 +59,6 @@ describe('Drey wallet adapter', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
-    process.env.NEXT_PUBLIC_DREY_MARKETPLACE_ENABLED = 'true';
     sats.getSupportedWallets.mockReturnValue([
       {
         id: 'XverseProviders.BitcoinProvider',
@@ -76,14 +75,6 @@ describe('Drey wallet adapter', () => {
     expect(options.map(option => option.id)).toEqual(['drey', 'XverseProviders.BitcoinProvider']);
     expect(options.filter(option => option.id === 'drey')).toHaveLength(1);
     expect(options[0]).toMatchObject({ name: 'Drey', isInstalled: true });
-  });
-
-  it('keeps Drey undiscoverable until the coordinated release gate is enabled', () => {
-    process.env.NEXT_PUBLIC_DREY_MARKETPLACE_ENABLED = 'false';
-    installDrey(() => null);
-    expect(getSatsWalletOptions().map(option => option.id)).toEqual([
-      'XverseProviders.BitcoinProvider',
-    ]);
   });
 
   it('refreshes discovery when late Drey injection announces initialization', () => {

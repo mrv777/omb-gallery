@@ -74,7 +74,6 @@ export function getSatsWalletOptions(): SatsWalletOption[] {
   const merged = new Map<string, SatsWalletOption>();
   for (const provider of [...getSupportedWallets(), ...discovered]) {
     if (typeof provider.id !== 'string' || merged.has(provider.id)) continue;
-    if (provider.id === DREY_PROVIDER_ID && !dreyMarketplaceEnabled()) continue;
     merged.set(provider.id, {
       id: provider.id,
       name: typeof provider.name === 'string' ? provider.name : provider.id,
@@ -84,7 +83,7 @@ export function getSatsWalletOptions(): SatsWalletOption[] {
       installUrl: providerInstallUrl(provider as SupportedWallet),
     });
   }
-  if (dreyMarketplaceEnabled() && !merged.has(DREY_PROVIDER_ID)) {
+  if (!merged.has(DREY_PROVIDER_ID)) {
     merged.set(DREY_PROVIDER_ID, {
       id: DREY_PROVIDER_ID,
       name: 'Drey',
@@ -100,10 +99,6 @@ export function getSatsWalletOptions(): SatsWalletOption[] {
     const br = bi === -1 ? Number.MAX_SAFE_INTEGER : bi;
     return ar - br || Number(b.isInstalled) - Number(a.isInstalled) || a.name.localeCompare(b.name);
   });
-}
-
-export function dreyMarketplaceEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_DREY_MARKETPLACE_ENABLED?.trim() === 'true';
 }
 
 export function listenForDreyInitialization(listener: () => void): () => void {
