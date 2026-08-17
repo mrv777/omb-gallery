@@ -18,6 +18,10 @@ export const DREY_INITIALIZED_EVENT = 'drey#initialized';
 export const DREY_CHROME_STORE_URL =
   'https://chromewebstore.google.com/detail/drey/kngidlmmbfmnoeimngkajdlbdenlhgof';
 export const DREY_PROVIDER_ICON = '/wallets/drey.png';
+export const LEATHER_PROVIDER_ID = 'LeatherProvider';
+export const LEATHER_PROVIDER_ICON = '/wallets/leather.png';
+export const LEATHER_CHROME_STORE_URL =
+  'https://chromewebstore.google.com/detail/leather/ldinpeekobnhjjdofggfgjlcehhmanlj';
 
 export type ConnectedWallet = {
   ordAddr: string;
@@ -61,30 +65,43 @@ type WalletWindow = Window & {
 
 const CONNECT_MESSAGE = 'Connect to OMB Wiki marketplace.';
 const ADDRESS_PURPOSES = [AddressPurpose.Ordinals, AddressPurpose.Payment];
-const PROVIDER_ORDER = [
+const CONSUMER_PROVIDER_ORDER = [
   DREY_PROVIDER_ID,
   'XverseProviders.BitcoinProvider',
   'unisat',
-  'FordefiProviders.UtxoProvider',
+  LEATHER_PROVIDER_ID,
 ];
+const CONSUMER_PROVIDER_IDS = new Set(CONSUMER_PROVIDER_ORDER);
 
 export function getSatsWalletOptions(): SatsWalletOption[] {
   const discovered = typeof window === 'undefined' ? [] : discoveredWallets(window as WalletWindow);
+  const discoveredIds = new Set(
+    discovered.flatMap(provider => (typeof provider.id === 'string' ? [provider.id] : []))
+  );
   const merged = new Map<string, SatsWalletOption>();
   for (const provider of [...getSupportedWallets(), ...discovered]) {
     if (typeof provider.id !== 'string' || merged.has(provider.id)) continue;
+    const isInstalled =
+      provider.id === DREY_PROVIDER_ID
+        ? hasDreyProvider()
+        : discoveredIds.has(provider.id) || Boolean(provider.isInstalled);
+    if (!isInstalled && !CONSUMER_PROVIDER_IDS.has(provider.id)) continue;
     merged.set(provider.id, {
       id: provider.id,
       name: typeof provider.name === 'string' ? provider.name : provider.id,
       icon:
         provider.id === DREY_PROVIDER_ID
           ? DREY_PROVIDER_ICON
-          : typeof provider.icon === 'string'
-            ? provider.icon
-            : '',
-      isInstalled:
-        provider.id === DREY_PROVIDER_ID ? hasDreyProvider() : Boolean(provider.isInstalled),
-      installUrl: providerInstallUrl(provider as SupportedWallet),
+          : provider.id === LEATHER_PROVIDER_ID
+            ? LEATHER_PROVIDER_ICON
+            : typeof provider.icon === 'string'
+              ? provider.icon
+              : '',
+      isInstalled,
+      installUrl:
+        provider.id === LEATHER_PROVIDER_ID
+          ? LEATHER_CHROME_STORE_URL
+          : providerInstallUrl(provider as SupportedWallet),
     });
   }
   if (!merged.has(DREY_PROVIDER_ID)) {
@@ -96,12 +113,23 @@ export function getSatsWalletOptions(): SatsWalletOption[] {
       installUrl: DREY_CHROME_STORE_URL,
     });
   }
+  if (!merged.has(LEATHER_PROVIDER_ID)) {
+    merged.set(LEATHER_PROVIDER_ID, {
+      id: LEATHER_PROVIDER_ID,
+      name: 'Leather',
+      icon: LEATHER_PROVIDER_ICON,
+      isInstalled: false,
+      installUrl: LEATHER_CHROME_STORE_URL,
+    });
+  }
   return Array.from(merged.values()).toSorted((a, b) => {
-    const ai = PROVIDER_ORDER.indexOf(a.id);
-    const bi = PROVIDER_ORDER.indexOf(b.id);
+    const installed = Number(b.isInstalled) - Number(a.isInstalled);
+    if (installed !== 0) return installed;
+    const ai = CONSUMER_PROVIDER_ORDER.indexOf(a.id);
+    const bi = CONSUMER_PROVIDER_ORDER.indexOf(b.id);
     const ar = ai === -1 ? Number.MAX_SAFE_INTEGER : ai;
     const br = bi === -1 ? Number.MAX_SAFE_INTEGER : bi;
-    return ar - br || Number(b.isInstalled) - Number(a.isInstalled) || a.name.localeCompare(b.name);
+    return ar - br || a.name.localeCompare(b.name);
   });
 }
 

@@ -19,6 +19,8 @@ vi.mock('sats-connect', () => ({
 import {
   DREY_MIN_BUY_VERSION,
   DREY_PROVIDER_ICON,
+  LEATHER_PROVIDER_ICON,
+  LEATHER_PROVIDER_ID,
   connectSatsWallet,
   getSatsWalletOptions,
   isDreyBuySupported,
@@ -79,16 +81,67 @@ describe('Drey wallet adapter', () => {
     );
   });
 
+  it('ships the official Leather wallet icon', () => {
+    const icon = readFileSync(new URL('../public/wallets/leather.png', import.meta.url));
+    expect(createHash('sha256').update(icon).digest('hex')).toBe(
+      'c81d2c3da71d06aeb48111ff24ab04aee0c7d57e282825e882dbcf187ea37a66'
+    );
+  });
+
   it('merges both discovery registries, suppresses duplicates, and keeps Drey first', () => {
     installDrey(() => null);
     const options = getSatsWalletOptions();
-    expect(options.map(option => option.id)).toEqual(['drey', 'XverseProviders.BitcoinProvider']);
+    expect(options.map(option => option.id)).toEqual([
+      'drey',
+      'XverseProviders.BitcoinProvider',
+      LEATHER_PROVIDER_ID,
+    ]);
     expect(options.filter(option => option.id === 'drey')).toHaveLength(1);
     expect(options[0]).toMatchObject({
       name: 'Drey',
       icon: DREY_PROVIDER_ICON,
       isInstalled: true,
     });
+  });
+
+  it('treats registry-discovered Leather as installed and supplies its local icon', () => {
+    vi.stubGlobal('window', {
+      btc_providers: [{ id: LEATHER_PROVIDER_ID, name: 'Leather' }],
+    });
+
+    const options = getSatsWalletOptions();
+    expect(options.find(option => option.id === LEATHER_PROVIDER_ID)).toMatchObject({
+      name: 'Leather',
+      icon: LEATHER_PROVIDER_ICON,
+      isInstalled: true,
+    });
+  });
+
+  it('hides unavailable institutional wallets but preserves them when installed', () => {
+    sats.getSupportedWallets.mockReturnValue([
+      {
+        id: 'FordefiProviders.UtxoProvider',
+        name: 'Fordefi',
+        icon: 'fordefi-icon',
+        isInstalled: false,
+      },
+    ]);
+
+    expect(getSatsWalletOptions().map(option => option.id)).not.toContain(
+      'FordefiProviders.UtxoProvider'
+    );
+
+    sats.getSupportedWallets.mockReturnValue([
+      {
+        id: 'FordefiProviders.UtxoProvider',
+        name: 'Fordefi',
+        icon: 'fordefi-icon',
+        isInstalled: true,
+      },
+    ]);
+    expect(getSatsWalletOptions()).toContainEqual(
+      expect.objectContaining({ id: 'FordefiProviders.UtxoProvider', isInstalled: true })
+    );
   });
 
   it('refreshes discovery when late Drey injection announces initialization', () => {

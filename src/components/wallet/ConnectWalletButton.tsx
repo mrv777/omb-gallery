@@ -241,12 +241,28 @@ function WalletPickerDialog({
 }
 
 function WalletIcon({ option, dim = false }: { option: SatsWalletOption; dim?: boolean }) {
+  const [failedIcon, setFailedIcon] = useState<string | null>(null);
+  const icon = option.icon.trim();
+  const showIcon = icon.length > 0 && failedIcon !== icon;
+
   return (
     <span
       aria-hidden="true"
-      className={`block h-8 w-8 bg-contain bg-center bg-no-repeat ${dim ? 'opacity-60' : ''}`}
-      style={{ backgroundImage: `url(${option.icon})` }}
-    />
+      className={`grid h-8 w-8 place-items-center border border-ink-2 bg-ink-1 text-[12px] font-bold text-bone-dim ${dim ? 'opacity-60' : ''}`}
+    >
+      {showIcon ? (
+        // Provider icons may be runtime data URIs, which next/image cannot validate.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={icon}
+          alt=""
+          className="h-full w-full object-contain"
+          onError={() => setFailedIcon(icon)}
+        />
+      ) : (
+        option.name.trim().charAt(0).toUpperCase() || 'W'
+      )}
+    </span>
   );
 }
 
