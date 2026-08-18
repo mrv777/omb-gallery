@@ -23,6 +23,7 @@ import {
   LEATHER_PROVIDER_ICON,
   LEATHER_PROVIDER_ID,
   connectSatsWallet,
+  getDreySpendableBalance,
   getSatsWalletOptions,
   isDreyBuySupported,
   isDreyCommunitySupported,
@@ -228,6 +229,32 @@ describe('Drey wallet adapter', () => {
       'signPsbt',
       { psbt: 'unsigned', signInputs: { bc1qpayment: [1] }, broadcast: false },
       'XverseProviders.BitcoinProvider'
+    );
+  });
+
+  it('returns only Drey confirmed spendable balance after revalidating the account', async () => {
+    const request = installDrey(method => {
+      if (method === 'getAccounts') return addresses;
+      if (method === 'getBalance')
+        return { confirmed: '125000', unconfirmed: '5000', total: '130000' };
+      throw new Error(`unexpected method ${method}`);
+    });
+    await expect(getDreySpendableBalance(dreyWallet())).resolves.toEqual({
+      confirmed: '125000',
+      unconfirmed: '5000',
+      total: '130000',
+    });
+    expect(request.mock.calls.map(([method]) => method)).toEqual(['getAccounts', 'getBalance']);
+  });
+
+  it('rejects inconsistent Drey balance results', async () => {
+    installDrey(method => {
+      if (method === 'getAccounts') return addresses;
+      if (method === 'getBalance') return { confirmed: '125000', unconfirmed: '5000', total: '1' };
+      throw new Error(`unexpected method ${method}`);
+    });
+    await expect(getDreySpendableBalance(dreyWallet())).rejects.toThrow(
+      /invalid spendable balance/u
     );
   });
 

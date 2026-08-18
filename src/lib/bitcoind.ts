@@ -95,6 +95,18 @@ export async function getRawTransaction(txid: string): Promise<RawTx> {
   return rpc<RawTx>('getrawtransaction', [txid, 2]);
 }
 
+export type TxOut = {
+  confirmations: number;
+  value: number;
+  scriptPubKey: { hex: string };
+  coinbase: boolean;
+};
+
+/** Returns null when the exact output is spent, including by a mempool transaction. */
+export async function getTxOut(txid: string, vout: number): Promise<TxOut | null> {
+  return rpc<TxOut | null>('gettxout', [txid, vout, true]);
+}
+
 // Per-call cache: bitcoind's getrawtransaction is fast over localhost (sub-ms)
 // but origination tracing + repayment walks repeatedly hit the same prevouts.
 // Caller passes a fresh Map per tick so the cache doesn't grow unbounded

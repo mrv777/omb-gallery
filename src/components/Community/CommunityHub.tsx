@@ -78,7 +78,7 @@ export default function CommunityHub({
             onClick={() => setCreating(value => !value)}
             className="h-10 border border-bone px-4 font-mono text-[10px] uppercase tracking-[0.1em] text-bone hover:bg-bone hover:text-ink-0"
           >
-            {creating ? 'close' : 'start a campaign'}
+            {creating ? 'close' : 'start a group buy'}
           </button>
         </div>
         <div className="mt-5 grid gap-2 font-mono text-[9px] uppercase tracking-[0.08em] text-bone-dim sm:grid-cols-3">
@@ -98,7 +98,7 @@ export default function CommunityHub({
         <section className="mt-6 border border-ink-2 bg-ink-1 p-4 sm:p-6">
           <div className="max-w-3xl">
             <h2 className="font-mono text-lg uppercase tracking-[0.08em] text-bone">
-              Start a campaign
+              Start a group buy
             </h2>
             <p className="mt-2 text-xs leading-relaxed text-bone-dim">
               One short setup. Drey creates your independent campaign key; the gallery only receives
@@ -110,7 +110,7 @@ export default function CommunityHub({
               </p>
             ) : wallet.providerId !== 'drey' ? (
               <p className="mt-5 border border-accent-orange/50 p-3 font-mono text-[10px] uppercase text-accent-orange">
-                Community Purchases uses Drey. Reconnect with Drey to create or join.
+                Group Buys uses Drey. Reconnect with Drey to create or join.
               </p>
             ) : !dreyReady ? (
               <p className="mt-5 border border-accent-orange/50 p-3 font-mono text-[10px] uppercase text-accent-orange">
@@ -276,7 +276,7 @@ export default function CommunityHub({
               onClick={() => void submit()}
               className="mt-5 h-11 border border-bone bg-bone px-5 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-0 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {busy ? 'signing…' : 'review & sign campaign'}
+              {busy ? 'signing…' : 'review & start group buy'}
             </button>
           </div>
         </section>
@@ -284,7 +284,7 @@ export default function CommunityHub({
 
       <section className="mt-8">
         <div className="mb-4 flex items-center justify-between font-mono uppercase tracking-[0.1em]">
-          <h2 className="text-sm text-bone">Campaigns</h2>
+          <h2 className="text-sm text-bone">Group buys</h2>
           <span className="text-[9px] text-bone-dim">{initialCampaigns.length} total</span>
         </div>
         {initialCampaigns.length ? (
@@ -295,7 +295,7 @@ export default function CommunityHub({
           </div>
         ) : (
           <div className="border border-dashed border-ink-2 px-4 py-12 text-center font-mono text-[10px] uppercase tracking-[0.08em] text-bone-dim">
-            No campaigns yet.
+            No group buys yet.
           </div>
         )}
       </section>

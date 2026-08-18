@@ -43,6 +43,12 @@ export type ConnectedWallet = {
   providerPlatform: string | null;
 };
 
+export type DreySpendableBalance = {
+  confirmed: string;
+  unconfirmed: string;
+  total: string;
+};
+
 export type SatsWalletOption = {
   id: string;
   name: string;
@@ -209,6 +215,25 @@ export async function signBuyerMessage(
   );
   if (response.status === 'error') throw walletResponseError(response.error);
   return response.result.signature;
+}
+
+export async function getDreySpendableBalance(
+  wallet: ConnectedWallet
+): Promise<DreySpendableBalance> {
+  if (wallet.providerId !== DREY_PROVIDER_ID) {
+    throw new Error('Reconnect with Drey to check purchase funds.');
+  }
+  await assertWalletAddresses(wallet);
+  const balance = await dreyRequest<DreySpendableBalance>('getBalance');
+  if (
+    !isCanonicalSats(balance?.confirmed) ||
+    !isCanonicalSats(balance?.unconfirmed) ||
+    !isCanonicalSats(balance?.total) ||
+    BigInt(balance.confirmed) + BigInt(balance.unconfirmed) !== BigInt(balance.total)
+  ) {
+    throw new Error('Drey returned an invalid spendable balance.');
+  }
+  return balance;
 }
 
 export async function signPurchasePsbt(args: {
@@ -383,4 +408,8 @@ function compareSemver(actual: string | null, required: string): number {
     if (left[index] !== right[index]) return (left[index] ?? 0) - (right[index] ?? 0);
   }
   return 0;
+}
+
+function isCanonicalSats(value: unknown): value is string {
+  return typeof value === 'string' && /^(?:0|[1-9][0-9]*)$/u.test(value);
 }

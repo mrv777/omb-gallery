@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import Link from 'next/link';
 import type { ColorFilter } from '@/lib/types';
 import { appendColorParam } from '@/lib/colorFilter';
@@ -80,7 +81,14 @@ export default function DesktopNav({
     // six gaps exactly when the row is tightest, which overflowed by 4px just
     // above the threshold.
     <nav className={`hidden lg:flex items-center gap-3 2xl:gap-5 shrink-0 ${className}`}>
-      {PRIMARY_NAV_ITEMS.map(nav => item(nav, false))}
+      {PRIMARY_NAV_ITEMS.map((nav, index) => (
+        <Fragment key={nav.key}>
+          {index > 0 && PRIMARY_NAV_ITEMS[index - 1]?.group !== nav.group ? (
+            <span aria-hidden="true" className="h-4 w-px shrink-0 bg-ink-2" />
+          ) : null}
+          {item(nav, false)}
+        </Fragment>
+      ))}
       <span aria-hidden="true" className="hidden nav-full:block h-4 w-px bg-ink-2 shrink-0" />
       <span className="hidden nav-full:flex items-center gap-3 2xl:gap-5">
         {SECONDARY_NAV_ITEMS.map(nav => item(nav, true))}

@@ -17,6 +17,10 @@ import {
 } from '@/lib/community-purchases/contracts';
 import { formatBtcCompact, formatTimeUntil, truncateAddr } from '@/lib/format';
 import { lookupInscription } from '@/lib/inscriptionLookup';
+import {
+  assertConfirmedCommunityFunding,
+  requiredCommunityFundingSats,
+} from '@/lib/community-purchases/funding';
 
 export default function CommunityCampaign({
   initial,
@@ -26,7 +30,7 @@ export default function CommunityCampaign({
   initialOwnerId: string;
 }) {
   const router = useRouter();
-  const { wallet, signMessage, signPsbt } = useWallet();
+  const { wallet, signMessage, getSpendableBalance, signPsbt } = useWallet();
   const [campaign, setCampaign] = useState(initial);
   const ownerId = initialOwnerId;
   const [units, setUnits] = useState('1');
@@ -72,7 +76,7 @@ export default function CommunityCampaign({
         onClick={() => router.push('/community')}
         className="mb-4 font-mono text-[10px] uppercase tracking-[0.1em] text-bone-dim hover:text-bone"
       >
-        ← all campaigns
+        ← all group buys
       </button>
       <section className="grid gap-6 border-b border-ink-2 pb-7 md:grid-cols-[220px_minmax(0,1fr)]">
         <div className="aspect-square overflow-hidden bg-ink-1">
@@ -312,6 +316,10 @@ export default function CommunityCampaign({
           <br />
           Finish recovery, then paste the enrollment package.
         </div>
+        <p className="mt-3 text-[10px] leading-relaxed text-bone-dim">
+          Drey checks that you have enough confirmed, clean BTC before reserving. Your BTC stays in
+          your wallet and is not locked.
+        </p>
         <textarea
           value={enrollmentText}
           onChange={event => setEnrollmentText(event.target.value)}
@@ -336,7 +344,7 @@ export default function CommunityCampaign({
           onClick={() => void join(unitCount)}
           className="mt-4 h-10 w-full border border-bone bg-bone font-mono text-[10px] uppercase tracking-[0.1em] text-ink-0 disabled:opacity-40"
         >
-          {busy ? 'signing…' : 'sign reservation'}
+          {busy ? 'checking & signing…' : 'sign reservation'}
         </button>
       </div>
     );
@@ -352,6 +360,10 @@ export default function CommunityCampaign({
           In Drey, select clean cardinal funding inputs for this purchase. Paste only their
           outpoints here; BTC still does not move.
         </p>
+        <p className="mt-2 text-[10px] leading-relaxed text-bone-dim">
+          Drey checks your confirmed spendable balance again. These inputs remain spendable until
+          you approve the exact purchase.
+        </p>
         <textarea
           value={funding}
           onChange={event => setFunding(event.target.value)}
@@ -366,7 +378,7 @@ export default function CommunityCampaign({
           onClick={() => void ready()}
           className="mt-4 h-10 w-full border border-accent-green bg-accent-green font-mono text-[10px] uppercase tracking-[0.1em] text-ink-0 disabled:opacity-40"
         >
-          {busy ? 'signing…' : 'confirm ready'}
+          {busy ? 'checking & signing…' : 'confirm ready'}
         </button>
       </div>
     );
@@ -508,11 +520,27 @@ export default function CommunityCampaign({
     if (!wallet || !isDreyCommunitySupported(wallet))
       return setError(`Drey ${DREY_MIN_COMMUNITY_VERSION} or newer is required.`);
     if (!noAlt || !consent) return setError('Complete both confirmations.');
+    if (!/^(?:0|[1-9][0-9]*)$/u.test(maxContribution)) {
+      return setError('Enter a whole-number maximum in sats.');
+    }
+    const maximum = BigInt(maxContribution);
+    const required = requiredCommunityFundingSats(campaign.maxLandedCostSats, requestedUnits);
+    if (maximum > BigInt(Number.MAX_SAFE_INTEGER)) return setError('That maximum is too large.');
+    if (maximum < required) {
+      return setError(`Your maximum must cover at least ${required.toLocaleString()} sats.`);
+    }
     let enrollment: CommunityEnrollmentV1;
     try {
       enrollment = JSON.parse(enrollmentText) as CommunityEnrollmentV1;
     } catch {
       return setError('Paste the enrollment package copied from Drey.');
+    }
+    setBusy(true);
+    try {
+      assertConfirmedCommunityFunding(await getSpendableBalance(), maximum);
+    } catch (reason) {
+      setBusy(false);
+      return setError(reason instanceof Error ? reason.message : 'Drey could not verify funds.');
     }
     const now = Math.floor(Date.now() / 1000);
     const payload: ReserveUnitsPayloadV1 = {
@@ -548,6 +576,24 @@ export default function CommunityCampaign({
       .split(/[\s,]+/u)
       .map(value => value.trim())
       .filter(Boolean);
+    if (
+      fundingOutpoints.length === 0 ||
+      new Set(fundingOutpoints).size !== fundingOutpoints.length ||
+      fundingOutpoints.some(value => !/^[0-9a-f]{64}:(?:0|[1-9][0-9]*)$/u.test(value))
+    ) {
+      return setError('Paste each unique funding outpoint as txid:vout.');
+    }
+    setBusy(true);
+    try {
+      const required = requiredCommunityFundingSats(
+        campaign.maxLandedCostSats,
+        me.allocatedUnits.length
+      );
+      assertConfirmedCommunityFunding(await getSpendableBalance(), required);
+    } catch (reason) {
+      setBusy(false);
+      return setError(reason instanceof Error ? reason.message : 'Drey could not verify funds.');
+    }
     const now = Math.floor(Date.now() / 1000);
     const payload: ConfirmReadinessPayloadV1 = {
       protocol: COMMUNITY_PURCHASES_PROTOCOL,

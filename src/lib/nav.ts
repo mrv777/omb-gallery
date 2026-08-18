@@ -30,12 +30,14 @@ export type NavKey =
  * split exists to solve.
  */
 export type NavTier = 'primary' | 'secondary';
+export type NavGroup = 'browse' | 'buy' | 'about';
 
 export type NavItem = {
   key: NavKey;
   label: string;
   href: string;
   tier: NavTier;
+  group: NavGroup;
   /**
    * Render this item as a glyph instead of its label in the horizontal nav.
    * A name, not a component — this module is imported by both the server tree
@@ -53,38 +55,41 @@ export const MARKETPLACE_NAV_ENABLED =
 export const COMMUNITY_NAV_ENABLED = process.env.NEXT_PUBLIC_COMMUNITY_PURCHASES_ENABLED === 'true';
 
 export const NAV_ITEMS: NavItem[] = [
-  { key: 'gallery', label: 'gallery', href: '/', tier: 'primary' },
-  { key: 'activity', label: 'activity', href: '/activity', tier: 'primary' },
-  { key: 'explorer', label: 'explorer', href: '/explorer', tier: 'primary' },
-  ...(COMMUNITY_NAV_ENABLED
-    ? [
-        {
-          key: 'community',
-          label: 'community',
-          href: '/community',
-          tier: 'primary',
-        } as NavItem,
-      ]
-    : []),
+  { key: 'gallery', label: 'gallery', href: '/', tier: 'primary', group: 'browse' },
+  { key: 'activity', label: 'activity', href: '/activity', tier: 'primary', group: 'browse' },
+  { key: 'explorer', label: 'explorer', href: '/explorer', tier: 'primary', group: 'browse' },
   ...(MARKETPLACE_NAV_ENABLED
     ? [
         {
           key: 'marketplace',
-          label: 'marketplace',
+          label: 'market',
           href: '/marketplace',
           tier: 'primary',
+          group: 'buy',
         } as NavItem,
       ]
     : []),
-  { key: 'history', label: 'history', href: '/history', tier: 'secondary' },
+  ...(COMMUNITY_NAV_ENABLED
+    ? [
+        {
+          key: 'community',
+          label: 'group buys',
+          href: '/community',
+          tier: 'primary',
+          group: 'buy',
+        } as NavItem,
+      ]
+    : []),
+  { key: 'history', label: 'history', href: '/history', tier: 'secondary', group: 'about' },
   {
     key: 'bravocados',
     label: 'bravocados',
     href: '/bravocados',
     tier: 'secondary',
+    group: 'about',
     icon: 'avocado',
   },
-  { key: 'info', label: 'info', href: '/info', tier: 'secondary' },
+  { key: 'info', label: 'info', href: '/info', tier: 'secondary', group: 'about' },
 ];
 
 export const PRIMARY_NAV_ITEMS = NAV_ITEMS.filter(i => i.tier === 'primary');

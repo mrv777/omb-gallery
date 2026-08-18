@@ -43,6 +43,7 @@ import { runRolesTick } from '@/lib/rolesStore';
 import { runClusterTick, runClusterRecompute } from '@/lib/clusterStore';
 import { runListingStagingRecompute } from '@/lib/listingStagingStore';
 import { log } from '@/lib/log';
+import { runCommunityFundingTick } from '@/lib/community-purchases/fundingMonitor';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -225,6 +226,9 @@ async function handle(req: NextRequest): Promise<NextResponse> {
       case 'cluster-recompute':
         result = safeClusterRecompute();
         break;
+      case 'community-funding':
+        result = await runCommunityFundingTick();
+        break;
       case 'listing-staging-recompute':
         result = safeListingStagingRecompute();
         break;
@@ -247,6 +251,7 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         // reclassify a sale as a loan). listings is independent. notify
         // last so it sees the final event_type for each row.
         const ord = await runOrdTick();
+        const communityFunding = await runCommunityFundingTick();
         const magisatFp = await safeMagisatFp();
         const magicEdenFp = await safeMagicEdenFp();
         const ordNetFp = await safeOrdNetFp();
@@ -262,6 +267,7 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         const notify = await safeNotify();
         result = [
           ord,
+          communityFunding,
           magisatFp,
           magicEdenFp,
           ordNetFp,

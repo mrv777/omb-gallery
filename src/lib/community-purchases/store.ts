@@ -773,6 +773,106 @@ export function confirmCommunityReadiness(args: {
   return getCommunityCampaign(campaign.id, now)!;
 }
 
+export function invalidateCommunityParticipantFunding(args: {
+  campaignId: string;
+  ownerId: string;
+  reason: 'missing' | 'spent' | 'changed' | 'insufficient';
+  now?: number;
+}): CommunityCampaignView {
+  const now = args.now ?? unixNow();
+  if (!IDENTIFIER.test(args.campaignId) || !IDENTIFIER.test(args.ownerId)) {
+    throw new CommunityPurchaseError(
+      'invalid-identifier',
+      'Campaign and owner identifiers are invalid.'
+    );
+  }
+  const db = getDb();
+  const campaign = campaignRow(db, args.campaignId);
+  if (!campaign || !['readiness', 'frozen', 'signing'].includes(campaign.status)) {
+    throw new CommunityPurchaseError(
+      'funding-invalidation-closed',
+      'Funding can only be replaced before acquisition broadcast.',
+      409
+    );
+  }
+  const participant = db
+    .prepare(`SELECT * FROM community_participants WHERE campaign_id = ? AND owner_id = ?`)
+    .get(args.campaignId, args.ownerId) as ParticipantRow | undefined;
+  if (!participant || countParticipantUnits(db, participant.id) === 0) {
+    throw new CommunityPurchaseError(
+      'funding-owner-not-selected',
+      'That owner does not hold a provisional slot.',
+      409
+    );
+  }
+
+  db.transaction(() => {
+    // Any collected signatures commit to the old inputs and roster. Removing
+    // the acquisition row atomically discards them through the FK cascade.
+    db.prepare(`DELETE FROM community_acquisitions WHERE campaign_id = ?`).run(campaign.id);
+    recordEvent(
+      db,
+      campaign.id,
+      'funding-invalidated',
+      participant.owner_id,
+      { reason: args.reason },
+      now
+    );
+    if (participant.is_creator === 1) {
+      db.prepare(
+        `UPDATE community_campaigns SET status = 'failed', updated_at = ? WHERE id = ?`
+      ).run(now, campaign.id);
+      recordEvent(db, campaign.id, 'creator-funding-invalidated', participant.owner_id, {}, now);
+      return;
+    }
+
+    db.prepare(`DELETE FROM community_units WHERE participant_id = ?`).run(participant.id);
+    db.prepare(
+      `UPDATE community_participants SET readiness_status = 'timed-out', waitlisted_units = 0,
+         readiness_payload_json = NULL, readiness_signature = NULL, readiness_nonce = NULL,
+         funding_outpoints_json = NULL, ready_at = NULL WHERE id = ?`
+    ).run(participant.id);
+    db.prepare(
+      `UPDATE community_participants SET readiness_status = 'waiting',
+         readiness_payload_json = NULL, readiness_signature = NULL, readiness_nonce = NULL,
+         funding_outpoints_json = NULL, ready_at = NULL
+       WHERE campaign_id = ? AND id != ?
+         AND EXISTS (SELECT 1 FROM community_units u WHERE u.participant_id = community_participants.id)`
+    ).run(campaign.id, participant.id);
+
+    const waitlisted = db
+      .prepare(
+        `SELECT * FROM community_participants
+         WHERE campaign_id = ? AND waitlisted_units > 0 AND readiness_status != 'timed-out'
+         ORDER BY joined_at, id`
+      )
+      .all(campaign.id) as ParticipantRow[];
+    for (const row of waitlisted) {
+      const free = COMMUNITY_PURCHASES_UNIT_COUNT - countAllocated(db, campaign.id);
+      if (free <= 0) break;
+      const promoted = Math.min(free, row.waitlisted_units);
+      assignUnits(db, campaign.id, row.id, promoted);
+      db.prepare(
+        `UPDATE community_participants SET waitlisted_units = waitlisted_units - ?, readiness_status = 'waiting'
+         WHERE id = ?`
+      ).run(promoted, row.id);
+      recordEvent(db, campaign.id, 'waitlist-promoted', row.owner_id, { units: promoted }, now);
+    }
+
+    bumpCapTableVersion(db, campaign.id, now);
+    const refreshed = campaignRow(db, campaign.id)!;
+    if (countAllocated(db, campaign.id) === COMMUNITY_PURCHASES_UNIT_COUNT) {
+      startReadiness(db, refreshed, now);
+    } else {
+      db.prepare(
+        `UPDATE community_campaigns SET status = 'open', readiness_started_at = NULL,
+           readiness_deadline = NULL, updated_at = ? WHERE id = ?`
+      ).run(now, campaign.id);
+    }
+  })();
+  return getCommunityCampaign(campaign.id, now)!;
+}
+
 function validateCreatePayload(payload: CreateCampaignPayloadV1, now: number): void {
   if (
     payload.protocol !== COMMUNITY_PURCHASES_PROTOCOL ||

@@ -17,10 +17,10 @@ export async function generateMetadata({
   const campaign = communityPurchasesEnabled() ? getCommunityCampaign(campaignId) : null;
   return campaign
     ? {
-        title: `Community OMB ${campaign.inscriptionNumber}`,
+        title: `Group Buy · OMB ${campaign.inscriptionNumber}`,
         description: `${campaign.allocatedUnitCount} of 100 units assigned.`,
       }
-    : { title: 'Community Purchase' };
+    : { title: 'Group Buy' };
 }
 
 export default async function CommunityCampaignPage({

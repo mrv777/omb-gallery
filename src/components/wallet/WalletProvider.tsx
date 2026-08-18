@@ -26,6 +26,7 @@ type WalletContextValue = {
   disconnect: () => Promise<void>;
   acceptTerms: () => Promise<void>;
   signMessage: (address: string, message: string) => Promise<string>;
+  getSpendableBalance: () => Promise<{ confirmed: string; unconfirmed: string; total: string }>;
   signPsbt: (
     psbt: string,
     signInputs?: Record<string, number[]>,
@@ -146,9 +147,38 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     [wallet]
   );
 
+  const getSpendableBalance = useCallback(async () => {
+    if (MOCK_WALLET_CLIENT) {
+      return { confirmed: '2100000000000000', unconfirmed: '0', total: '2100000000000000' };
+    }
+    if (!wallet) throw new Error('Reconnect your wallet before checking funds.');
+    const { getDreySpendableBalance } = await import('@/lib/wallet/satsConnect');
+    return getDreySpendableBalance(wallet);
+  }, [wallet]);
+
   const value = useMemo(
-    () => ({ wallet, connecting, error, connect, disconnect, acceptTerms, signMessage, signPsbt }),
-    [wallet, connecting, error, connect, disconnect, acceptTerms, signMessage, signPsbt]
+    () => ({
+      wallet,
+      connecting,
+      error,
+      connect,
+      disconnect,
+      acceptTerms,
+      signMessage,
+      getSpendableBalance,
+      signPsbt,
+    }),
+    [
+      wallet,
+      connecting,
+      error,
+      connect,
+      disconnect,
+      acceptTerms,
+      signMessage,
+      getSpendableBalance,
+      signPsbt,
+    ]
   );
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;

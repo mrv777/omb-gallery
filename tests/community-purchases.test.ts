@@ -41,6 +41,7 @@ import { installPublicPolicyCrypto } from '../src/lib/community-purchases/dreyCr
 let dbModule: typeof import('../src/lib/db');
 let store: typeof import('../src/lib/community-purchases/store');
 let acquisitionStore: typeof import('../src/lib/community-purchases/acquisitionStore');
+let fundingMonitor: typeof import('../src/lib/community-purchases/fundingMonitor');
 let saleStore: typeof import('../src/lib/community-purchases/saleStore');
 const tempDir = path.join(
   os.tmpdir(),
@@ -58,6 +59,7 @@ beforeEach(async () => {
   dbModule = await import('../src/lib/db');
   store = await import('../src/lib/community-purchases/store');
   acquisitionStore = await import('../src/lib/community-purchases/acquisitionStore');
+  fundingMonitor = await import('../src/lib/community-purchases/fundingMonitor');
   saleStore = await import('../src/lib/community-purchases/saleStore');
 });
 
@@ -308,6 +310,25 @@ describe('Community Purchases coordination', () => {
     const unsigned = constructCommunityVaultAcquisitionPsbt(policy, plan);
     const base = Transaction.fromPSBT(hexToBytes(unsigned), { PSBTVersion: 0 });
     base.signIdx(asset.privateKey, 0, [SigHash.ALL]);
+    const db = dbModule.getDb();
+    db.prepare(
+      `UPDATE community_participants SET funding_outpoints_json = ?
+       WHERE campaign_id = ? AND owner_id = 'owner-0'`
+    ).run(JSON.stringify([`${'12'.repeat(32)}:0`]), campaign.id);
+    expect(() =>
+      acquisitionStore.publishCommunityAcquisition({
+        campaignId: campaign.id,
+        policy,
+        plan,
+        preflight,
+        basePsbtHex: bytesToHex(base.toPSBT(0)),
+        nowMs: NOW * 1000 + 32_000,
+      })
+    ).toThrow(/differ from readiness/u);
+    db.prepare(
+      `UPDATE community_participants SET funding_outpoints_json = ?
+       WHERE campaign_id = ? AND owner_id = 'owner-0'`
+    ).run(JSON.stringify([`${(500).toString(16).padStart(64, '0')}:0`]), campaign.id);
     let coordinated = acquisitionStore.publishCommunityAcquisition({
       campaignId: campaign.id,
       policy,
@@ -707,6 +728,94 @@ describe('Community Purchases coordination', () => {
     expect(after.policy).toBeNull();
   });
 
+  it('discards stale acquisition signatures and promotes the waitlist when funding moves', async () => {
+    const fixture = seedListedTarget();
+    let campaign = await createOpenCampaign(fixture);
+    for (let index = 1; index < 5; index++) {
+      campaign = store.reserveCommunityUnits({
+        payload: reservePayload(campaign, index, 20),
+        signature: `reserve-${index}`,
+        walletAddress: roots[index]!.payoutAddress,
+        now: NOW + index,
+      });
+    }
+    campaign = store.reserveCommunityUnits({
+      payload: reservePayload(campaign, 5, 20),
+      signature: 'waitlist',
+      walletAddress: roots[5]!.payoutAddress,
+      now: NOW + 6,
+    });
+    for (let index = 0; index < 5; index++) {
+      const participant = campaign.participants.find(row => row.ownerId === `owner-${index}`)!;
+      campaign = store.confirmCommunityReadiness({
+        payload: readinessPayload(
+          campaign,
+          participant.ownerId,
+          `${String(index + 800).padStart(64, '0')}:0`,
+          `funding-ready-${index}`
+        ),
+        signature: `funding-ready-${index}`,
+        walletAddress: participant.walletAddress,
+        now: NOW + 20 + index,
+      });
+    }
+    expect(campaign.status).toBe('frozen');
+    const oldVersion = campaign.capTableVersion;
+    const db = dbModule.getDb();
+    db.prepare(
+      `INSERT INTO community_acquisitions (
+         campaign_id, plan_digest, plan_json, preflight_json, signing_psbt_hex,
+         base_psbt_hex, status, expires_at_ms, created_at, updated_at
+       ) VALUES (?, ?, '{}', '{}', '00', '00', 'signing', ?, ?, ?)`
+    ).run(campaign.id, 'ee'.repeat(32), (NOW + 600) * 1000, NOW + 30, NOW + 30);
+    db.prepare(
+      `INSERT INTO community_acquisition_signatures (
+         campaign_id, owner_id, psbt_hash, signed_psbt_hex, signed_indexes_json,
+         approval_payload_json, approval_signature, approval_nonce, created_at
+       ) VALUES (?, 'owner-0', ?, '00', '[1]', '{}', 'signature', 'stale-approval', ?)`
+    ).run(campaign.id, 'ff'.repeat(32), NOW + 31);
+    db.prepare(`UPDATE community_campaigns SET status = 'signing' WHERE id = ?`).run(campaign.id);
+
+    const checked: string[] = [];
+    const tick = await fundingMonitor.runCommunityFundingTick({
+      configured: true,
+      now: NOW + 32,
+      fetchTxOut: async (txid, vout) => {
+        checked.push(`${txid}:${vout}`);
+        return txid === String(801).padStart(64, '0')
+          ? null
+          : { confirmations: 6, value: 0.01, scriptPubKey: { hex: '0014' }, coinbase: false };
+      },
+    });
+    const restarted = store.getCommunityCampaign(campaign.id, NOW + 32)!;
+
+    expect(tick.invalidatedOwners).toEqual(['owner-1']);
+    expect(checked).toContain(`${String(801).padStart(64, '0')}:0`);
+    expect(restarted.status).toBe('readiness');
+    expect(restarted.capTableVersion).toBe(oldVersion + 1);
+    expect(restarted.policy).toBeNull();
+    expect(restarted.acquisition).toBeNull();
+    expect(restarted.participants.find(row => row.ownerId === 'owner-1')).toMatchObject({
+      allocatedUnits: [],
+      waitlistedUnits: 0,
+      readiness: 'timed-out',
+    });
+    expect(restarted.participants.find(row => row.ownerId === 'owner-5')).toMatchObject({
+      allocatedUnits: expect.any(Array),
+      waitlistedUnits: 0,
+      readiness: 'waiting',
+    });
+    expect(
+      restarted.participants.find(row => row.ownerId === 'owner-5')?.allocatedUnits
+    ).toHaveLength(20);
+    expect(restarted.participants.filter(row => row.allocatedUnits.length > 0)).toSatisfy(rows =>
+      rows.every(row => row.readiness === 'waiting')
+    );
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM community_acquisition_signatures`).get()).toEqual({
+      n: 0,
+    });
+  });
+
   it('invalidates a listed campaign when an immutable listing term changes', async () => {
     const fixture = seedListedTarget();
     const campaign = await createOpenCampaign(fixture);
@@ -979,7 +1088,7 @@ async function freezeListedCampaign() {
       payload: readinessPayload(
         campaign,
         participant.ownerId,
-        `${String(index + 700).padStart(64, '0')}:0`,
+        `${(500 + index).toString(16).padStart(64, '0')}:0`,
         `freeze-ready-${index}`
       ),
       signature: `freeze-ready-signature-${index}`,

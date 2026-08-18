@@ -299,6 +299,7 @@ export function publishCommunityAcquisition(args: {
       409
     );
   }
+  assertCommittedFundingInputs(db, campaign.id, args.plan);
   const signingPsbtHex = constructCommunityVaultAcquisitionPsbt(frozen, args.plan);
   const base = validateCommunityVaultAcquisitionPsbt(
     frozen,
@@ -371,6 +372,51 @@ export function publishCommunityAcquisition(args: {
     );
   })();
   return requireCampaign(campaign.id, now);
+}
+
+function assertCommittedFundingInputs(
+  db: ReturnType<typeof getDb>,
+  campaignId: string,
+  plan: CommunityVaultAcquisitionPlanV1
+): void {
+  const rows = db
+    .prepare(
+      `SELECT p.owner_id, p.funding_outpoints_json
+       FROM community_participants p
+       WHERE p.campaign_id = ? AND p.readiness_status = 'ready'
+         AND EXISTS (SELECT 1 FROM community_units u WHERE u.participant_id = p.id)
+       ORDER BY p.cap_table_order, p.id`
+    )
+    .all(campaignId) as Array<{ owner_id: string; funding_outpoints_json: string | null }>;
+  for (const row of rows) {
+    const committed = parseCommittedOutpoints(row.funding_outpoints_json);
+    const planned = plan.inputs
+      .filter(input => input.ownerId === row.owner_id)
+      .map(input => `${input.txid}:${input.vout}`)
+      .toSorted();
+    if (JSON.stringify(planned) !== JSON.stringify(committed)) {
+      throw new CommunityPurchaseError(
+        'funding-commitment-mismatch',
+        `The acquisition inputs for ${row.owner_id} differ from readiness. Restart readiness.`,
+        409
+      );
+    }
+  }
+}
+
+function parseCommittedOutpoints(raw: string | null): string[] {
+  try {
+    const parsed = JSON.parse(raw ?? '') as unknown;
+    if (!Array.isArray(parsed) || parsed.some(value => typeof value !== 'string'))
+      throw new Error();
+    return (parsed as string[]).toSorted();
+  } catch {
+    throw new CommunityPurchaseError(
+      'funding-commitment-invalid',
+      'A selected owner does not have a valid readiness commitment.',
+      409
+    );
+  }
 }
 
 export function submitCommunityAcquisitionApproval(args: {

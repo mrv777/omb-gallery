@@ -47,9 +47,9 @@ export default function MobileMenu({ active }: { active?: NavKey } = {}) {
       >
         {NAV_ITEMS.map((item, i) => {
           const isActive = item.key === active;
-          // Mirror the desktop tier divider so the sheet tells the same story:
-          // the OMB app proper, then adjacent surfaces.
-          const startsSecondary = item.tier === 'secondary' && NAV_ITEMS[i - 1]?.tier === 'primary';
+          // Mirror the desktop groups so browsing, buying, and collection
+          // context remain easy to scan without another menu level.
+          const startsSection = i > 0 && item.group !== NAV_ITEMS[i - 1]?.group;
           return (
             <Link
               key={item.key}
@@ -57,7 +57,7 @@ export default function MobileMenu({ active }: { active?: NavKey } = {}) {
               role="menuitem"
               onClick={close}
               className={`flex items-center h-12 px-5 transition-colors ${
-                startsSecondary ? 'border-t border-ink-2 mt-1 pt-1' : ''
+                startsSection ? 'border-t border-ink-2 mt-1 pt-1' : ''
               } ${isActive ? 'text-bone' : 'text-bone-dim hover:text-bone'}`}
             >
               <span

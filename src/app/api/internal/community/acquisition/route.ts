@@ -12,6 +12,7 @@ import {
   recordCommunityAcquisitionBroadcast,
 } from '@/lib/community-purchases/acquisitionStore';
 import { communityErrorResponse, requireCommunityEnabled } from '@/lib/community-purchases/api';
+import { invalidateCommunityParticipantFunding } from '@/lib/community-purchases/store';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -24,6 +25,8 @@ type Body = {
   plan?: unknown;
   preflight?: unknown;
   base_psbt_hex?: unknown;
+  owner_id?: unknown;
+  reason?: unknown;
 };
 
 export async function GET(request: NextRequest) {
@@ -73,6 +76,24 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'campaign_id required' }, { status: 400 });
       }
       const campaign = await confirmCommunityAcquisitionHeld({ campaignId: body.campaign_id });
+      return NextResponse.json({ campaign }, { headers: { 'Cache-Control': 'private, no-store' } });
+    }
+    if (body?.action === 'invalidate-funding') {
+      if (
+        typeof body.campaign_id !== 'string' ||
+        typeof body.owner_id !== 'string' ||
+        !['missing', 'spent', 'changed', 'insufficient'].includes(String(body.reason))
+      ) {
+        return NextResponse.json(
+          { error: 'campaign_id, owner_id, and a valid reason are required' },
+          { status: 400 }
+        );
+      }
+      const campaign = invalidateCommunityParticipantFunding({
+        campaignId: body.campaign_id,
+        ownerId: body.owner_id,
+        reason: body.reason as 'missing' | 'spent' | 'changed' | 'insufficient',
+      });
       return NextResponse.json({ campaign }, { headers: { 'Cache-Control': 'private, no-store' } });
     }
     if (

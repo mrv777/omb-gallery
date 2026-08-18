@@ -10,7 +10,7 @@ import { getMarketplaceListings } from '@/lib/marketplace/listings';
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
-  title: 'Community Purchases',
+  title: 'Group Buys',
   description: 'Buy and hold one OMB together with contributor-controlled Bitcoin custody.',
 };
 
