@@ -7,6 +7,7 @@ import {
   type DonationWalletKey,
   type ProviderWindow,
 } from './donation';
+import { DREY_PROVIDER_ID } from './wallet/dreyProvider';
 
 type DonationMethod = 'wallet_getCurrentPermissions' | 'wallet_connect' | 'sendTransfer';
 
@@ -97,6 +98,9 @@ async function safePermissionRead(
   try {
     const response = await request('wallet_getCurrentPermissions', undefined, providerId);
     if (response.status === 'success') {
+      if (providerId === DREY_PROVIDER_ID) {
+        return hasDreyBalancePermission(response.result) ? 'connected' : 'connect';
+      }
       return Array.isArray(response.result) && response.result.length > 0 ? 'connected' : 'connect';
     }
     return isUnsupportedMethodError(response.error)
@@ -112,16 +116,45 @@ async function safePermissionRead(
 }
 
 async function connectWallet(request: DonationRequest, providerId: string): Promise<void> {
+  const permissions =
+    providerId === DREY_PROVIDER_ID
+      ? {
+          permissions: [
+            {
+              type: 'account',
+              resourceId: 'active',
+              actions: { read: true },
+              dataCategories: ['balance'],
+            },
+          ],
+        }
+      : {};
   const response = await request(
     'wallet_connect',
     {
       addresses: [AddressPurpose.Payment],
       message: 'Support the OMB site.',
       network: BitcoinNetworkType.Mainnet,
+      ...permissions,
     },
     providerId
   );
   if (response.status === 'error') throw toDonationWalletError(response.error);
+}
+
+function hasDreyBalancePermission(result: unknown): boolean {
+  return (
+    Array.isArray(result) &&
+    result.some(permission => {
+      if (!permission || typeof permission !== 'object') return false;
+      const candidate = permission as { type?: unknown; dataCategories?: unknown };
+      return (
+        candidate.type === 'account' &&
+        Array.isArray(candidate.dataCategories) &&
+        candidate.dataCategories.includes('balance')
+      );
+    })
+  );
 }
 
 function isUnsupportedMethodError(error: { code?: number; message?: string }): boolean {
@@ -132,8 +165,12 @@ function isUnsupportedMethodError(error: { code?: number; message?: string }): b
 }
 
 function isAuthorizationError(error: { code?: number; message?: string; data?: unknown }): boolean {
+  if (error.data && typeof error.data === 'object') {
+    const dreyCode = (error.data as { dreyCode?: unknown }).dreyCode;
+    if (dreyCode === 'ERR_NOT_CONNECTED' || dreyCode === 'ERR_NO_ACCOUNT') return true;
+  }
   const raw = `${error.message ?? ''} ${JSON.stringify(error.data ?? '')}`;
-  return /not connected|connect(?:ion)? required|unauthori[sz]ed|permission required|access denied/i.test(
+  return /not connected|no approved account|connect(?:ion)? required|unauthori[sz]ed|permission required|access denied/i.test(
     raw
   );
 }

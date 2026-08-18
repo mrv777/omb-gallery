@@ -4,6 +4,28 @@ import { DONATION_CONFIG } from '@/lib/donation';
 
 const TXID = 'ab'.repeat(32);
 const DREY_WINDOW = { drey: { request() {} } };
+const XVERSE_WINDOW = { XverseProviders: { BitcoinProvider: { request() {} } } };
+const DREY_BALANCE_PERMISSIONS = [
+  {
+    type: 'account',
+    resourceId: 'active',
+    actions: { read: true },
+    dataCategories: ['account', 'addresses', 'balance'],
+  },
+];
+const DREY_CONNECT_PARAMS = {
+  addresses: ['payment'],
+  message: 'Support the OMB site.',
+  network: 'Mainnet',
+  permissions: [
+    {
+      type: 'account',
+      resourceId: 'active',
+      actions: { read: true },
+      dataCategories: ['balance'],
+    },
+  ],
+};
 
 describe('donation wallet handoff', () => {
   it('connects when permissions are empty, then sends the exact recipient and amount', async () => {
@@ -21,12 +43,71 @@ describe('donation wallet handoff', () => {
       'wallet_connect',
       'sendTransfer',
     ]);
+    expect(request.mock.calls[1]).toEqual(['wallet_connect', DREY_CONNECT_PARAMS, 'drey']);
     expect(request.mock.calls[2]).toEqual([
       'sendTransfer',
       {
         recipients: [{ address: DONATION_CONFIG.address, amount: 50_000 }],
       },
       'drey',
+    ]);
+  });
+
+  it('upgrades an existing Drey connection that lacks balance permission', async () => {
+    const request = vi
+      .fn<DonationRequest>()
+      .mockResolvedValueOnce({
+        status: 'success',
+        result: [
+          {
+            type: 'account',
+            resourceId: 'active',
+            actions: { read: true },
+            dataCategories: ['account', 'addresses'],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ status: 'success', result: { id: 'account' } })
+      .mockResolvedValueOnce({ status: 'success', result: { txid: TXID } });
+
+    await sendDonation('drey', 50_000, { providerWindow: DREY_WINDOW, request });
+    expect(request.mock.calls.map(call => call[0])).toEqual([
+      'wallet_getCurrentPermissions',
+      'wallet_connect',
+      'sendTransfer',
+    ]);
+    expect(request.mock.calls[1]).toEqual(['wallet_connect', DREY_CONNECT_PARAMS, 'drey']);
+  });
+
+  it('does not reconnect Drey when balance permission is already granted', async () => {
+    const request = vi
+      .fn<DonationRequest>()
+      .mockResolvedValueOnce({ status: 'success', result: DREY_BALANCE_PERMISSIONS })
+      .mockResolvedValueOnce({ status: 'success', result: { txid: TXID } });
+
+    await sendDonation('drey', 50_000, { providerWindow: DREY_WINDOW, request });
+    expect(request.mock.calls.map(call => call[0])).toEqual([
+      'wallet_getCurrentPermissions',
+      'sendTransfer',
+    ]);
+  });
+
+  it('keeps Drey-specific permission fields out of the Xverse connection request', async () => {
+    const request = vi
+      .fn<DonationRequest>()
+      .mockResolvedValueOnce({ status: 'success', result: [] })
+      .mockResolvedValueOnce({ status: 'success', result: { id: 'account' } })
+      .mockResolvedValueOnce({ status: 'success', result: { txid: TXID } });
+
+    await sendDonation('xverse', 50_000, { providerWindow: XVERSE_WINDOW, request });
+    expect(request.mock.calls[1]).toEqual([
+      'wallet_connect',
+      {
+        addresses: ['payment'],
+        message: 'Support the OMB site.',
+        network: 'Mainnet',
+      },
+      'XverseProviders.BitcoinProvider',
     ]);
   });
 
@@ -46,7 +127,7 @@ describe('donation wallet handoff', () => {
     ]);
   });
 
-  it('connects and retries once when the first transfer reports missing authorization', async () => {
+  it('connects and retries once when Drey reports its exact missing-account error', async () => {
     const request = vi
       .fn<DonationRequest>()
       .mockResolvedValueOnce({
@@ -55,7 +136,11 @@ describe('donation wallet handoff', () => {
       })
       .mockResolvedValueOnce({
         status: 'error',
-        error: { message: 'Connection required' },
+        error: {
+          code: -32002,
+          message: 'No approved account is available',
+          data: { dreyCode: 'ERR_NO_ACCOUNT' },
+        },
       })
       .mockResolvedValueOnce({ status: 'success', result: { id: 'account' } })
       .mockResolvedValueOnce({ status: 'success', result: { txid: TXID } });
@@ -67,6 +152,7 @@ describe('donation wallet handoff', () => {
       'wallet_connect',
       'sendTransfer',
     ]);
+    expect(request.mock.calls[2]).toEqual(['wallet_connect', DREY_CONNECT_PARAMS, 'drey']);
   });
 
   it('classifies unavailable, cancelled, rejected, and insufficient-funds failures', async () => {
@@ -81,7 +167,7 @@ describe('donation wallet handoff', () => {
     ] as const) {
       const request = vi
         .fn<DonationRequest>()
-        .mockResolvedValueOnce({ status: 'success', result: [{}] })
+        .mockResolvedValueOnce({ status: 'success', result: DREY_BALANCE_PERMISSIONS })
         .mockResolvedValueOnce({ status: 'error', error: { message } });
       const error = await sendDonation('drey', 10_000, {
         providerWindow: DREY_WINDOW,
@@ -95,7 +181,7 @@ describe('donation wallet handoff', () => {
   it('rejects malformed success responses instead of claiming a broadcast', async () => {
     const request = vi
       .fn<DonationRequest>()
-      .mockResolvedValueOnce({ status: 'success', result: [{}] })
+      .mockResolvedValueOnce({ status: 'success', result: DREY_BALANCE_PERMISSIONS })
       .mockResolvedValueOnce({ status: 'success', result: {} });
     await expect(
       sendDonation('drey', 10_000, { providerWindow: DREY_WINDOW, request })
