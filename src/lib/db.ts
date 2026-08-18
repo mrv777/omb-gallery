@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_BRAVOCADO_DISTRIBUTION_LIST, SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 41;
+const SCHEMA_VERSION = 43;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -173,6 +173,8 @@ function migrate(db: DB): void {
         upgradeV38ToV39(db);
         upgradeV39ToV40(db);
         upgradeV40ToV41(db);
+        upgradeV41ToV42(db);
+        upgradeV42ToV43(db);
       } else {
         initSchemaLatest(db);
       }
@@ -217,6 +219,8 @@ function migrate(db: DB): void {
       if (current < 39) upgradeV38ToV39(db);
       if (current < 40) upgradeV39ToV40(db);
       if (current < 41) upgradeV40ToV41(db);
+      if (current < 42) upgradeV41ToV42(db);
+      if (current < 43) upgradeV42ToV43(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -775,6 +779,71 @@ function initSchemaLatest(db: DB): void {
     );
     CREATE INDEX IF NOT EXISTS idx_community_events_campaign
       ON community_campaign_events (campaign_id, id DESC);
+
+    CREATE TABLE IF NOT EXISTS community_acquisitions (
+      campaign_id         TEXT PRIMARY KEY REFERENCES community_campaigns (id) ON DELETE CASCADE,
+      plan_digest         TEXT NOT NULL UNIQUE,
+      plan_json           TEXT NOT NULL,
+      preflight_json      TEXT NOT NULL,
+      signing_psbt_hex    TEXT NOT NULL,
+      base_psbt_hex       TEXT NOT NULL,
+      status              TEXT NOT NULL CHECK (status IN ('signing','ready','expired','failed')),
+      combined_psbt_hex   TEXT,
+      transaction_hex     TEXT,
+      txid                TEXT,
+      expires_at_ms       INTEGER NOT NULL,
+      created_at          INTEGER NOT NULL,
+      updated_at          INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_community_acquisitions_status
+      ON community_acquisitions (status, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS community_acquisition_signatures (
+      campaign_id          TEXT NOT NULL REFERENCES community_acquisitions (campaign_id) ON DELETE CASCADE,
+      owner_id             TEXT NOT NULL,
+      psbt_hash            TEXT NOT NULL,
+      signed_psbt_hex      TEXT NOT NULL,
+      signed_indexes_json  TEXT NOT NULL,
+      approval_payload_json TEXT NOT NULL,
+      approval_signature   TEXT NOT NULL,
+      approval_nonce       TEXT NOT NULL,
+      created_at           INTEGER NOT NULL,
+      PRIMARY KEY (campaign_id, owner_id),
+      UNIQUE (campaign_id, psbt_hash),
+      UNIQUE (campaign_id, approval_nonce)
+    );
+
+    CREATE TABLE IF NOT EXISTS community_sales (
+      campaign_id          TEXT PRIMARY KEY REFERENCES community_campaigns (id) ON DELETE CASCADE,
+      offer_digest         TEXT NOT NULL UNIQUE,
+      plan_json            TEXT NOT NULL,
+      preflight_json       TEXT NOT NULL,
+      signing_psbt_hex     TEXT NOT NULL,
+      status               TEXT NOT NULL CHECK (status IN ('signing','ready','expired','failed')),
+      combined_psbt_hex    TEXT,
+      transaction_hex      TEXT,
+      txid                 TEXT,
+      expires_at_ms        INTEGER NOT NULL,
+      created_at           INTEGER NOT NULL,
+      updated_at           INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_community_sales_status
+      ON community_sales (status, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS community_sale_signatures (
+      campaign_id           TEXT NOT NULL REFERENCES community_sales (campaign_id) ON DELETE CASCADE,
+      owner_id              TEXT NOT NULL,
+      psbt_hash             TEXT NOT NULL,
+      signed_psbt_hex       TEXT NOT NULL,
+      signed_units_json     TEXT NOT NULL,
+      approval_payload_json TEXT NOT NULL,
+      approval_signature    TEXT NOT NULL,
+      approval_nonce        TEXT NOT NULL,
+      created_at            INTEGER NOT NULL,
+      PRIMARY KEY (campaign_id, owner_id),
+      UNIQUE (campaign_id, psbt_hash),
+      UNIQUE (campaign_id, approval_nonce)
+    );
   `);
 }
 
@@ -2122,6 +2191,84 @@ function upgradeV40ToV41(db: DB): void {
     );
     CREATE INDEX IF NOT EXISTS idx_community_events_campaign
       ON community_campaign_events (campaign_id, id DESC);
+  `);
+}
+
+function upgradeV41ToV42(db: DB): void {
+  // Exact acquisition plans and public PSBT signatures. Final transaction
+  // bytes stay server-side until a separately authorized broadcast workflow.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS community_acquisitions (
+      campaign_id         TEXT PRIMARY KEY REFERENCES community_campaigns (id) ON DELETE CASCADE,
+      plan_digest         TEXT NOT NULL UNIQUE,
+      plan_json           TEXT NOT NULL,
+      preflight_json      TEXT NOT NULL,
+      signing_psbt_hex    TEXT NOT NULL,
+      base_psbt_hex       TEXT NOT NULL,
+      status              TEXT NOT NULL CHECK (status IN ('signing','ready','expired','failed')),
+      combined_psbt_hex   TEXT,
+      transaction_hex     TEXT,
+      txid                TEXT,
+      expires_at_ms       INTEGER NOT NULL,
+      created_at          INTEGER NOT NULL,
+      updated_at          INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_community_acquisitions_status
+      ON community_acquisitions (status, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS community_acquisition_signatures (
+      campaign_id          TEXT NOT NULL REFERENCES community_acquisitions (campaign_id) ON DELETE CASCADE,
+      owner_id             TEXT NOT NULL,
+      psbt_hash            TEXT NOT NULL,
+      signed_psbt_hex      TEXT NOT NULL,
+      signed_indexes_json  TEXT NOT NULL,
+      approval_payload_json TEXT NOT NULL,
+      approval_signature   TEXT NOT NULL,
+      approval_nonce       TEXT NOT NULL,
+      created_at           INTEGER NOT NULL,
+      PRIMARY KEY (campaign_id, owner_id),
+      UNIQUE (campaign_id, psbt_hash),
+      UNIQUE (campaign_id, approval_nonce)
+    );
+  `);
+}
+
+function upgradeV42ToV43(db: DB): void {
+  // Exact funded offers and public owner approval receipts. Buyer inputs are
+  // already authorized in the stored PSBT; final sale bytes stay server-side
+  // until a separately authorized broadcaster retrieves them.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS community_sales (
+      campaign_id          TEXT PRIMARY KEY REFERENCES community_campaigns (id) ON DELETE CASCADE,
+      offer_digest         TEXT NOT NULL UNIQUE,
+      plan_json            TEXT NOT NULL,
+      preflight_json       TEXT NOT NULL,
+      signing_psbt_hex     TEXT NOT NULL,
+      status               TEXT NOT NULL CHECK (status IN ('signing','ready','expired','failed')),
+      combined_psbt_hex    TEXT,
+      transaction_hex      TEXT,
+      txid                 TEXT,
+      expires_at_ms        INTEGER NOT NULL,
+      created_at           INTEGER NOT NULL,
+      updated_at           INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_community_sales_status
+      ON community_sales (status, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS community_sale_signatures (
+      campaign_id           TEXT NOT NULL REFERENCES community_sales (campaign_id) ON DELETE CASCADE,
+      owner_id              TEXT NOT NULL,
+      psbt_hash             TEXT NOT NULL,
+      signed_psbt_hex       TEXT NOT NULL,
+      signed_units_json     TEXT NOT NULL,
+      approval_payload_json TEXT NOT NULL,
+      approval_signature    TEXT NOT NULL,
+      approval_nonce        TEXT NOT NULL,
+      created_at            INTEGER NOT NULL,
+      PRIMARY KEY (campaign_id, owner_id),
+      UNIQUE (campaign_id, psbt_hash),
+      UNIQUE (campaign_id, approval_nonce)
+    );
   `);
 }
 

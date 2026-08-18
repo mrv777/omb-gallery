@@ -26,7 +26,7 @@ export default function CommunityCampaign({
   initialOwnerId: string;
 }) {
   const router = useRouter();
-  const { wallet, signMessage } = useWallet();
+  const { wallet, signMessage, signPsbt } = useWallet();
   const [campaign, setCampaign] = useState(initial);
   const ownerId = initialOwnerId;
   const [units, setUnits] = useState('1');
@@ -52,6 +52,17 @@ export default function CommunityCampaign({
     !!me &&
     me.allocatedUnits.length > 0 &&
     me.readiness !== 'ready';
+  const canApprove =
+    campaign.status === 'signing' &&
+    campaign.acquisition?.status === 'signing' &&
+    !!me &&
+    me.readiness === 'ready' &&
+    !campaign.acquisition.signedOwnerIds.includes(me.ownerId);
+  const canApproveSale =
+    campaign.status === 'held' &&
+    campaign.sale?.status === 'signing' &&
+    !!me &&
+    !campaign.sale.signedOwnerIds.includes(me.ownerId);
   const dreyReady = wallet ? isDreyCommunitySupported(wallet) : false;
 
   return (
@@ -210,7 +221,11 @@ export default function CommunityCampaign({
         <aside>
           {canJoin && <JoinPanel />}
           {canReady && <ReadinessPanel />}
-          {me && !canReady && (
+          {canApprove && <AcquisitionPanel />}
+          {canApproveSale && <SalePanel />}
+          {campaign.sale && !canApproveSale && <SaleStatus />}
+          {campaign.acquisition && !canApprove && !campaign.sale && <AcquisitionStatus />}
+          {me && !canReady && !campaign.acquisition && (
             <div className="border border-ink-2 bg-ink-1 p-4">
               <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-accent-green">
                 You joined
@@ -357,6 +372,119 @@ export default function CommunityCampaign({
     );
   }
 
+  function AcquisitionPanel() {
+    const acquisition = campaign.acquisition!;
+    const obligation = acquisition.context.plan.ownerObligations.find(
+      item => item.ownerId === me!.ownerId
+    );
+    return (
+      <div className="border border-accent-green/50 bg-ink-1 p-4">
+        <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-accent-green">
+          Step 3 of 3
+        </div>
+        <div className="mt-1 font-mono text-sm uppercase tracking-[0.1em] text-bone">
+          Approve in Drey
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-bone-dim">
+          Your share is {obligation ? formatBtcCompact(Number(obligation.cashDueSats)) : '—'} for{' '}
+          {me!.allocatedUnits.length}% ownership. Drey checks the exact OMB, vault address, inputs,
+          change, and fee before signing.
+        </p>
+        <p className="mt-3 font-mono text-[9px] uppercase leading-relaxed text-bone-dim">
+          {acquisition.signedOwnerIds.length}/{acquisition.requiredOwnerCount} owners approved ·
+          nothing broadcasts here
+        </p>
+        <Feedback />
+        <button
+          type="button"
+          disabled={busy || !dreyReady}
+          onClick={() => void approveAcquisition()}
+          className="mt-4 h-10 w-full border border-accent-green bg-accent-green font-mono text-[10px] uppercase tracking-[0.1em] text-ink-0 disabled:opacity-40"
+        >
+          {busy ? 'opening Drey…' : 'review and approve'}
+        </button>
+      </div>
+    );
+  }
+
+  function AcquisitionStatus() {
+    const acquisition = campaign.acquisition!;
+    const approved = me ? acquisition.signedOwnerIds.includes(me.ownerId) : false;
+    return (
+      <div className="border border-ink-2 bg-ink-1 p-4">
+        <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-accent-green">
+          {campaign.status === 'held'
+            ? 'Held in Community Vault'
+            : acquisition.status === 'ready'
+              ? 'Ready for broadcast'
+              : approved
+                ? 'Your approval is in'
+                : 'Owner approvals'}
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-bone-dim">
+          {campaign.status === 'held'
+            ? 'The confirmed OMB is held by the frozen 69-of-100 policy.'
+            : acquisition.status === 'ready'
+              ? 'Every input is signed and the final transaction passed Drey’s exact-plan and Ordinal-routing checks. It has not been broadcast.'
+              : `${acquisition.signedOwnerIds.length} of ${acquisition.requiredOwnerCount} owners approved.`}
+        </p>
+      </div>
+    );
+  }
+
+  function SalePanel() {
+    const sale = campaign.sale!;
+    const payout = sale.context.plan.ownerPayouts.find(item => item.ownerId === me!.ownerId);
+    return (
+      <div className="border border-accent-green/50 bg-ink-1 p-4">
+        <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-accent-green">
+          Funded offer
+        </div>
+        <div className="mt-1 font-mono text-sm uppercase tracking-[0.1em] text-bone">
+          Review in Drey
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-bone-dim">
+          The buyer offers {formatBtcCompact(Number(sale.grossOfferSats))}. Your exact direct payout
+          is {payout ? formatBtcCompact(Number(payout.valueSats)) : '—'}. The buyer pays the network
+          fee on top.
+        </p>
+        <p className="mt-3 font-mono text-[9px] uppercase leading-relaxed text-bone-dim">
+          {sale.signedUnitCount}/69 units approved · every owner is paid · nothing broadcasts here
+        </p>
+        <Feedback />
+        <button
+          type="button"
+          disabled={busy || !dreyReady}
+          onClick={() => void approveSale()}
+          className="mt-4 h-10 w-full border border-accent-green bg-accent-green font-mono text-[10px] uppercase tracking-[0.1em] text-ink-0 disabled:opacity-40"
+        >
+          {busy ? 'opening Drey…' : 'review and approve'}
+        </button>
+      </div>
+    );
+  }
+
+  function SaleStatus() {
+    const sale = campaign.sale!;
+    const approved = me ? sale.signedOwnerIds.includes(me.ownerId) : false;
+    return (
+      <div className="border border-ink-2 bg-ink-1 p-4">
+        <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-accent-green">
+          {sale.status === 'ready'
+            ? 'Sale ready for broadcast'
+            : approved
+              ? 'Your sale approval is in'
+              : 'Funded offer approvals'}
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-bone-dim">
+          {sale.status === 'ready'
+            ? `${formatBtcCompact(Number(sale.grossOfferSats))} is approved for direct owner payouts. The OMB destination and buyer-paid fee were verified. It has not been broadcast.`
+            : `The buyer offers ${formatBtcCompact(Number(sale.grossOfferSats))} to owners and pays the network fee on top. ${sale.signedUnitCount} of 69 unit signatures are collected.`}
+        </p>
+      </div>
+    );
+  }
+
   function Feedback() {
     return (
       <>
@@ -437,6 +565,119 @@ export default function CommunityCampaign({
     await sendAction(`/api/community/campaigns/${campaign.id}/readiness`, payload);
   }
 
+  async function approveAcquisition() {
+    setError(null);
+    setNotice(null);
+    if (!wallet || !me || !campaign.acquisition || !isDreyCommunitySupported(wallet)) {
+      return setError(`Drey ${DREY_MIN_COMMUNITY_VERSION} or newer is required.`);
+    }
+    const acquisition = campaign.acquisition;
+    const context = { ...acquisition.context, ownerId: me.ownerId };
+    const indexes = context.plan.inputs
+      .map((input, index) => (input.ownerId === me.ownerId ? index : -1))
+      .filter(index => index >= 0);
+    if (indexes.length === 0) return setError('No funding inputs are assigned to this owner.');
+    setBusy(true);
+    try {
+      const signedPsbt = await signPsbt(
+        acquisition.signingPsbtBase64,
+        { [wallet.payAddr ?? wallet.ordAddr]: indexes },
+        undefined,
+        context
+      );
+      const signedPsbtHash = await sha256Base64(signedPsbt);
+      const now = Math.floor(Date.now() / 1000);
+      const payload = {
+        protocol: COMMUNITY_PURCHASES_PROTOCOL,
+        version: 1 as const,
+        network: 'mainnet' as const,
+        action: 'approve-acquisition' as const,
+        campaignId: campaign.id,
+        ownerId: me.ownerId,
+        capTableVersion: campaign.capTableVersion,
+        planDigest: acquisition.planDigest,
+        signedPsbtHash,
+        approvedAt: now,
+        expiresAt: now + 10 * 60,
+        nonce: newActionNonce(),
+      };
+      const signature = await signMessage(wallet.ordAddr, communityMessage(payload));
+      const response = await fetch(
+        `/api/community/campaigns/${campaign.id}/acquisition/approvals`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ payload, signature, signed_psbt: signedPsbt }),
+        }
+      );
+      const json = (await response.json().catch(() => null)) as {
+        campaign?: CommunityCampaignView;
+        error?: string;
+      } | null;
+      if (!response.ok || !json?.campaign) throw new Error(json?.error ?? 'Approval failed.');
+      setCampaign(json.campaign);
+      setNotice('Approval saved.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Approval failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approveSale() {
+    setError(null);
+    setNotice(null);
+    if (!wallet || !me || !campaign.sale || !isDreyCommunitySupported(wallet)) {
+      return setError(`Drey ${DREY_MIN_COMMUNITY_VERSION} or newer is required.`);
+    }
+    const sale = campaign.sale;
+    const context = { ...sale.context, ownerId: me.ownerId };
+    const vaultInputIndex = context.plan.spendPlan.vaultInputIndex;
+    setBusy(true);
+    try {
+      const signedPsbt = await signPsbt(
+        sale.signingPsbtBase64,
+        { [wallet.ordAddr]: [vaultInputIndex] },
+        undefined,
+        undefined,
+        context
+      );
+      const signedPsbtHash = await sha256Base64(signedPsbt);
+      const now = Math.floor(Date.now() / 1000);
+      const payload = {
+        protocol: COMMUNITY_PURCHASES_PROTOCOL,
+        version: 1 as const,
+        network: 'mainnet' as const,
+        action: 'approve-sale' as const,
+        campaignId: campaign.id,
+        ownerId: me.ownerId,
+        capTableVersion: campaign.capTableVersion,
+        offerDigest: sale.offerDigest,
+        signedPsbtHash,
+        approvedAt: now,
+        expiresAt: now + 10 * 60,
+        nonce: newActionNonce(),
+      };
+      const signature = await signMessage(wallet.ordAddr, communityMessage(payload));
+      const response = await fetch(`/api/community/campaigns/${campaign.id}/sale/approvals`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payload, signature, signed_psbt: signedPsbt }),
+      });
+      const json = (await response.json().catch(() => null)) as {
+        campaign?: CommunityCampaignView;
+        error?: string;
+      } | null;
+      if (!response.ok || !json?.campaign) throw new Error(json?.error ?? 'Sale approval failed.');
+      setCampaign(json.campaign);
+      setNotice('Sale approval saved.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Sale approval failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function sendAction(
     url: string,
     payload: ReserveUnitsPayloadV1 | ConfirmReadinessPayloadV1
@@ -463,6 +704,13 @@ export default function CommunityCampaign({
       setBusy(false);
     }
   }
+}
+
+async function sha256Base64(value: string): Promise<string> {
+  const binary = window.atob(value);
+  const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+  const digest = await window.crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function Field({

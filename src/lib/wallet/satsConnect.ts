@@ -11,6 +11,8 @@ import {
   type SupportedWallet,
 } from 'sats-connect';
 import type { MarketplaceContext } from '@/lib/marketplace/types';
+import type { CommunityVaultAcquisitionProviderContextV1 } from '@drey/core/domain/community-vault/acquisition-provider';
+import type { CommunitySaleProviderContextV1 } from '@/lib/community-purchases/contracts';
 import {
   DREY_CHROME_STORE_URL,
   DREY_PROVIDER_ICON,
@@ -18,7 +20,7 @@ import {
 } from '@/lib/wallet/dreyProvider';
 
 export const DREY_MIN_BUY_VERSION = '0.11.0';
-export const DREY_MIN_COMMUNITY_VERSION = '0.12.0';
+export const DREY_MIN_COMMUNITY_VERSION = '0.14.0';
 export {
   DREY_CHROME_STORE_URL,
   DREY_INITIALIZED_EVENT,
@@ -214,6 +216,8 @@ export async function signPurchasePsbt(args: {
   psbt: string;
   signInputs?: Record<string, number[]>;
   marketplaceContext?: MarketplaceContext;
+  communityVaultAcquisitionContext?: CommunityVaultAcquisitionProviderContextV1;
+  communityVaultSaleContext?: CommunitySaleProviderContextV1 & { ownerId: string };
 }): Promise<{ signedPsbt: string; txid?: string }> {
   if (process.env.NEXT_PUBLIC_MARKETPLACE_MOCK === 'true')
     return { signedPsbt: `mock-signed:${args.psbt}` };
@@ -224,6 +228,12 @@ export async function signPurchasePsbt(args: {
       signInputs: args.signInputs,
       broadcast: false,
       ...(args.marketplaceContext ? { marketplaceContext: args.marketplaceContext } : {}),
+      ...(args.communityVaultAcquisitionContext
+        ? { communityVaultAcquisitionContext: args.communityVaultAcquisitionContext }
+        : {}),
+      ...(args.communityVaultSaleContext
+        ? { communityVaultSaleContext: args.communityVaultSaleContext }
+        : {}),
     });
     return { signedPsbt: result.psbt, txid: result.txid };
   }

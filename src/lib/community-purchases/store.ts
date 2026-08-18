@@ -118,6 +118,24 @@ export function listCommunityCampaigns(now = unixNow()): CommunityCampaignView[]
 export function getCommunityCampaign(id: string, now = unixNow()): CommunityCampaignView | null {
   const db = getDb();
   reconcileCampaign(db, id, now);
+  db.transaction(() => {
+    const expired = db
+      .prepare(
+        `UPDATE community_acquisitions SET status = 'expired', updated_at = ?
+       WHERE campaign_id = ? AND status = 'signing' AND expires_at_ms <= ?`
+      )
+      .run(now, id, now * 1000);
+    if (expired.changes > 0) {
+      db.prepare(
+        `UPDATE community_campaigns SET status = 'failed', updated_at = ?
+         WHERE id = ? AND status = 'signing'`
+      ).run(now, id);
+    }
+    db.prepare(
+      `UPDATE community_sales SET status = 'expired', updated_at = ?
+       WHERE campaign_id = ? AND status = 'signing' AND expires_at_ms <= ?`
+    ).run(now, id, now * 1000);
+  })();
   const campaign = db.prepare(`SELECT * FROM community_campaigns WHERE id = ?`).get(id) as
     | CampaignRow
     | undefined;
@@ -160,6 +178,50 @@ export function getCommunityCampaign(id: string, now = unixNow()): CommunityCamp
       campaignXpub: row.campaign_xpub,
     },
   }));
+  const acquisition = db
+    .prepare(`SELECT * FROM community_acquisitions WHERE campaign_id = ?`)
+    .get(id) as
+    | {
+        plan_digest: string;
+        plan_json: string;
+        preflight_json: string;
+        signing_psbt_hex: string;
+        status: 'signing' | 'ready' | 'expired' | 'failed';
+        expires_at_ms: number;
+        txid: string | null;
+      }
+    | undefined;
+  const signedOwnerIds = acquisition
+    ? (
+        db
+          .prepare(
+            `SELECT owner_id FROM community_acquisition_signatures
+           WHERE campaign_id = ? ORDER BY created_at, owner_id`
+          )
+          .all(id) as Array<{ owner_id: string }>
+      ).map(row => row.owner_id)
+    : [];
+  const sale = db.prepare(`SELECT * FROM community_sales WHERE campaign_id = ?`).get(id) as
+    | {
+        offer_digest: string;
+        plan_json: string;
+        preflight_json: string;
+        signing_psbt_hex: string;
+        status: 'signing' | 'ready' | 'expired' | 'failed';
+        expires_at_ms: number;
+        txid: string | null;
+      }
+    | undefined;
+  const saleSignatures = sale
+    ? (db
+        .prepare(
+          `SELECT owner_id, signed_units_json FROM community_sale_signatures
+           WHERE campaign_id = ? ORDER BY created_at, owner_id`
+        )
+        .all(id) as Array<{ owner_id: string; signed_units_json: string }>)
+    : [];
+  const salePlan = sale ? JSON.parse(sale.plan_json) : null;
+  const policy = campaign.policy_json ? JSON.parse(campaign.policy_json) : null;
   return {
     id: campaign.id,
     inscriptionNumber: campaign.inscription_number,
@@ -181,10 +243,51 @@ export function getCommunityCampaign(id: string, now = unixNow()): CommunityCamp
     capTableHash: campaign.cap_table_hash,
     policyId: campaign.policy_id,
     vaultAddress: campaign.vault_address,
-    policy: campaign.policy_json ? JSON.parse(campaign.policy_json) : null,
+    policy,
     allocatedUnitCount: units.length,
     waitlistedUnitCount: participants.reduce((sum, row) => sum + row.waitlisted_units, 0),
     participants: participantViews,
+    acquisition:
+      acquisition && policy
+        ? {
+            status: acquisition.status,
+            planDigest: acquisition.plan_digest,
+            context: {
+              version: 1,
+              policy,
+              plan: JSON.parse(acquisition.plan_json),
+              preflight: JSON.parse(acquisition.preflight_json),
+            },
+            signingPsbtBase64: Buffer.from(acquisition.signing_psbt_hex, 'hex').toString('base64'),
+            signedOwnerIds,
+            requiredOwnerCount: participantViews.filter(item => item.allocatedUnits.length > 0)
+              .length,
+            expiresAtMs: String(acquisition.expires_at_ms),
+            txid: acquisition.txid,
+          }
+        : null,
+    sale:
+      sale && policy && salePlan
+        ? {
+            status: sale.status,
+            offerDigest: sale.offer_digest,
+            context: {
+              version: 1,
+              policy,
+              plan: salePlan,
+              preflight: JSON.parse(sale.preflight_json),
+            },
+            signingPsbtBase64: Buffer.from(sale.signing_psbt_hex, 'hex').toString('base64'),
+            signedOwnerIds: saleSignatures.map(row => row.owner_id),
+            signedUnitCount: new Set(
+              saleSignatures.flatMap(row => JSON.parse(row.signed_units_json) as number[])
+            ).size,
+            requiredUnitCount: 69,
+            expiresAtMs: String(sale.expires_at_ms),
+            grossOfferSats: String(salePlan.grossOfferSats),
+            txid: sale.txid,
+          }
+        : null,
   };
 }
 

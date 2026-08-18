@@ -11,6 +11,8 @@ import {
 } from 'react';
 import type { ConnectedWallet } from '@/lib/wallet/satsConnect';
 import type { MarketplaceContext } from '@/lib/marketplace/types';
+import type { CommunityVaultAcquisitionProviderContextV1 } from '@drey/core/domain/community-vault/acquisition-provider';
+import type { CommunitySaleProviderContextV1 } from '@/lib/community-purchases/contracts';
 
 type BuyerSessionState = ConnectedWallet & {
   acceptedTermsAt: number | null;
@@ -27,7 +29,9 @@ type WalletContextValue = {
   signPsbt: (
     psbt: string,
     signInputs?: Record<string, number[]>,
-    marketplaceContext?: MarketplaceContext
+    marketplaceContext?: MarketplaceContext,
+    communityVaultAcquisitionContext?: CommunityVaultAcquisitionProviderContextV1,
+    communityVaultSaleContext?: CommunitySaleProviderContextV1 & { ownerId: string }
   ) => Promise<string>;
 };
 
@@ -113,11 +117,20 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     async (
       psbt: string,
       signInputs?: Record<string, number[]>,
-      marketplaceContext?: MarketplaceContext
+      marketplaceContext?: MarketplaceContext,
+      communityVaultAcquisitionContext?: CommunityVaultAcquisitionProviderContextV1,
+      communityVaultSaleContext?: CommunitySaleProviderContextV1 & { ownerId: string }
     ) => {
       if (!wallet) throw new Error('Reconnect your wallet before signing.');
       const { signPurchasePsbt } = await import('@/lib/wallet/satsConnect');
-      const signed = await signPurchasePsbt({ wallet, psbt, signInputs, marketplaceContext });
+      const signed = await signPurchasePsbt({
+        wallet,
+        psbt,
+        signInputs,
+        marketplaceContext,
+        communityVaultAcquisitionContext,
+        communityVaultSaleContext,
+      });
       return signed.signedPsbt;
     },
     [wallet]

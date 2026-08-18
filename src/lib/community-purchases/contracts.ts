@@ -1,3 +1,6 @@
+import type { CommunityVaultAcquisitionProviderContextV1 } from '@drey/core/domain/community-vault/acquisition-provider';
+import type { CommunityVaultSaleProviderContextV1 } from '@drey/core/domain/community-vault/sale-provider';
+
 export const COMMUNITY_PURCHASES_TERMS_VERSION = 'omb-community-purchases-2026-08-18' as const;
 export const COMMUNITY_PURCHASES_PROTOCOL = 'omb-community-purchases' as const;
 export const COMMUNITY_PURCHASES_SCHEMA_VERSION = 1 as const;
@@ -94,6 +97,62 @@ export type ConfirmReadinessPayloadV1 = {
   nonce: string;
 };
 
+export type ApproveAcquisitionPayloadV1 = {
+  protocol: typeof COMMUNITY_PURCHASES_PROTOCOL;
+  version: 1;
+  network: 'mainnet';
+  action: 'approve-acquisition';
+  campaignId: string;
+  ownerId: string;
+  capTableVersion: number;
+  planDigest: string;
+  signedPsbtHash: string;
+  approvedAt: number;
+  expiresAt: number;
+  nonce: string;
+};
+
+export type ApproveSalePayloadV1 = {
+  protocol: typeof COMMUNITY_PURCHASES_PROTOCOL;
+  version: 1;
+  network: 'mainnet';
+  action: 'approve-sale';
+  campaignId: string;
+  ownerId: string;
+  capTableVersion: number;
+  offerDigest: string;
+  signedPsbtHash: string;
+  approvedAt: number;
+  expiresAt: number;
+  nonce: string;
+};
+
+export type CommunityAcquisitionView = {
+  status: 'signing' | 'ready' | 'expired' | 'failed';
+  planDigest: string;
+  context: Omit<CommunityVaultAcquisitionProviderContextV1, 'ownerId'>;
+  signingPsbtBase64: string;
+  signedOwnerIds: string[];
+  requiredOwnerCount: number;
+  expiresAtMs: string;
+  txid: string | null;
+};
+
+export type CommunitySaleProviderContextV1 = Omit<CommunityVaultSaleProviderContextV1, 'ownerId'>;
+
+export type CommunitySaleView = {
+  status: 'signing' | 'ready' | 'expired' | 'failed';
+  offerDigest: string;
+  context: CommunitySaleProviderContextV1;
+  signingPsbtBase64: string;
+  signedOwnerIds: string[];
+  signedUnitCount: number;
+  requiredUnitCount: 69;
+  expiresAtMs: string;
+  grossOfferSats: string;
+  txid: string | null;
+};
+
 export type CommunityParticipantView = {
   ownerId: string;
   capTableOrder: number;
@@ -137,10 +196,17 @@ export type CommunityCampaignView = {
   allocatedUnitCount: number;
   waitlistedUnitCount: number;
   participants: CommunityParticipantView[];
+  acquisition: CommunityAcquisitionView | null;
+  sale: CommunitySaleView | null;
 };
 
 export function communityMessage(
-  payload: CreateCampaignPayloadV1 | ReserveUnitsPayloadV1 | ConfirmReadinessPayloadV1
+  payload:
+    | CreateCampaignPayloadV1
+    | ReserveUnitsPayloadV1
+    | ConfirmReadinessPayloadV1
+    | ApproveAcquisitionPayloadV1
+    | ApproveSalePayloadV1
 ): string {
   return `OMB Community Purchases\n${JSON.stringify(payload)}`;
 }

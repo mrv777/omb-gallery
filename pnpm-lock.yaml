@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@drey/core':
-        specifier: git+https://github.com/mrv777/drey-wallet-core.git#96593c747cb57bb2a7474e87e35bb90eb1ddd3a3
-        version: git+https://github.com/mrv777/drey-wallet-core.git#96593c747cb57bb2a7474e87e35bb90eb1ddd3a3
+        specifier: git+https://github.com/mrv777/drey-wallet-core.git#v0.14.0
+        version: git+https://github.com/mrv777/drey-wallet-core.git#9283441aae8446fe60ea30186cdc63537c8f968e
       '@radix-ui/react-hover-card':
         specifier: ^1.1.15
         version: 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -54,6 +54,15 @@ importers:
         specifier: ^0.34.5
         version: 0.34.5
     devDependencies:
+      '@noble/curves':
+        specifier: 1.9.7
+        version: 1.9.7
+      '@scure/bip32':
+        specifier: ^1.7.0
+        version: 1.7.0
+      '@scure/btc-signer':
+        specifier: 1.8.1
+        version: 1.8.1
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
@@ -176,9 +185,9 @@ packages:
   '@bitcoinerlab/secp256k1@1.2.0':
     resolution: {integrity: sha512-jeujZSzb3JOZfmJYI0ph1PVpCRV5oaexCgy+RvCXV8XlY+XFB/2n3WOcvBsKLsOw78KYgnQrQWb2HrKE4be88Q==}
 
-  '@drey/core@git+https://github.com/mrv777/drey-wallet-core.git#96593c747cb57bb2a7474e87e35bb90eb1ddd3a3':
-    resolution: {commit: 96593c747cb57bb2a7474e87e35bb90eb1ddd3a3, repo: https://github.com/mrv777/drey-wallet-core.git, type: git}
-    version: 0.12.0
+  '@drey/core@git+https://github.com/mrv777/drey-wallet-core.git#9283441aae8446fe60ea30186cdc63537c8f968e':
+    resolution: {commit: 9283441aae8446fe60ea30186cdc63537c8f968e, repo: https://github.com/mrv777/drey-wallet-core.git, type: git}
+    version: 0.14.0
 
   '@emnapi/core@1.10.0':
     resolution: {integrity: sha512-yq6OkJ4p82CAfPl0u9mQebQHKPJkY7WrIuk205cTYnYe+k2Z8YBh11FrbRG/H6ihirqcacOgl2BIO8oyMQLeXw==}
@@ -3153,7 +3162,7 @@ snapshots:
     dependencies:
       '@noble/curves': 1.9.7
 
-  '@drey/core@git+https://github.com/mrv777/drey-wallet-core.git#96593c747cb57bb2a7474e87e35bb90eb1ddd3a3':
+  '@drey/core@git+https://github.com/mrv777/drey-wallet-core.git#9283441aae8446fe60ea30186cdc63537c8f968e':
     dependencies:
       '@noble/curves': 1.9.7
       '@scure/base': 1.2.6

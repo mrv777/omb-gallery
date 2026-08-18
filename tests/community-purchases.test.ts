@@ -3,17 +3,45 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import communityVector from '@drey/core/vectors/community-vault-v1.json';
+import { HDKey } from '@scure/bip32';
+import { secp256k1 } from '@noble/curves/secp256k1';
+import { NETWORK, SigHash, Transaction, p2wpkh } from '@scure/btc-signer';
+import {
+  communityVaultAcquisitionUnitAmounts,
+  constructCommunityVaultAcquisitionPsbt,
+  createCommunityVaultListedAcquisitionPlan,
+  validateCommunityVaultAcquisitionPsbt,
+} from '@drey/core/domain/community-vault/acquisition';
+import type {
+  CommunityVaultAcquisitionInputV1,
+  CommunityVaultAcquisitionPreflightV1,
+} from '@drey/core/domain/community-vault/acquisition-contracts';
+import type { CommunityVaultPolicyV1 } from '@drey/core/domain/community-vault/contracts';
+import {
+  approveCommunityVaultSale,
+  constructCommunityVaultSalePsbt,
+  createCommunityVaultSalePlan,
+  validateCommunityVaultSalePsbt,
+} from '@drey/core/domain/community-vault/sale';
+import type { CommunityVaultSalePreflightV1 } from '@drey/core/domain/community-vault/sale-contracts';
+import { getCryptoProvider } from '@drey/core/domain/vault/crypto-provider';
+import { bytesToHex, hexToBytes, utf8ToBytes } from '@drey/core/domain/vault/encoding';
 import {
   COMMUNITY_PURCHASES_PROTOCOL,
   COMMUNITY_PURCHASES_TERMS_VERSION,
   type CommunityEnrollmentV1,
+  type ApproveAcquisitionPayloadV1,
+  type ApproveSalePayloadV1,
   type ConfirmReadinessPayloadV1,
   type CreateCampaignPayloadV1,
   type ReserveUnitsPayloadV1,
 } from '../src/lib/community-purchases/contracts';
+import { installPublicPolicyCrypto } from '../src/lib/community-purchases/dreyCrypto';
 
 let dbModule: typeof import('../src/lib/db');
 let store: typeof import('../src/lib/community-purchases/store');
+let acquisitionStore: typeof import('../src/lib/community-purchases/acquisitionStore');
+let saleStore: typeof import('../src/lib/community-purchases/saleStore');
 const tempDir = path.join(
   os.tmpdir(),
   `omb-community-${process.pid}-${Math.random().toString(36).slice(2)}`
@@ -29,6 +57,8 @@ beforeEach(async () => {
   vi.resetModules();
   dbModule = await import('../src/lib/db');
   store = await import('../src/lib/community-purchases/store');
+  acquisitionStore = await import('../src/lib/community-purchases/acquisitionStore');
+  saleStore = await import('../src/lib/community-purchases/saleStore');
 });
 
 afterEach(() => {
@@ -41,18 +71,22 @@ afterEach(() => {
 });
 
 describe('Community Purchases coordination', () => {
-  it('creates public-only schema at v41', () => {
+  it('creates public-only schema at v43', () => {
     const db = dbModule.getDb();
-    expect(db.pragma('user_version', { simple: true })).toBe(41);
+    expect(db.pragma('user_version', { simple: true })).toBe(43);
     const tables = db
       .prepare(
         `SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'community_%' ORDER BY name`
       )
       .all() as Array<{ name: string }>;
     expect(tables.map(row => row.name)).toEqual([
+      'community_acquisition_signatures',
+      'community_acquisitions',
       'community_campaign_events',
       'community_campaigns',
       'community_participants',
+      'community_sale_signatures',
+      'community_sales',
       'community_units',
     ]);
     const columns = db.prepare(`PRAGMA table_info(community_participants)`).all() as Array<{
@@ -150,6 +184,423 @@ describe('Community Purchases coordination', () => {
       Array.from({ length: 100 }, (_, unit) => unit)
     );
   });
+
+  it('coordinates exact owner PSBT approvals to a verified transaction without broadcasting', async () => {
+    installPublicPolicyCrypto();
+    const campaign = await freezeListedCampaign();
+    const policy = campaign.policy as CommunityVaultPolicyV1;
+    const seller = paymentKey(90);
+    const asset = paymentKey(91);
+    const fundingKeys = policy.owners.map((_owner, index) => paymentKey(100 + index));
+    const assetCost = 1_000_000n;
+    const settlementFee = 2_000n;
+    const assetUnits = communityVaultAcquisitionUnitAmounts(assetCost.toString()).map(BigInt);
+    const feeUnits = communityVaultAcquisitionUnitAmounts(settlementFee.toString()).map(BigInt);
+    const fundingInputs: CommunityVaultAcquisitionInputV1[] = policy.owners.map((owner, index) => {
+      const due = owner.units.reduce(
+        (total, unit) => total + assetUnits[unit]! + feeUnits[unit]!,
+        0n
+      );
+      return {
+        txid: (500 + index).toString(16).padStart(64, '0'),
+        vout: 0,
+        valueSats: (due + 1_000n).toString(),
+        scriptPubKeyHex: fundingKeys[index]!.scriptPubKeyHex,
+        sequence: 0xffff_fffd,
+        scriptKind: 'p2wpkh',
+        role: 'owner-funding',
+        ownerId: owner.ownerId,
+        sighashType: SigHash.ALL,
+      };
+    });
+    const listingFingerprint = (
+      dbModule
+        .getDb()
+        .prepare(`SELECT source_fingerprint FROM community_campaigns WHERE id = ?`)
+        .get(campaign.id) as { source_fingerprint: string }
+    ).source_fingerprint;
+    const createdAtMs = String(NOW * 1000 + 30_000);
+    const expiresAtMs = String(NOW * 1000 + 90_000);
+    const plan = createCommunityVaultListedAcquisitionPlan({
+      policy,
+      planId: 'gallery-acquisition-fixture',
+      createdAtMs,
+      expiresAtMs,
+      inputs: [
+        {
+          txid: policy.currentOutpoint.txid,
+          vout: policy.currentOutpoint.vout,
+          valueSats: '10000',
+          scriptPubKeyHex: asset.scriptPubKeyHex,
+          sequence: 0xffff_fffd,
+          scriptKind: 'p2wpkh',
+          role: 'inscription',
+          ownerId: null,
+          sighashType: SigHash.ALL,
+        },
+        ...fundingInputs,
+      ],
+      outputs: [
+        {
+          valueSats: '10000',
+          scriptPubKeyHex: policy.scriptPubKeyHex,
+          role: 'vault',
+          ownerId: null,
+          recipientId: null,
+        },
+        {
+          valueSats: assetCost.toString(),
+          scriptPubKeyHex: seller.scriptPubKeyHex,
+          role: 'seller-payment',
+          ownerId: null,
+          recipientId: 'seller',
+        },
+        ...policy.owners.map((owner, index) => ({
+          valueSats: '1000',
+          scriptPubKeyHex: fundingKeys[index]!.scriptPubKeyHex,
+          role: 'owner-change' as const,
+          ownerId: owner.ownerId,
+          recipientId: null,
+        })),
+      ],
+      assetInputIndex: 0,
+      vaultOutputIndex: 0,
+      inscriptionInputOffsetSats: '0',
+      inscriptionOutputOffsetSats: '0',
+      postageSats: '546',
+      settlementFeeSats: settlementFee.toString(),
+      listedTerms: {
+        marketplaceId: 'satflow',
+        listingId: 'listing-1',
+        listingFingerprintHex: listingFingerprint,
+        observedAtMs: String(NOW * 1000),
+        listingExpiresAtMs: expiresAtMs,
+        sellerPaymentSats: assetCost.toString(),
+        sellerPayoutScriptPubKeyHex: seller.scriptPubKeyHex,
+        maximumLandedCostSats: campaign.maxLandedCostSats,
+      },
+    });
+    const preflight: CommunityVaultAcquisitionPreflightV1 = {
+      version: 1,
+      network: 'mainnet',
+      source: 'ord',
+      verifiedAtMs: String(NOW * 1000 + 31_000),
+      blockHeight: 900_000,
+      blockHash: 'ef'.repeat(32),
+      inputs: plan.inputs.map((input, inputIndex) => ({
+        inputIndex,
+        txid: input.txid,
+        vout: input.vout,
+        valueSats: input.valueSats,
+        scriptPubKeyHex: input.scriptPubKeyHex,
+        unspent: true,
+        inscriptionIds: inputIndex === 0 ? [policy.inscriptionId] : [],
+        runeIds: [],
+      })),
+      listing: {
+        marketplaceId: 'satflow',
+        listingId: 'listing-1',
+        listingFingerprintHex: listingFingerprint,
+        active: true,
+        observedAtMs: String(NOW * 1000 + 30_000),
+      },
+    };
+    const unsigned = constructCommunityVaultAcquisitionPsbt(policy, plan);
+    const base = Transaction.fromPSBT(hexToBytes(unsigned), { PSBTVersion: 0 });
+    base.signIdx(asset.privateKey, 0, [SigHash.ALL]);
+    let coordinated = acquisitionStore.publishCommunityAcquisition({
+      campaignId: campaign.id,
+      policy,
+      plan,
+      preflight,
+      basePsbtHex: bytesToHex(base.toPSBT(0)),
+      nowMs: NOW * 1000 + 32_000,
+    });
+    expect(coordinated.status).toBe('signing');
+    expect(coordinated.acquisition).toMatchObject({
+      status: 'signing',
+      signedOwnerIds: [],
+      requiredOwnerCount: 5,
+    });
+
+    for (let index = 0; index < policy.owners.length; index++) {
+      const owner = policy.owners[index]!;
+      const tx = Transaction.fromPSBT(hexToBytes(unsigned), { PSBTVersion: 0 });
+      tx.signIdx(fundingKeys[index]!.privateKey, index + 1, [SigHash.ALL]);
+      const signedPsbtHex = bytesToHex(tx.toPSBT(0));
+      const checked = validateCommunityVaultAcquisitionPsbt(policy, plan, signedPsbtHex);
+      const participant = coordinated.participants.find(item => item.ownerId === owner.ownerId)!;
+      const payload: ApproveAcquisitionPayloadV1 = {
+        protocol: COMMUNITY_PURCHASES_PROTOCOL,
+        version: 1,
+        network: 'mainnet',
+        action: 'approve-acquisition',
+        campaignId: campaign.id,
+        ownerId: owner.ownerId,
+        capTableVersion: campaign.capTableVersion,
+        planDigest: plan.planDigest,
+        signedPsbtHash: checked.psbtHash,
+        approvedAt: NOW + 33 + index,
+        expiresAt: NOW + 600,
+        nonce: `approval-${index}`,
+      };
+      coordinated = acquisitionStore.submitCommunityAcquisitionApproval({
+        campaignId: campaign.id,
+        payload,
+        signature: `approval-signature-${index}`,
+        walletAddress: participant.walletAddress,
+        signedPsbtBase64: Buffer.from(signedPsbtHex, 'hex').toString('base64'),
+        now: NOW + 33 + index,
+      });
+    }
+    expect(coordinated.acquisition?.status).toBe('ready');
+    expect(coordinated.acquisition?.signedOwnerIds).toHaveLength(5);
+    expect(coordinated.acquisition?.txid).toMatch(/^[0-9a-f]{64}$/u);
+    const stored = dbModule
+      .getDb()
+      .prepare(`SELECT transaction_hex, status FROM community_acquisitions WHERE campaign_id = ?`)
+      .get(campaign.id) as { transaction_hex: string | null; status: string };
+    expect(stored.status).toBe('ready');
+    expect(stored.transaction_hex).toMatch(/^[0-9a-f]+$/u);
+    expect(coordinated.status).toBe('signing');
+
+    const ready = acquisitionStore.getReadyCommunityAcquisition(campaign.id);
+    expect(ready.transactionHex).toBe(stored.transaction_hex);
+    expect(ready.vaultOutpoint).toBe(`${ready.txid}:0`);
+    expect(() =>
+      acquisitionStore.recordCommunityAcquisitionBroadcast({
+        campaignId: campaign.id,
+        txid: '00'.repeat(32),
+        now: NOW + 50,
+      })
+    ).toThrow(/does not match/u);
+    coordinated = acquisitionStore.recordCommunityAcquisitionBroadcast({
+      campaignId: campaign.id,
+      txid: ready.txid,
+      now: NOW + 50,
+    });
+    expect(coordinated.status).toBe('broadcast');
+    await expect(
+      acquisitionStore.confirmCommunityAcquisitionHeld({
+        campaignId: campaign.id,
+        now: NOW + 51,
+        fetchDetail: async () => ({
+          inscription_number: campaign.inscriptionNumber,
+          inscription_id: campaign.inscriptionId,
+          output: ready.vaultOutpoint,
+          address: campaign.vaultAddress,
+          block_height: 900_001,
+          block_timestamp: NOW + 51,
+          satpoint: `${ready.vaultOutpoint}:0`,
+        }),
+        fetchConfirmations: async () => 0,
+      })
+    ).rejects.toThrow(/not yet confirmed/u);
+    coordinated = await acquisitionStore.confirmCommunityAcquisitionHeld({
+      campaignId: campaign.id,
+      now: NOW + 52,
+      fetchDetail: async () => ({
+        inscription_number: campaign.inscriptionNumber,
+        inscription_id: campaign.inscriptionId,
+        output: ready.vaultOutpoint,
+        address: campaign.vaultAddress,
+        block_height: 900_001,
+        block_timestamp: NOW + 52,
+        satpoint: `${ready.vaultOutpoint}:0`,
+      }),
+      fetchConfirmations: async () => 1,
+    });
+    expect(coordinated.status).toBe('held');
+    expect(coordinated.currentOutpoint).toBe(ready.vaultOutpoint);
+  });
+
+  it('coordinates a buyer-funded sale from owner approvals to exact direct payouts without broadcasting', async () => {
+    installPublicPolicyCrypto();
+    const frozen = await freezeListedCampaign();
+    const policy = frozen.policy as CommunityVaultPolicyV1;
+    const vaultOutpoint = `${'ee'.repeat(32)}:0`;
+    dbModule
+      .getDb()
+      .prepare(`UPDATE community_campaigns SET status = 'held', current_outpoint = ? WHERE id = ?`)
+      .run(vaultOutpoint, frozen.id);
+    const held = store.getCommunityCampaign(frozen.id, NOW + 20)!;
+    const buyerFunding = paymentKey(220);
+    const buyerDestination = paymentKey(221);
+    const buyerChange = paymentKey(222);
+    const createdAtMs = String(NOW * 1000 + 30_000);
+    const expiresAtMs = String(NOW * 1000 + 120_000);
+    const plan = createCommunityVaultSalePlan({
+      policy,
+      vaultOutpoint: { txid: 'ee'.repeat(32), vout: 0 },
+      offerId: '12'.repeat(32),
+      buyerId: 'buyer-fixture',
+      nonceHex: '34'.repeat(32),
+      createdAtMs,
+      expiresAtMs,
+      vaultValueSats: '10000',
+      inscriptionInputOffsetSats: '0',
+      postageSats: '546',
+      grossOfferSats: '100000',
+      settlementFeeSats: '2000',
+      buyerDestinationAddress: buyerDestination.address,
+      buyerDestinationScriptPubKeyHex: buyerDestination.scriptPubKeyHex,
+      buyerInputs: [
+        {
+          txid: '56'.repeat(32),
+          vout: 1,
+          valueSats: '103000',
+          scriptPubKeyHex: buyerFunding.scriptPubKeyHex,
+          sequence: 0xffff_fffd,
+          scriptKind: 'p2wpkh',
+          sighashType: SigHash.ALL,
+        },
+      ],
+      buyerChange: { valueSats: '1000', scriptPubKeyHex: buyerChange.scriptPubKeyHex },
+    });
+    const preflight: CommunityVaultSalePreflightV1 = {
+      version: 1,
+      network: 'mainnet',
+      source: 'ord',
+      verifiedAtMs: String(NOW * 1000 + 31_000),
+      blockHeight: 900_010,
+      blockHash: '78'.repeat(32),
+      inputs: plan.spendPlan.inputs.map((input, inputIndex) => ({
+        inputIndex,
+        txid: input.txid,
+        vout: input.vout,
+        valueSats: input.valueSats,
+        scriptPubKeyHex: input.scriptPubKeyHex,
+        unspent: true,
+        inscriptionIds: inputIndex === plan.spendPlan.vaultInputIndex ? [plan.inscriptionId] : [],
+        runeIds: [],
+      })),
+    };
+    const buyer = Transaction.fromPSBT(hexToBytes(constructCommunityVaultSalePsbt(policy, plan)), {
+      PSBTVersion: 0,
+      lowR: true,
+    });
+    buyer.signIdx(buyerFunding.privateKey, 1, [SigHash.ALL]);
+    buyer.finalizeIdx(1);
+    const buyerFundedPsbtHex = bytesToHex(buyer.toPSBT(0));
+    let coordinated = saleStore.publishCommunitySale({
+      campaignId: held.id,
+      policy,
+      plan,
+      preflight,
+      buyerFundedPsbtHex,
+      nowMs: NOW * 1000 + 32_000,
+    });
+    expect(coordinated.sale).toMatchObject({
+      status: 'signing',
+      signedUnitCount: 0,
+      requiredUnitCount: 69,
+      grossOfferSats: '100000',
+    });
+
+    let randomByte = 1;
+    for (let index = 0; index < 4; index += 1) {
+      const owner = policy.owners[index]!;
+      const approved = approveCommunityVaultSale({
+        policy,
+        plan,
+        psbtHex: buyerFundedPsbtHex,
+        ownerId: owner.ownerId,
+        signerRoot: communityOwnerRoot(index),
+        nowMs: String(NOW * 1000 + 33_000 + index),
+        random: length => new Uint8Array(length).fill(randomByte++),
+      });
+      const checked = validateCommunityVaultSalePsbt(policy, plan, approved.psbtHex);
+      const participant = held.participants.find(item => item.ownerId === owner.ownerId)!;
+      const payload: ApproveSalePayloadV1 = {
+        protocol: COMMUNITY_PURCHASES_PROTOCOL,
+        version: 1,
+        network: 'mainnet',
+        action: 'approve-sale',
+        campaignId: held.id,
+        ownerId: owner.ownerId,
+        capTableVersion: held.capTableVersion,
+        offerDigest: plan.offerDigest,
+        signedPsbtHash: checked.psbtHash,
+        approvedAt: NOW + 33 + index,
+        expiresAt: NOW + 600,
+        nonce: `sale-approval-${index}`,
+      };
+      coordinated = saleStore.submitCommunitySaleApproval({
+        campaignId: held.id,
+        payload,
+        signature: `sale-approval-signature-${index}`,
+        walletAddress: participant.walletAddress,
+        signedPsbtBase64: Buffer.from(approved.psbtHex, 'hex').toString('base64'),
+        now: NOW + 33 + index,
+      });
+      if (index === 2) {
+        expect(coordinated.sale).toMatchObject({ status: 'signing', signedUnitCount: 60 });
+        expect(() => saleStore.getReadyCommunitySale(held.id)).toThrow(/69 unit signatures/u);
+      }
+    }
+
+    expect(coordinated.status).toBe('held');
+    expect(coordinated.sale).toMatchObject({ status: 'ready', signedUnitCount: 80 });
+    const ready = saleStore.getReadyCommunitySale(held.id);
+    const raw = Transaction.fromRaw(hexToBytes(ready.transactionHex));
+    expect(raw.id).toBe(ready.txid);
+    expect(bytesToHex(raw.getOutput(0).script!)).toBe(buyerDestination.scriptPubKeyHex);
+    expect(plan.ownerPayouts.reduce((sum, payout) => sum + BigInt(payout.valueSats), 0n)).toBe(
+      100_000n
+    );
+    expect(
+      plan.ownerPayouts.find(payout => payout.ownerId === policy.owners[4]!.ownerId)?.valueSats
+    ).toBe('20000');
+    expect(
+      dbModule.getDb().prepare(`SELECT status FROM community_campaigns WHERE id = ?`).get(held.id)
+    ).toEqual({ status: 'held' });
+    expect(() =>
+      saleStore.recordCommunitySaleBroadcast({
+        campaignId: held.id,
+        txid: '00'.repeat(32),
+        now: NOW + 50,
+      })
+    ).toThrow(/does not match/u);
+    saleStore.recordCommunitySaleBroadcast({
+      campaignId: held.id,
+      txid: ready.txid,
+      now: NOW + 50,
+    });
+    const buyerOutpoint = `${ready.txid}:${plan.spendPlan.ordinalRoute.outputIndex}`;
+    await expect(
+      saleStore.confirmCommunitySaleSold({
+        campaignId: held.id,
+        now: NOW + 51,
+        fetchDetail: async () => ({
+          inscription_number: held.inscriptionNumber,
+          inscription_id: held.inscriptionId,
+          output: buyerOutpoint,
+          address: plan.buyerDestinationAddress,
+          block_height: 900_011,
+          block_timestamp: NOW + 51,
+          satpoint: `${buyerOutpoint}:0`,
+        }),
+        fetchConfirmations: async () => 0,
+      })
+    ).rejects.toThrow(/not yet confirmed/u);
+    coordinated = await saleStore.confirmCommunitySaleSold({
+      campaignId: held.id,
+      now: NOW + 52,
+      fetchDetail: async () => ({
+        inscription_number: held.inscriptionNumber,
+        inscription_id: held.inscriptionId,
+        output: buyerOutpoint,
+        address: plan.buyerDestinationAddress,
+        block_height: 900_011,
+        block_timestamp: NOW + 52,
+        satpoint: `${buyerOutpoint}:0`,
+      }),
+      fetchConfirmations: async () => 1,
+    });
+    expect(coordinated.status).toBe('sold');
+    expect(coordinated.currentOutpoint).toBe(buyerOutpoint);
+    expect(() => saleStore.getReadyCommunitySale(held.id)).toThrow(/not reached/u);
+  }, 30_000);
 
   it('accepts excess demand into an ordered waitlist without mutating the frozen roster version', async () => {
     const fixture = seedListedTarget();
@@ -490,4 +941,52 @@ function enrollment(index: number, campaignId: string): CommunityEnrollmentV1 {
       campaignXpub: root.campaignRoot.campaignXpub,
     },
   };
+}
+
+function paymentKey(index: number) {
+  const privateKey = new Uint8Array(32);
+  privateKey[30] = Math.floor(index / 255);
+  privateKey[31] = (index % 255) + 1;
+  const publicKey = secp256k1.getPublicKey(privateKey, true);
+  const payment = p2wpkh(publicKey, NETWORK);
+  return {
+    privateKey,
+    address: payment.address,
+    scriptPubKeyHex: bytesToHex(payment.script),
+  };
+}
+
+function communityOwnerRoot(index: number): HDKey {
+  const seed = getCryptoProvider().sha256(utf8ToBytes(`drey-community-vault-v1-owner-${index}`));
+  return HDKey.fromMasterSeed(seed);
+}
+
+async function freezeListedCampaign() {
+  let campaign = await createOpenCampaign(seedListedTarget());
+  for (let index = 1; index < 5; index++) {
+    campaign = store.reserveCommunityUnits({
+      payload: reservePayload(campaign, index, 20),
+      signature: `reserve-${index}`,
+      walletAddress: roots[index]!.payoutAddress,
+      now: NOW + index,
+    });
+  }
+  for (let index = 0; index < 5; index++) {
+    const participant = campaign.participants.find(
+      item => item.walletAddress === roots[index]!.payoutAddress
+    )!;
+    campaign = store.confirmCommunityReadiness({
+      payload: readinessPayload(
+        campaign,
+        participant.ownerId,
+        `${String(index + 700).padStart(64, '0')}:0`,
+        `freeze-ready-${index}`
+      ),
+      signature: `freeze-ready-signature-${index}`,
+      walletAddress: participant.walletAddress,
+      now: NOW + 10 + index,
+    });
+  }
+  expect(campaign.status).toBe('frozen');
+  return campaign;
 }

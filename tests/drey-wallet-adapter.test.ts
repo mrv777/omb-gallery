@@ -267,11 +267,11 @@ describe('Drey wallet adapter', () => {
     );
   });
 
-  it('gates Community Purchases at Drey 0.12.0', () => {
-    expect(DREY_MIN_COMMUNITY_VERSION).toBe('0.12.0');
-    expect(isDreyCommunitySupported(dreyWallet({ providerVersion: '0.11.9' }))).toBe(false);
-    expect(isDreyCommunitySupported(dreyWallet({ providerVersion: '0.12.0' }))).toBe(true);
-    expect(isDreyCommunitySupported(dreyWallet({ providerVersion: '0.12.1' }))).toBe(true);
+  it('gates Community Purchases at Drey 0.14.0', () => {
+    expect(DREY_MIN_COMMUNITY_VERSION).toBe('0.14.0');
+    expect(isDreyCommunitySupported(dreyWallet({ providerVersion: '0.13.1' }))).toBe(false);
+    expect(isDreyCommunitySupported(dreyWallet({ providerVersion: '0.14.0' }))).toBe(true);
+    expect(isDreyCommunitySupported(dreyWallet({ providerVersion: '0.14.0' }))).toBe(true);
     expect(
       isDreyCommunitySupported(dreyWallet({ providerId: 'XverseProviders.BitcoinProvider' }))
     ).toBe(false);
