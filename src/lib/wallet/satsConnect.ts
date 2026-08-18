@@ -11,13 +11,20 @@ import {
   type SupportedWallet,
 } from 'sats-connect';
 import type { MarketplaceContext } from '@/lib/marketplace/types';
+import {
+  DREY_CHROME_STORE_URL,
+  DREY_PROVIDER_ICON,
+  DREY_PROVIDER_ID,
+} from '@/lib/wallet/dreyProvider';
 
-export const DREY_PROVIDER_ID = 'drey';
 export const DREY_MIN_BUY_VERSION = '0.11.0';
-export const DREY_INITIALIZED_EVENT = 'drey#initialized';
-export const DREY_CHROME_STORE_URL =
-  'https://chromewebstore.google.com/detail/drey/kngidlmmbfmnoeimngkajdlbdenlhgof';
-export const DREY_PROVIDER_ICON = '/wallets/drey.png';
+export {
+  DREY_CHROME_STORE_URL,
+  DREY_INITIALIZED_EVENT,
+  DREY_PROVIDER_ICON,
+  DREY_PROVIDER_ID,
+  listenForDreyInitialization,
+} from '@/lib/wallet/dreyProvider';
 export const LEATHER_PROVIDER_ID = 'LeatherProvider';
 export const LEATHER_PROVIDER_ICON = '/wallets/leather.png';
 export const LEATHER_CHROME_STORE_URL =
@@ -131,11 +138,6 @@ export function getSatsWalletOptions(): SatsWalletOption[] {
     const br = bi === -1 ? Number.MAX_SAFE_INTEGER : bi;
     return ar - br || a.name.localeCompare(b.name);
   });
-}
-
-export function listenForDreyInitialization(listener: () => void): () => void {
-  window.addEventListener(DREY_INITIALIZED_EVENT, listener);
-  return () => window.removeEventListener(DREY_INITIALIZED_EVENT, listener);
 }
 
 export async function connectSatsWallet(providerId?: string): Promise<ConnectedWallet> {

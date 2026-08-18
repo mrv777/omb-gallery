@@ -14,6 +14,7 @@ import {
   type ProviderWindow,
 } from '@/lib/donation';
 import { DonationWalletError, sendDonation } from '@/lib/donationWallet';
+import { listenForDreyInitialization } from '@/lib/wallet/dreyProvider';
 
 type PaymentState =
   | { kind: 'idle' }
@@ -45,10 +46,10 @@ export default function DonationDialog({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     dialogRef.current?.focus();
     window.addEventListener('focus', refreshWallets);
-    window.addEventListener('sqrl#initialized', refreshWallets);
+    const stopListeningForDrey = listenForDreyInitialization(refreshWallets);
     return () => {
       window.removeEventListener('focus', refreshWallets);
-      window.removeEventListener('sqrl#initialized', refreshWallets);
+      stopListeningForDrey();
       if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
     };
   }, [refreshWallets]);

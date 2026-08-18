@@ -3,7 +3,7 @@ import { DonationWalletError, sendDonation, type DonationRequest } from '@/lib/d
 import { DONATION_CONFIG } from '@/lib/donation';
 
 const TXID = 'ab'.repeat(32);
-const SQRL_WINDOW = { sqrl: { request() {} } };
+const DREY_WINDOW = { drey: { request() {} } };
 
 describe('donation wallet handoff', () => {
   it('connects when permissions are empty, then sends the exact recipient and amount', async () => {
@@ -14,7 +14,7 @@ describe('donation wallet handoff', () => {
       .mockResolvedValueOnce({ status: 'success', result: { txid: TXID } });
 
     await expect(
-      sendDonation('sqrl', 50_000, { providerWindow: SQRL_WINDOW, request })
+      sendDonation('drey', 50_000, { providerWindow: DREY_WINDOW, request })
     ).resolves.toEqual({ txid: TXID });
     expect(request.mock.calls.map(call => call[0])).toEqual([
       'wallet_getCurrentPermissions',
@@ -26,7 +26,7 @@ describe('donation wallet handoff', () => {
       {
         recipients: [{ address: DONATION_CONFIG.address, amount: 50_000 }],
       },
-      'sqrl',
+      'drey',
     ]);
   });
 
@@ -39,7 +39,7 @@ describe('donation wallet handoff', () => {
       })
       .mockResolvedValueOnce({ status: 'success', result: { txid: TXID } });
 
-    await sendDonation('sqrl', 10_000, { providerWindow: SQRL_WINDOW, request });
+    await sendDonation('drey', 10_000, { providerWindow: DREY_WINDOW, request });
     expect(request.mock.calls.map(call => call[0])).toEqual([
       'wallet_getCurrentPermissions',
       'sendTransfer',
@@ -60,7 +60,7 @@ describe('donation wallet handoff', () => {
       .mockResolvedValueOnce({ status: 'success', result: { id: 'account' } })
       .mockResolvedValueOnce({ status: 'success', result: { txid: TXID } });
 
-    await sendDonation('sqrl', 100_000, { providerWindow: SQRL_WINDOW, request });
+    await sendDonation('drey', 100_000, { providerWindow: DREY_WINDOW, request });
     expect(request.mock.calls.map(call => call[0])).toEqual([
       'wallet_getCurrentPermissions',
       'sendTransfer',
@@ -71,7 +71,7 @@ describe('donation wallet handoff', () => {
 
   it('classifies unavailable, cancelled, rejected, and insufficient-funds failures', async () => {
     await expect(
-      sendDonation('sqrl', 10_000, { providerWindow: {}, request: vi.fn() })
+      sendDonation('drey', 10_000, { providerWindow: {}, request: vi.fn() })
     ).rejects.toMatchObject({ kind: 'unavailable' });
 
     for (const [message, kind] of [
@@ -83,8 +83,8 @@ describe('donation wallet handoff', () => {
         .fn<DonationRequest>()
         .mockResolvedValueOnce({ status: 'success', result: [{}] })
         .mockResolvedValueOnce({ status: 'error', error: { message } });
-      const error = await sendDonation('sqrl', 10_000, {
-        providerWindow: SQRL_WINDOW,
+      const error = await sendDonation('drey', 10_000, {
+        providerWindow: DREY_WINDOW,
         request,
       }).catch(caught => caught);
       expect(error).toBeInstanceOf(DonationWalletError);
@@ -98,7 +98,7 @@ describe('donation wallet handoff', () => {
       .mockResolvedValueOnce({ status: 'success', result: [{}] })
       .mockResolvedValueOnce({ status: 'success', result: {} });
     await expect(
-      sendDonation('sqrl', 10_000, { providerWindow: SQRL_WINDOW, request })
+      sendDonation('drey', 10_000, { providerWindow: DREY_WINDOW, request })
     ).rejects.toMatchObject({ kind: 'unexpected' });
   });
 });

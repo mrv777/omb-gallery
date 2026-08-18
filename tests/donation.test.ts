@@ -22,6 +22,15 @@ describe('donation configuration', () => {
     expect(DONATION_CONFIG.presetSats).toEqual([10_000, 50_000, 100_000]);
     expect(DONATION_CONFIG.minimumWalletSats).toBe(1_000);
   });
+
+  it('uses Drey as the donation provider with the current store listing', () => {
+    expect(DONATION_CONFIG.wallets.drey).toEqual({
+      id: 'drey',
+      name: 'Drey',
+      installUrl: 'https://chromewebstore.google.com/detail/drey/kngidlmmbfmnoeimngkajdlbdenlhgof',
+    });
+    expect('sqrl' in DONATION_CONFIG.wallets).toBe(false);
+  });
 });
 
 describe('donation amount and BIP21 helpers', () => {
@@ -53,23 +62,23 @@ describe('donation wallet detection', () => {
   it('detects the two supported provider objects', () => {
     const providerWindow = {
       XverseProviders: { BitcoinProvider: { request() {} } },
-      sqrl: { request() {} },
+      drey: { request() {} },
     };
     expect(donationWalletAvailability(providerWindow)).toEqual({
       xverse: true,
-      sqrl: true,
+      drey: true,
     });
   });
 
   it('does not trust discovery metadata without the matching provider object', () => {
     expect(
-      donationWalletInstalled('sqrl', {
-        btc_providers: [{ id: 'sqrl', name: 'SQRL' }],
+      donationWalletInstalled('drey', {
+        btc_providers: [{ id: 'drey', name: 'Drey' }],
       })
     ).toBe(false);
     expect(donationWalletAvailability({})).toEqual({
       xverse: false,
-      sqrl: false,
+      drey: false,
     });
   });
 });

@@ -1,3 +1,5 @@
+import { DREY_CHROME_STORE_URL, DREY_PROVIDER_ID } from '@/lib/wallet/dreyProvider';
+
 export const DONATION_CONFIG = Object.freeze({
   address: 'bc1qfrt77mfrcrvjxcq7ahcgtm7w4czl6eftk4jk2c',
   label: 'OMB Archive',
@@ -11,10 +13,10 @@ export const DONATION_CONFIG = Object.freeze({
       installUrl:
         'https://chromewebstore.google.com/detail/xverse-wallet/idnnbdplmphpflfnlkomgpfbpcgelopg',
     },
-    sqrl: {
-      id: 'sqrl',
-      name: 'SQRL',
-      installUrl: 'https://chromewebstore.google.com/detail/sqrl/kngidlmmbfmnoeimngkajdlbdenlhgof',
+    drey: {
+      id: DREY_PROVIDER_ID,
+      name: 'Drey',
+      installUrl: DREY_CHROME_STORE_URL,
     },
   },
 });
@@ -72,7 +74,7 @@ export function buildDonationUri(sats: number | null): string {
 
 export type ProviderWindow = {
   XverseProviders?: { BitcoinProvider?: { request?: unknown } };
-  sqrl?: { request?: unknown };
+  drey?: { request?: unknown };
   btc_providers?: unknown[];
   wbip_providers?: unknown[];
 };
@@ -84,7 +86,7 @@ export function donationWalletInstalled(
   if (wallet === 'xverse') {
     return typeof providerWindow.XverseProviders?.BitcoinProvider?.request === 'function';
   }
-  if (typeof providerWindow.sqrl?.request === 'function') return true;
+  if (typeof providerWindow.drey?.request === 'function') return true;
 
   const discovered = [
     ...(Array.isArray(providerWindow.btc_providers) ? providerWindow.btc_providers : []),
@@ -93,9 +95,9 @@ export function donationWalletInstalled(
   const registered = discovered.some(provider => {
     if (!provider || typeof provider !== 'object') return false;
     const candidate = provider as { id?: unknown };
-    return candidate.id === DONATION_CONFIG.wallets.sqrl.id;
+    return candidate.id === DONATION_CONFIG.wallets.drey.id;
   });
-  return registered && typeof providerWindow.sqrl?.request === 'function';
+  return registered && typeof providerWindow.drey?.request === 'function';
 }
 
 export function donationWalletAvailability(
@@ -103,6 +105,6 @@ export function donationWalletAvailability(
 ): Record<DonationWalletKey, boolean> {
   return {
     xverse: donationWalletInstalled('xverse', providerWindow),
-    sqrl: donationWalletInstalled('sqrl', providerWindow),
+    drey: donationWalletInstalled('drey', providerWindow),
   };
 }
