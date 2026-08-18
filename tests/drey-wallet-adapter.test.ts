@@ -18,12 +18,14 @@ vi.mock('sats-connect', () => ({
 
 import {
   DREY_MIN_BUY_VERSION,
+  DREY_MIN_COMMUNITY_VERSION,
   DREY_PROVIDER_ICON,
   LEATHER_PROVIDER_ICON,
   LEATHER_PROVIDER_ID,
   connectSatsWallet,
   getSatsWalletOptions,
   isDreyBuySupported,
+  isDreyCommunitySupported,
   listenForDreyInitialization,
   probeDreyConnection,
   signPurchasePsbt,
@@ -263,5 +265,15 @@ describe('Drey wallet adapter', () => {
     expect(isDreyBuySupported(dreyWallet({ providerId: 'XverseProviders.BitcoinProvider' }))).toBe(
       true
     );
+  });
+
+  it('gates Community Purchases at Drey 0.12.0', () => {
+    expect(DREY_MIN_COMMUNITY_VERSION).toBe('0.12.0');
+    expect(isDreyCommunitySupported(dreyWallet({ providerVersion: '0.11.9' }))).toBe(false);
+    expect(isDreyCommunitySupported(dreyWallet({ providerVersion: '0.12.0' }))).toBe(true);
+    expect(isDreyCommunitySupported(dreyWallet({ providerVersion: '0.12.1' }))).toBe(true);
+    expect(
+      isDreyCommunitySupported(dreyWallet({ providerId: 'XverseProviders.BitcoinProvider' }))
+    ).toBe(false);
   });
 });

@@ -11,6 +11,7 @@ export type NavKey =
   | 'gallery'
   | 'activity'
   | 'explorer'
+  | 'community'
   | 'marketplace'
   | 'history'
   | 'bravocados'
@@ -49,10 +50,22 @@ export const MARKETPLACE_NAV_ENABLED =
   process.env.NEXT_PUBLIC_MARKETPLACE_ENABLED === 'true' ||
   process.env.NEXT_PUBLIC_MARKETPLACE_MOCK === 'true';
 
+export const COMMUNITY_NAV_ENABLED = process.env.NEXT_PUBLIC_COMMUNITY_PURCHASES_ENABLED === 'true';
+
 export const NAV_ITEMS: NavItem[] = [
   { key: 'gallery', label: 'gallery', href: '/', tier: 'primary' },
   { key: 'activity', label: 'activity', href: '/activity', tier: 'primary' },
   { key: 'explorer', label: 'explorer', href: '/explorer', tier: 'primary' },
+  ...(COMMUNITY_NAV_ENABLED
+    ? [
+        {
+          key: 'community',
+          label: 'community',
+          href: '/community',
+          tier: 'primary',
+        } as NavItem,
+      ]
+    : []),
   ...(MARKETPLACE_NAV_ENABLED
     ? [
         {

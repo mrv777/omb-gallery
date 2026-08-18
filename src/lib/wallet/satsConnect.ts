@@ -18,6 +18,7 @@ import {
 } from '@/lib/wallet/dreyProvider';
 
 export const DREY_MIN_BUY_VERSION = '0.11.0';
+export const DREY_MIN_COMMUNITY_VERSION = '0.12.0';
 export {
   DREY_CHROME_STORE_URL,
   DREY_INITIALIZED_EVENT,
@@ -260,6 +261,13 @@ export function isDreyBuySupported(wallet: ConnectedWallet): boolean {
   return (
     wallet.providerId !== DREY_PROVIDER_ID ||
     compareSemver(wallet.providerVersion, DREY_MIN_BUY_VERSION) >= 0
+  );
+}
+
+export function isDreyCommunitySupported(wallet: ConnectedWallet): boolean {
+  return (
+    wallet.providerId === DREY_PROVIDER_ID &&
+    compareSemver(wallet.providerVersion, DREY_MIN_COMMUNITY_VERSION) >= 0
   );
 }
 

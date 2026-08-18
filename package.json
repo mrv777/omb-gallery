@@ -27,6 +27,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@drey/core": "git+https://github.com/mrv777/drey-wallet-core.git#96593c747cb57bb2a7474e87e35bb90eb1ddd3a3",
     "@radix-ui/react-hover-card": "^1.1.15",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@tanstack/react-virtual": "^3.13.24",

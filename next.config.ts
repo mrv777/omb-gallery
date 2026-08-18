@@ -4,6 +4,7 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: 'standalone',
   reactCompiler: true,
+  transpilePackages: ['@drey/core'],
   // Native modules — leave as runtime requires, do not bundle through webpack.
   serverExternalPackages: ['better-sqlite3', 'sharp'],
   images: {

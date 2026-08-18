@@ -14,7 +14,7 @@ import {
   verifyBuyerSignature,
 } from '@/lib/buyerSession';
 import { marketplaceMockWalletEnabled } from '@/lib/marketplace/listings';
-import { marketplaceRateLimit, requireMarketplaceEnabled } from '@/lib/marketplace/apiGuards';
+import { marketplaceRateLimit, requireWalletSessionsEnabled } from '@/lib/marketplace/apiGuards';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -30,7 +30,7 @@ type SessionBody = {
 };
 
 export async function GET(req: NextRequest) {
-  const disabled = requireMarketplaceEnabled();
+  const disabled = requireWalletSessionsEnabled();
   if (disabled) return disabled;
 
   const url = new URL(req.url);
@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const disabled = requireMarketplaceEnabled();
+  const disabled = requireWalletSessionsEnabled();
   if (disabled) return disabled;
   const limited = marketplaceRateLimit(req, 'session-create', 20, 200);
   if (limited) return limited;
@@ -113,7 +113,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const disabled = requireMarketplaceEnabled();
+  const disabled = requireWalletSessionsEnabled();
   if (disabled) return disabled;
   const limited = marketplaceRateLimit(req, 'session-terms', 30, 300);
   if (limited) return limited;
@@ -135,7 +135,7 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE() {
-  const disabled = requireMarketplaceEnabled();
+  const disabled = requireWalletSessionsEnabled();
   if (disabled) return disabled;
 
   const res = NextResponse.json({ ok: true });

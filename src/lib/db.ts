@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_BRAVOCADO_DISTRIBUTION_LIST, SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 40;
+const SCHEMA_VERSION = 41;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -172,6 +172,7 @@ function migrate(db: DB): void {
         upgradeV37ToV38(db);
         upgradeV38ToV39(db);
         upgradeV39ToV40(db);
+        upgradeV40ToV41(db);
       } else {
         initSchemaLatest(db);
       }
@@ -215,6 +216,7 @@ function migrate(db: DB): void {
       if (current < 38) upgradeV37ToV38(db);
       if (current < 39) upgradeV38ToV39(db);
       if (current < 40) upgradeV39ToV40(db);
+      if (current < 41) upgradeV40ToV41(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -673,6 +675,106 @@ function initSchemaLatest(db: DB): void {
       ON wallet_staging_edges (seller_wallet, eligible_for_fold, last_seen_at DESC);
     CREATE INDEX IF NOT EXISTS idx_staging_edges_eligible
       ON wallet_staging_edges (eligible_for_fold, fast_12h_distinct_inscriptions DESC);
+
+    -- Community Purchases. These rows contain only public coordination and
+    -- policy material. Owner secrets, funding keys, and recovery material
+    -- remain in Drey; the gallery never receives an independent vault key.
+    CREATE TABLE IF NOT EXISTS community_campaigns (
+      id                     TEXT PRIMARY KEY,
+      inscription_number     INTEGER NOT NULL REFERENCES inscriptions (inscription_number),
+      inscription_id         TEXT NOT NULL,
+      current_outpoint       TEXT NOT NULL,
+      source                 TEXT NOT NULL CHECK (source IN ('listed','creator-fronted')),
+      ownership_mode         TEXT NOT NULL CHECK (ownership_mode IN ('anchored','open')),
+      eligibility_mode       TEXT NOT NULL CHECK (eligibility_mode IN ('anyone','omb-holders-only')),
+      creator_owner_id       TEXT NOT NULL,
+      status                 TEXT NOT NULL CHECK (status IN ('open','readiness','frozen','signing','broadcast','held','expired','failed','sold')),
+      terms_version          TEXT NOT NULL,
+      landed_cost_sats       INTEGER NOT NULL CHECK (landed_cost_sats > 0),
+      max_landed_cost_sats   INTEGER NOT NULL CHECK (max_landed_cost_sats >= landed_cost_sats),
+      marketplace            TEXT,
+      listing_id             TEXT,
+      source_fingerprint     TEXT NOT NULL,
+      fronted_buy_intent_id  INTEGER REFERENCES buy_intents (id),
+      opened_at              INTEGER NOT NULL,
+      expires_at             INTEGER NOT NULL,
+      readiness_started_at   INTEGER,
+      readiness_deadline     INTEGER,
+      frozen_at              INTEGER,
+      cap_table_version      INTEGER NOT NULL DEFAULT 1 CHECK (cap_table_version > 0),
+      cap_table_hash         TEXT,
+      policy_id              TEXT,
+      vault_address          TEXT,
+      policy_json            TEXT,
+      created_at             INTEGER NOT NULL,
+      updated_at             INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_community_campaign_status
+      ON community_campaigns (status, opened_at DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_community_campaign_active_inscription
+      ON community_campaigns (inscription_id)
+      WHERE status IN ('open','readiness','frozen','signing','broadcast','held');
+
+    CREATE TABLE IF NOT EXISTS community_participants (
+      id                              INTEGER PRIMARY KEY AUTOINCREMENT,
+      campaign_id                     TEXT NOT NULL REFERENCES community_campaigns (id) ON DELETE CASCADE,
+      owner_id                        TEXT NOT NULL,
+      cap_table_order                 INTEGER NOT NULL,
+      identity_key                    TEXT NOT NULL,
+      wallet_address                  TEXT NOT NULL,
+      payout_address                  TEXT NOT NULL,
+      payout_script_pubkey_hex        TEXT NOT NULL,
+      matrica_user_id                 TEXT,
+      matrica_username                TEXT,
+      is_creator                      INTEGER NOT NULL CHECK (is_creator IN (0,1)),
+      requested_units                 INTEGER NOT NULL CHECK (requested_units BETWEEN 1 AND 33),
+      waitlisted_units                INTEGER NOT NULL DEFAULT 0 CHECK (waitlisted_units BETWEEN 0 AND 20),
+      max_contribution_sats           INTEGER NOT NULL CHECK (max_contribution_sats >= 0),
+      qualifying_inscription_number   INTEGER REFERENCES inscriptions (inscription_number),
+      root_fingerprint_hex            TEXT NOT NULL,
+      campaign_xpub                   TEXT NOT NULL,
+      recovery_confirmed              INTEGER NOT NULL CHECK (recovery_confirmed IN (0,1)),
+      inferred_links_json             TEXT NOT NULL DEFAULT '[]',
+      reservation_payload_json        TEXT NOT NULL,
+      reservation_signature           TEXT NOT NULL,
+      reservation_nonce               TEXT NOT NULL,
+      readiness_status                TEXT NOT NULL DEFAULT 'waiting' CHECK (readiness_status IN ('waiting','ready','timed-out')),
+      readiness_payload_json          TEXT,
+      readiness_signature             TEXT,
+      readiness_nonce                 TEXT,
+      funding_outpoints_json          TEXT,
+      ready_at                        INTEGER,
+      joined_at                       INTEGER NOT NULL,
+      UNIQUE (campaign_id, owner_id),
+      UNIQUE (campaign_id, identity_key),
+      UNIQUE (campaign_id, reservation_nonce),
+      UNIQUE (campaign_id, campaign_xpub)
+    );
+    CREATE INDEX IF NOT EXISTS idx_community_participants_campaign
+      ON community_participants (campaign_id, cap_table_order);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_community_qualifying_omb
+      ON community_participants (campaign_id, qualifying_inscription_number)
+      WHERE qualifying_inscription_number IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS community_units (
+      campaign_id    TEXT NOT NULL REFERENCES community_campaigns (id) ON DELETE CASCADE,
+      unit_number    INTEGER NOT NULL CHECK (unit_number BETWEEN 0 AND 99),
+      participant_id INTEGER NOT NULL REFERENCES community_participants (id) ON DELETE CASCADE,
+      PRIMARY KEY (campaign_id, unit_number)
+    );
+    CREATE INDEX IF NOT EXISTS idx_community_units_participant
+      ON community_units (participant_id, unit_number);
+
+    CREATE TABLE IF NOT EXISTS community_campaign_events (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      campaign_id TEXT NOT NULL REFERENCES community_campaigns (id) ON DELETE CASCADE,
+      event_type  TEXT NOT NULL,
+      owner_id    TEXT,
+      detail_json TEXT NOT NULL DEFAULT '{}',
+      created_at  INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_community_events_campaign
+      ON community_campaign_events (campaign_id, id DESC);
   `);
 }
 
@@ -1917,6 +2019,109 @@ function upgradeV39ToV40(db: DB): void {
       updated_at         INTEGER NOT NULL DEFAULT (unixepoch())
     );
     CREATE INDEX IF NOT EXISTS idx_notify_bursts_hop ON notify_bursts (last_hop_seen_at);
+  `);
+}
+
+function upgradeV40ToV41(db: DB): void {
+  // Public coordination state for Community Purchases. No private key,
+  // mnemonic, recovery secret, or pooled balance is stored in these tables.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS community_campaigns (
+      id                     TEXT PRIMARY KEY,
+      inscription_number     INTEGER NOT NULL REFERENCES inscriptions (inscription_number),
+      inscription_id         TEXT NOT NULL,
+      current_outpoint       TEXT NOT NULL,
+      source                 TEXT NOT NULL CHECK (source IN ('listed','creator-fronted')),
+      ownership_mode         TEXT NOT NULL CHECK (ownership_mode IN ('anchored','open')),
+      eligibility_mode       TEXT NOT NULL CHECK (eligibility_mode IN ('anyone','omb-holders-only')),
+      creator_owner_id       TEXT NOT NULL,
+      status                 TEXT NOT NULL CHECK (status IN ('open','readiness','frozen','signing','broadcast','held','expired','failed','sold')),
+      terms_version          TEXT NOT NULL,
+      landed_cost_sats       INTEGER NOT NULL CHECK (landed_cost_sats > 0),
+      max_landed_cost_sats   INTEGER NOT NULL CHECK (max_landed_cost_sats >= landed_cost_sats),
+      marketplace            TEXT,
+      listing_id             TEXT,
+      source_fingerprint     TEXT NOT NULL,
+      fronted_buy_intent_id  INTEGER REFERENCES buy_intents (id),
+      opened_at              INTEGER NOT NULL,
+      expires_at             INTEGER NOT NULL,
+      readiness_started_at   INTEGER,
+      readiness_deadline     INTEGER,
+      frozen_at              INTEGER,
+      cap_table_version      INTEGER NOT NULL DEFAULT 1 CHECK (cap_table_version > 0),
+      cap_table_hash         TEXT,
+      policy_id              TEXT,
+      vault_address          TEXT,
+      policy_json            TEXT,
+      created_at             INTEGER NOT NULL,
+      updated_at             INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_community_campaign_status
+      ON community_campaigns (status, opened_at DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_community_campaign_active_inscription
+      ON community_campaigns (inscription_id)
+      WHERE status IN ('open','readiness','frozen','signing','broadcast','held');
+
+    CREATE TABLE IF NOT EXISTS community_participants (
+      id                              INTEGER PRIMARY KEY AUTOINCREMENT,
+      campaign_id                     TEXT NOT NULL REFERENCES community_campaigns (id) ON DELETE CASCADE,
+      owner_id                        TEXT NOT NULL,
+      cap_table_order                 INTEGER NOT NULL,
+      identity_key                    TEXT NOT NULL,
+      wallet_address                  TEXT NOT NULL,
+      payout_address                  TEXT NOT NULL,
+      payout_script_pubkey_hex        TEXT NOT NULL,
+      matrica_user_id                 TEXT,
+      matrica_username                TEXT,
+      is_creator                      INTEGER NOT NULL CHECK (is_creator IN (0,1)),
+      requested_units                 INTEGER NOT NULL CHECK (requested_units BETWEEN 1 AND 33),
+      waitlisted_units                INTEGER NOT NULL DEFAULT 0 CHECK (waitlisted_units BETWEEN 0 AND 20),
+      max_contribution_sats           INTEGER NOT NULL CHECK (max_contribution_sats >= 0),
+      qualifying_inscription_number   INTEGER REFERENCES inscriptions (inscription_number),
+      root_fingerprint_hex            TEXT NOT NULL,
+      campaign_xpub                   TEXT NOT NULL,
+      recovery_confirmed              INTEGER NOT NULL CHECK (recovery_confirmed IN (0,1)),
+      inferred_links_json             TEXT NOT NULL DEFAULT '[]',
+      reservation_payload_json        TEXT NOT NULL,
+      reservation_signature           TEXT NOT NULL,
+      reservation_nonce               TEXT NOT NULL,
+      readiness_status                TEXT NOT NULL DEFAULT 'waiting' CHECK (readiness_status IN ('waiting','ready','timed-out')),
+      readiness_payload_json          TEXT,
+      readiness_signature             TEXT,
+      readiness_nonce                 TEXT,
+      funding_outpoints_json          TEXT,
+      ready_at                        INTEGER,
+      joined_at                       INTEGER NOT NULL,
+      UNIQUE (campaign_id, owner_id),
+      UNIQUE (campaign_id, identity_key),
+      UNIQUE (campaign_id, reservation_nonce),
+      UNIQUE (campaign_id, campaign_xpub)
+    );
+    CREATE INDEX IF NOT EXISTS idx_community_participants_campaign
+      ON community_participants (campaign_id, cap_table_order);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_community_qualifying_omb
+      ON community_participants (campaign_id, qualifying_inscription_number)
+      WHERE qualifying_inscription_number IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS community_units (
+      campaign_id    TEXT NOT NULL REFERENCES community_campaigns (id) ON DELETE CASCADE,
+      unit_number    INTEGER NOT NULL CHECK (unit_number BETWEEN 0 AND 99),
+      participant_id INTEGER NOT NULL REFERENCES community_participants (id) ON DELETE CASCADE,
+      PRIMARY KEY (campaign_id, unit_number)
+    );
+    CREATE INDEX IF NOT EXISTS idx_community_units_participant
+      ON community_units (participant_id, unit_number);
+
+    CREATE TABLE IF NOT EXISTS community_campaign_events (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      campaign_id TEXT NOT NULL REFERENCES community_campaigns (id) ON DELETE CASCADE,
+      event_type  TEXT NOT NULL,
+      owner_id    TEXT,
+      detail_json TEXT NOT NULL DEFAULT '{}',
+      created_at  INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_community_events_campaign
+      ON community_campaign_events (campaign_id, id DESC);
   `);
 }
 
