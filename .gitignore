@@ -68,6 +68,11 @@ MARKETPLACE.md
 # Claude Code local state (scheduled task locks, agent worktrees, etc.)
 /.claude/
 
+# Private/local product and protocol notes. These are implementation references,
+# not public repository documentation.
+/docs/
+/OMB_MARKETPLACE_VISION.md
+
 # Cluster-research generated artifacts. The scripts (*.js) and REPORT.md
 # are tracked; per-run outputs (calibration JSON dumps, captured stdout)
 # are regenerable from the scripts against a fresh snapshot and would
