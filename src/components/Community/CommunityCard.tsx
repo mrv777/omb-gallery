@@ -24,7 +24,10 @@ export default function CommunityCard({ campaign }: { campaign: CommunityCampaig
       <div className="min-w-0 font-mono uppercase tracking-[0.08em]">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-sm text-bone">OMB {campaign.inscriptionNumber}</div>
+            <div className="text-sm">
+              <span className="text-bone-dim">OMB</span>{' '}
+              <span className="text-bone tabular-nums">#{campaign.inscriptionNumber}</span>
+            </div>
             <div className="mt-1 text-[9px] text-bone-dim">
               {campaign.ownershipMode} ·{' '}
               {campaign.eligibilityMode === 'anyone' ? 'anyone' : 'holders only'}
