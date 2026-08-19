@@ -12,7 +12,10 @@ import {
 import type { ConnectedWallet } from '@/lib/wallet/satsConnect';
 import type { MarketplaceContext } from '@/lib/marketplace/types';
 import type { CommunityVaultAcquisitionProviderContextV1 } from '@drey/core/domain/community-vault/acquisition-provider';
-import type { CommunitySaleProviderContextV1 } from '@/lib/community-purchases/contracts';
+import type {
+  CommunitySaleBuyerProviderContextV1,
+  CommunitySaleProviderContextV1,
+} from '@/lib/community-purchases/contracts';
 
 type BuyerSessionState = ConnectedWallet & {
   acceptedTermsAt: number | null;
@@ -32,7 +35,8 @@ type WalletContextValue = {
     signInputs?: Record<string, number[]>,
     marketplaceContext?: MarketplaceContext,
     communityVaultAcquisitionContext?: CommunityVaultAcquisitionProviderContextV1,
-    communityVaultSaleContext?: CommunitySaleProviderContextV1 & { ownerId: string }
+    communityVaultSaleContext?: CommunitySaleProviderContextV1 & { ownerId: string },
+    communityVaultSaleBuyerContext?: CommunitySaleBuyerProviderContextV1
   ) => Promise<string>;
 };
 
@@ -120,7 +124,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       signInputs?: Record<string, number[]>,
       marketplaceContext?: MarketplaceContext,
       communityVaultAcquisitionContext?: CommunityVaultAcquisitionProviderContextV1,
-      communityVaultSaleContext?: CommunitySaleProviderContextV1 & { ownerId: string }
+      communityVaultSaleContext?: CommunitySaleProviderContextV1 & { ownerId: string },
+      communityVaultSaleBuyerContext?: CommunitySaleBuyerProviderContextV1
     ) => {
       if (!wallet) throw new Error('Reconnect your wallet before signing.');
       const { signPurchasePsbt } = await import('@/lib/wallet/satsConnect');
@@ -131,6 +136,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         marketplaceContext,
         communityVaultAcquisitionContext,
         communityVaultSaleContext,
+        communityVaultSaleBuyerContext,
       });
       return signed.signedPsbt;
     },

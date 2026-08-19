@@ -124,9 +124,35 @@ export async function getRawTxCached(txid: string, cache: TxCache): Promise<RawT
 // Health probe used at the start of a tick to confirm bitcoind is reachable.
 // Returns the chain tip block height, or throws.
 export async function getBlockchainTip(): Promise<number> {
-  const info = await rpc<{ blocks: number; chain: string }>('getblockchaininfo', []);
+  const info = await getBlockchainInfo();
   if (info.chain !== 'main' && info.chain !== 'test') {
     log.warn('bitcoind', 'unexpected chain', { chain: info.chain });
   }
   return info.blocks;
+}
+
+export type BlockchainInfo = {
+  blocks: number;
+  bestblockhash: string;
+  chain: string;
+};
+
+export async function getBlockchainInfo(): Promise<BlockchainInfo> {
+  return rpc<BlockchainInfo>('getblockchaininfo', []);
+}
+
+/** Conservative fee estimate in sat/vB, clamped away from pathological node responses. */
+export async function estimateFeeRateSatPerVb(): Promise<number> {
+  const configured = process.env.COMMUNITY_SALE_FEE_RATE_SAT_VB;
+  if (configured && /^(?:[1-9][0-9]*)(?:\.[0-9]{1,3})?$/u.test(configured)) {
+    return Math.min(200, Math.max(1, Number(configured)));
+  }
+  const quote = await rpc<{ feerate?: number; errors?: string[] }>('estimatesmartfee', [
+    3,
+    'conservative',
+  ]);
+  if (typeof quote.feerate !== 'number' || !Number.isFinite(quote.feerate) || quote.feerate <= 0) {
+    return 10;
+  }
+  return Math.min(200, Math.max(1, Math.ceil((quote.feerate * 100_000_000) / 1_000)));
 }

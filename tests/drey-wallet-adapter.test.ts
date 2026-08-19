@@ -19,6 +19,7 @@ vi.mock('sats-connect', () => ({
 import {
   DREY_MIN_BUY_VERSION,
   DREY_COMMUNITY_CAPABILITY,
+  DREY_COMMUNITY_OFFERS_CAPABILITY,
   DREY_PROVIDER_ICON,
   LEATHER_PROVIDER_ICON,
   LEATHER_PROVIDER_ID,
@@ -27,6 +28,7 @@ import {
   getSatsWalletOptions,
   isDreyBuySupported,
   isDreyCommunitySupported,
+  isDreyCommunityOffersSupported,
   listenForDreyInitialization,
   openDreyCommunitySetup,
   probeDreyConnection,
@@ -242,6 +244,29 @@ describe('Drey wallet adapter', () => {
     );
   });
 
+  it('passes the exact buyer-funded Community Vault offer context without broadcast', async () => {
+    const communityVaultSaleBuyerContext = { version: 1, exact: 'offer' } as never;
+    const request = installDrey(method => {
+      if (method === 'getAccounts') return addresses;
+      if (method === 'signPsbt') return { psbt: 'buyer-funded' };
+      throw new Error(`unexpected method ${method}`);
+    });
+    await expect(
+      signPurchasePsbt({
+        wallet: dreyWallet(),
+        psbt: 'unsigned-offer',
+        signInputs: { bc1qpayment: [1, 2] },
+        communityVaultSaleBuyerContext,
+      })
+    ).resolves.toEqual({ signedPsbt: 'buyer-funded', txid: undefined });
+    expect(request).toHaveBeenLastCalledWith('signPsbt', {
+      psbt: 'unsigned-offer',
+      signInputs: { bc1qpayment: [1, 2] },
+      broadcast: false,
+      communityVaultSaleBuyerContext,
+    });
+  });
+
   it('opens a prefilled Drey setup only when the explicit capability is present', async () => {
     const request = installDrey(method => {
       if (method === 'getAccounts') return addresses;
@@ -353,5 +378,20 @@ describe('Drey wallet adapter', () => {
         })
       )
     ).toBe(false);
+  });
+
+  it('gates buyer offers on the separate offer capability', () => {
+    expect(
+      isDreyCommunityOffersSupported(
+        dreyWallet({ providerCapabilities: [DREY_COMMUNITY_CAPABILITY] })
+      )
+    ).toBe(false);
+    expect(
+      isDreyCommunityOffersSupported(
+        dreyWallet({
+          providerCapabilities: [DREY_COMMUNITY_CAPABILITY, DREY_COMMUNITY_OFFERS_CAPABILITY],
+        })
+      )
+    ).toBe(true);
   });
 });

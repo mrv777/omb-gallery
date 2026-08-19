@@ -21,6 +21,16 @@ export type OrdInscriptionDetail = {
   satpoint: string | null;
 };
 
+export type OrdOutputInfo = {
+  outpoint: string;
+  valueSats: string;
+  scriptPubKeyHex: string;
+  confirmations: number;
+  spent: boolean;
+  inscriptionIds: string[];
+  runeIds: string[];
+};
+
 export class OrdError extends Error {
   constructor(
     message: string,
@@ -47,6 +57,21 @@ export async function fetchBlockHeight(): Promise<number> {
   if (typeof json === 'number') return json;
   if (typeof json === 'string' && /^\d+$/.test(json)) return parseInt(json, 10);
   throw new OrdError('Unexpected /blockheight response shape', null, false);
+}
+
+/** Confirmed, inscription-free, rune-free outputs currently controlled by an address. */
+export async function fetchAddressCardinalOutputs(address: string): Promise<OrdOutputInfo[]> {
+  const json = await getJson(
+    `${ensureBase()}/outputs/${encodeURIComponent(address)}?type=cardinal`
+  );
+  return normalizeOutputList(json);
+}
+
+/** Re-read exact outpoints immediately before a Community Vault action. */
+export async function fetchOutputsBatch(outpoints: string[]): Promise<OrdOutputInfo[]> {
+  if (outpoints.length === 0) return [];
+  const json = await postJson(`${ensureBase()}/outputs`, outpoints);
+  return normalizeOutputList(json);
 }
 
 /**
@@ -185,6 +210,69 @@ function normalizeInscriptionDetail(item: Record<string, unknown>): OrdInscripti
     ]),
     satpoint: satpoint ?? null,
   };
+}
+
+function normalizeOutputList(json: unknown): OrdOutputInfo[] {
+  if (!Array.isArray(json)) {
+    throw new OrdError('Unexpected ord outputs response shape', null, false);
+  }
+  return json.map((item, index) => normalizeOutput(item, index));
+}
+
+function normalizeOutput(raw: unknown, index: number): OrdOutputInfo {
+  if (!raw || typeof raw !== 'object') {
+    throw new OrdError(`Invalid ord output at index ${index}`, null, false);
+  }
+  const item = raw as Record<string, unknown>;
+  const outpoint = pickString(item, ['outpoint', 'output']);
+  const value = item.value ?? item.value_sats ?? item.amount;
+  const script = pickString(item, ['script_pubkey', 'script_pubkey_hex', 'scriptPubKeyHex']);
+  const confirmations = pickInt(item, ['confirmations']);
+  const spent = item.spent;
+  if (
+    !outpoint ||
+    !/^[0-9a-f]{64}:(?:0|[1-9][0-9]*)$/iu.test(outpoint) ||
+    (typeof value !== 'number' && typeof value !== 'string') ||
+    !/^(?:0|[1-9][0-9]*)$/u.test(String(value)) ||
+    !script ||
+    !/^(?:[0-9a-f]{2})+$/iu.test(script) ||
+    confirmations == null ||
+    typeof spent !== 'boolean'
+  ) {
+    throw new OrdError(`Incomplete ord output at index ${index}`, null, false);
+  }
+  return {
+    outpoint: outpoint.toLowerCase(),
+    valueSats: String(value),
+    scriptPubKeyHex: script.toLowerCase(),
+    confirmations,
+    spent,
+    inscriptionIds: normalizeIdentifierList(item.inscriptions),
+    runeIds: normalizeRuneIds(item.runes),
+  };
+}
+
+function normalizeIdentifierList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(item => {
+    if (typeof item === 'string') return [item];
+    if (!item || typeof item !== 'object') return [];
+    const id = pickString(item as Record<string, unknown>, ['id', 'inscription_id']);
+    return id ? [id] : [];
+  });
+}
+
+function normalizeRuneIds(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap(item => {
+      if (typeof item === 'string') return [item];
+      if (!item || typeof item !== 'object') return [];
+      const id = pickString(item as Record<string, unknown>, ['id', 'rune_id', 'rune']);
+      return id ? [id] : [];
+    });
+  }
+  if (value && typeof value === 'object') return Object.keys(value as Record<string, unknown>);
+  return [];
 }
 
 /**

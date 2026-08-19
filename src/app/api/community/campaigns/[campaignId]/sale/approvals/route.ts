@@ -6,7 +6,10 @@ import {
   communityRateLimit,
   requireCommunityEnabled,
 } from '@/lib/community-purchases/api';
-import { submitCommunitySaleApproval } from '@/lib/community-purchases/saleStore';
+import {
+  refreshCommunitySale,
+  submitCommunitySaleApproval,
+} from '@/lib/community-purchases/saleStore';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -33,6 +36,7 @@ export async function POST(
     if (typeof body?.signed_psbt !== 'string') {
       return NextResponse.json({ error: 'signed_psbt required' }, { status: 400 });
     }
+    await refreshCommunitySale({ campaignId });
     const campaign = submitCommunitySaleApproval({
       campaignId,
       payload: action.payload,

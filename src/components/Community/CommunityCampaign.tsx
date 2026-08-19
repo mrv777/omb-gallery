@@ -4,7 +4,11 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import SafeImg from '@/components/SafeImg';
 import { useWallet } from '@/components/wallet/WalletProvider';
-import { DREY_COMMUNITY_UPGRADE_MESSAGE, isDreyCommunitySupported } from '@/lib/wallet/satsConnect';
+import {
+  DREY_COMMUNITY_UPGRADE_MESSAGE,
+  isDreyCommunityOffersSupported,
+  isDreyCommunitySupported,
+} from '@/lib/wallet/satsConnect';
 import {
   COMMUNITY_PURCHASES_PROTOCOL,
   COMMUNITY_PURCHASES_TERMS_VERSION,
@@ -12,7 +16,9 @@ import {
   newActionNonce,
   type CommunityCampaignView,
   type CommunityEnrollmentV1,
+  type CommunityPreparedSaleOffer,
   type ConfirmReadinessPayloadV1,
+  type CreateSaleOfferPayloadV1,
   type ReserveUnitsPayloadV1,
 } from '@/lib/community-purchases/contracts';
 import { formatBtcCompact, formatTimeUntil, truncateAddr } from '@/lib/format';
@@ -43,6 +49,8 @@ export default function CommunityCampaign({
   const [noAlt, setNoAlt] = useState(false);
   const [consent, setConsent] = useState(false);
   const [funding, setFunding] = useState('');
+  const [offerBtc, setOfferBtc] = useState('');
+  const [offerDuration, setOfferDuration] = useState('24');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -68,6 +76,7 @@ export default function CommunityCampaign({
     !!me &&
     !campaign.sale.signedOwnerIds.includes(me.ownerId);
   const dreyReady = wallet ? isDreyCommunitySupported(wallet) : false;
+  const dreyOffersReady = wallet ? isDreyCommunityOffersSupported(wallet) : false;
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pb-10 sm:px-6">
@@ -228,7 +237,10 @@ export default function CommunityCampaign({
           {canApprove && <AcquisitionPanel />}
           {canApproveSale && <SalePanel />}
           {campaign.sale && !canApproveSale && <SaleStatus />}
-          {campaign.acquisition && !canApprove && !campaign.sale && <AcquisitionStatus />}
+          {campaign.status === 'held' && !campaign.sale && <MakeOfferPanel />}
+          {campaign.acquisition && !canApprove && !campaign.sale && campaign.status !== 'held' && (
+            <AcquisitionStatus />
+          )}
           {me && !canReady && !campaign.acquisition && (
             <div className="border border-ink-2 bg-ink-1 p-4">
               <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-accent-green">
@@ -244,7 +256,7 @@ export default function CommunityCampaign({
           )}
           {!wallet && (
             <div className="border border-ink-2 bg-ink-1 p-4 font-mono text-[10px] uppercase leading-relaxed text-bone-dim">
-              Connect Drey above to join or confirm readiness.
+              Connect Drey above to join, approve, or make an offer.
             </div>
           )}
           <div className="mt-4 border border-ink-2 p-4 text-[11px] leading-relaxed text-bone-dim">
@@ -476,6 +488,66 @@ export default function CommunityCampaign({
     );
   }
 
+  function MakeOfferPanel() {
+    return (
+      <div className="border border-accent-blue/50 bg-ink-1 p-4">
+        <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-accent-blue">
+          Buy the whole OMB
+        </div>
+        <div className="mt-1 font-mono text-sm uppercase tracking-[0.1em] text-bone">
+          Make an offer
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-bone-dim">
+          Enter one total price. Drey adds the network fee, checks clean funds, and lets you review
+          the exact transaction before signing.
+        </p>
+        {!dreyOffersReady && (
+          <p className="mt-3 border border-accent-orange/50 p-3 font-mono text-[9px] uppercase leading-relaxed text-accent-orange">
+            {wallet?.providerId === 'drey'
+              ? DREY_COMMUNITY_UPGRADE_MESSAGE
+              : 'Connect with Drey to make an offer.'}
+          </p>
+        )}
+        <div className="mt-4 grid grid-cols-[minmax(0,1fr)_112px] gap-3">
+          <Field
+            label="your offer · BTC"
+            value={offerBtc}
+            inputMode="decimal"
+            placeholder="0.00"
+            onChange={setOfferBtc}
+          />
+          <label className="block font-mono text-[9px] uppercase tracking-[0.08em] text-bone-dim">
+            open for
+            <select
+              value={offerDuration}
+              onChange={event => setOfferDuration(event.target.value)}
+              className="mt-1 h-10 w-full border border-ink-2 bg-ink-0 px-3 text-[11px] text-bone outline-none focus:border-bone"
+            >
+              <option value="6">6 hours</option>
+              <option value="24">24 hours</option>
+              <option value="72">3 days</option>
+            </select>
+          </label>
+        </div>
+        {wallet && (
+          <p className="mt-3 text-[10px] leading-relaxed text-bone-dim">
+            If accepted, the OMB goes to {truncateAddr(wallet.ordAddr, 8, 6)}. Owners are paid
+            directly; the gallery never holds the BTC or OMB.
+          </p>
+        )}
+        <Feedback />
+        <button
+          type="button"
+          disabled={busy || !dreyOffersReady}
+          onClick={() => void makeOffer()}
+          className="mt-4 h-10 w-full border border-accent-blue bg-accent-blue font-mono text-[10px] uppercase tracking-[0.1em] text-bone disabled:opacity-40"
+        >
+          {busy ? 'opening Drey…' : 'review and fund in Drey'}
+        </button>
+      </div>
+    );
+  }
+
   function SaleStatus() {
     const sale = campaign.sale!;
     const approved = me ? sale.signedOwnerIds.includes(me.ownerId) : false;
@@ -676,11 +748,22 @@ export default function CommunityCampaign({
     if (!wallet || !me || !campaign.sale || !isDreyCommunitySupported(wallet)) {
       return setError(DREY_COMMUNITY_UPGRADE_MESSAGE);
     }
-    const sale = campaign.sale;
-    const context = { ...sale.context, ownerId: me.ownerId };
-    const vaultInputIndex = context.plan.spendPlan.vaultInputIndex;
     setBusy(true);
     try {
+      const refreshResponse = await fetch(`/api/community/campaigns/${campaign.id}/sale`, {
+        cache: 'no-store',
+      });
+      const refreshed = (await refreshResponse.json().catch(() => null)) as {
+        campaign?: CommunityCampaignView;
+        error?: string;
+      } | null;
+      if (!refreshResponse.ok || !refreshed?.campaign?.sale) {
+        throw new Error(refreshed?.error ?? 'The funded offer could not be rechecked.');
+      }
+      setCampaign(refreshed.campaign);
+      const sale = refreshed.campaign.sale;
+      const context = { ...sale.context, ownerId: me.ownerId };
+      const vaultInputIndex = context.plan.spendPlan.vaultInputIndex;
       const signedPsbt = await signPsbt(
         sale.signingPsbtBase64,
         { [wallet.ordAddr]: [vaultInputIndex] },
@@ -695,9 +778,9 @@ export default function CommunityCampaign({
         version: 1 as const,
         network: 'mainnet' as const,
         action: 'approve-sale' as const,
-        campaignId: campaign.id,
+        campaignId: refreshed.campaign.id,
         ownerId: me.ownerId,
-        capTableVersion: campaign.capTableVersion,
+        capTableVersion: refreshed.campaign.capTableVersion,
         offerDigest: sale.offerDigest,
         signedPsbtHash,
         approvedAt: now,
@@ -719,6 +802,97 @@ export default function CommunityCampaign({
       setNotice('Sale approval saved.');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Sale approval failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function makeOffer() {
+    setError(null);
+    setNotice(null);
+    if (!wallet || !wallet.payAddr || !isDreyCommunityOffersSupported(wallet)) {
+      return setError(DREY_COMMUNITY_UPGRADE_MESSAGE);
+    }
+    let grossOfferSats: string;
+    try {
+      grossOfferSats = btcTextToSats(offerBtc);
+    } catch (reason) {
+      return setError(reason instanceof Error ? reason.message : 'Enter a valid BTC amount.');
+    }
+    setBusy(true);
+    try {
+      const prepareResponse = await fetch(`/api/community/campaigns/${campaign.id}/sale`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'prepare',
+          gross_offer_sats: grossOfferSats,
+          duration_hours: Number(offerDuration),
+        }),
+      });
+      const prepared = (await prepareResponse.json().catch(() => null)) as {
+        offer?: CommunityPreparedSaleOffer;
+        error?: string;
+      } | null;
+      if (!prepareResponse.ok || !prepared?.offer) {
+        throw new Error(prepared?.error ?? 'The offer could not be prepared.');
+      }
+      const offer = prepared.offer;
+      const context = {
+        version: 1 as const,
+        policy: offer.policy,
+        plan: offer.plan,
+        preflight: offer.preflight,
+      };
+      const signedPsbt = await signPsbt(
+        offer.signingPsbtBase64,
+        { [wallet.payAddr]: offer.buyerInputIndexes },
+        undefined,
+        undefined,
+        undefined,
+        context
+      );
+      const now = Math.floor(Date.now() / 1_000);
+      const payload: CreateSaleOfferPayloadV1 = {
+        protocol: COMMUNITY_PURCHASES_PROTOCOL,
+        version: 1,
+        network: 'mainnet',
+        action: 'create-sale-offer',
+        campaignId: campaign.id,
+        buyerId: offer.plan.buyerId,
+        buyerDestinationAddress: wallet.ordAddr,
+        offerDigest: offer.plan.offerDigest,
+        grossOfferSats: offer.plan.grossOfferSats,
+        signedPsbtHash: await sha256Base64(signedPsbt),
+        offerExpiresAtMs: offer.plan.expiresAtMs,
+        createdAt: now,
+        expiresAt: now + 10 * 60,
+        nonce: newActionNonce(),
+      };
+      const signature = await signMessage(wallet.ordAddr, communityMessage(payload));
+      const publishResponse = await fetch(`/api/community/campaigns/${campaign.id}/sale`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'publish',
+          payload,
+          signature,
+          policy: offer.policy,
+          plan: offer.plan,
+          buyer_funded_psbt: signedPsbt,
+        }),
+      });
+      const published = (await publishResponse.json().catch(() => null)) as {
+        campaign?: CommunityCampaignView;
+        error?: string;
+      } | null;
+      if (!publishResponse.ok || !published?.campaign) {
+        throw new Error(published?.error ?? 'The funded offer could not be published.');
+      }
+      setCampaign(published.campaign);
+      setNotice('Offer funded. Owners can now review it.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The offer could not be completed.');
     } finally {
       setBusy(false);
     }
@@ -780,6 +954,16 @@ function Field({
       />
     </label>
   );
+}
+
+function btcTextToSats(value: string): string {
+  const normalized = value.trim();
+  const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,8}))?$/u.exec(normalized);
+  if (!match) throw new Error('Enter a BTC amount with no more than 8 decimal places.');
+  const sats = BigInt(match[1]!) * 100_000_000n + BigInt((match[2] ?? '').padEnd(8, '0') || '0');
+  if (sats <= 0n) throw new Error('Enter an offer greater than zero.');
+  if (sats > 2_100_000_000_000_000n) throw new Error('That offer is too large.');
+  return sats.toString();
 }
 function Check({
   checked,

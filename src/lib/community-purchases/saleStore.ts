@@ -23,9 +23,11 @@ import {
   COMMUNITY_PURCHASES_PROTOCOL,
   type ApproveSalePayloadV1,
   type CommunityCampaignView,
+  type CreateSaleOfferPayloadV1,
 } from './contracts';
 import { CommunityPurchaseError, getCommunityCampaign } from './store';
 import { installPublicPolicyCrypto } from './dreyCrypto';
+import { refreshCommunitySalePlanPreflight, type SaleOfferDependencies } from './saleOffers';
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const HEX_32 = /^[0-9a-f]{64}$/u;
@@ -55,6 +57,11 @@ export function publishCommunitySale(args: {
   plan: CommunityVaultSalePlanV1;
   preflight: CommunityVaultSalePreflightV1;
   buyerFundedPsbtHex: string;
+  buyerAuthorization?: {
+    walletAddress: string;
+    payload: CreateSaleOfferPayloadV1;
+    signature: string;
+  };
   nowMs?: number;
 }): CommunityCampaignView {
   installPublicPolicyCrypto();
@@ -141,8 +148,7 @@ export function publishCommunitySale(args: {
   if (existing) {
     if (
       existing.offer_digest !== args.plan.offerDigest ||
-      existing.signing_psbt_hex !== base.psbtHex ||
-      existing.preflight_json !== JSON.stringify(args.preflight)
+      existing.signing_psbt_hex !== base.psbtHex
     ) {
       throw new CommunityPurchaseError(
         'sale-already-published',
@@ -150,6 +156,9 @@ export function publishCommunitySale(args: {
         409
       );
     }
+    db.prepare(
+      `UPDATE community_sales SET preflight_json = ?, updated_at = ? WHERE campaign_id = ?`
+    ).run(JSON.stringify(args.preflight), Math.floor(nowMs / 1000), campaign.id);
     return requireCampaign(campaign.id, Math.floor(nowMs / 1000));
   }
   const now = Math.floor(nowMs / 1000);
@@ -178,11 +187,71 @@ export function publishCommunitySale(args: {
       JSON.stringify({
         offerDigest: args.plan.offerDigest,
         grossOfferSats: args.plan.grossOfferSats,
+        buyerAuthorization: args.buyerAuthorization ?? null,
       }),
       now
     );
   })();
   return requireCampaign(campaign.id, now);
+}
+
+export async function refreshCommunitySale(args: {
+  campaignId: string;
+  now?: number;
+  deps?: Partial<SaleOfferDependencies>;
+}): Promise<CommunityCampaignView> {
+  const now = args.now ?? Math.floor(Date.now() / 1000);
+  const db = getDb();
+  const row = db
+    .prepare(
+      `SELECT c.policy_json, c.status AS campaign_status,
+              s.plan_json, s.status AS sale_status, s.expires_at_ms
+       FROM community_campaigns c
+       JOIN community_sales s ON s.campaign_id = c.id
+       WHERE c.id = ?`
+    )
+    .get(args.campaignId) as
+    | {
+        policy_json: string | null;
+        campaign_status: string;
+        plan_json: string;
+        sale_status: string;
+        expires_at_ms: number;
+      }
+    | undefined;
+  if (!row?.policy_json || row.campaign_status !== 'held') {
+    throw new CommunityPurchaseError('sale-unavailable', 'This funded offer is unavailable.', 409);
+  }
+  if (row.sale_status === 'ready') return requireCampaign(args.campaignId, now);
+  if (row.sale_status !== 'signing' || row.expires_at_ms <= now * 1_000) {
+    expireSale(args.campaignId, now);
+    throw new CommunityPurchaseError('sale-expired', 'This funded offer has closed.', 409);
+  }
+  const policy = JSON.parse(row.policy_json) as CommunityVaultPolicyV1;
+  const plan = JSON.parse(row.plan_json) as CommunityVaultSalePlanV1;
+  try {
+    const preflight = await refreshCommunitySalePlanPreflight({ policy, plan, deps: args.deps });
+    db.prepare(
+      `UPDATE community_sales SET preflight_json = ?, updated_at = ?
+       WHERE campaign_id = ? AND status = 'signing'`
+    ).run(JSON.stringify(preflight), now, args.campaignId);
+    return requireCampaign(args.campaignId, now);
+  } catch (error) {
+    if (error instanceof CommunityPurchaseError && error.code === 'sale-funds-changed') {
+      db.transaction(() => {
+        db.prepare(
+          `UPDATE community_sales SET status = 'failed', updated_at = ?
+           WHERE campaign_id = ? AND status = 'signing'`
+        ).run(now, args.campaignId);
+        db.prepare(
+          `INSERT INTO community_campaign_events
+           (campaign_id, event_type, detail_json, created_at)
+           VALUES (?, 'sale-funding-invalidated', ?, ?)`
+        ).run(args.campaignId, JSON.stringify({ reason: error.code }), now);
+      })();
+    }
+    throw error;
+  }
 }
 
 export function submitCommunitySaleApproval(args: {

@@ -34,6 +34,7 @@ import {
   type ApproveSalePayloadV1,
   type ConfirmReadinessPayloadV1,
   type CreateCampaignPayloadV1,
+  type CreateSaleOfferPayloadV1,
   type ReserveUnitsPayloadV1,
 } from '../src/lib/community-purchases/contracts';
 import { installPublicPolicyCrypto } from '../src/lib/community-purchases/dreyCrypto';
@@ -503,12 +504,33 @@ describe('Community Purchases coordination', () => {
     buyer.signIdx(buyerFunding.privateKey, 1, [SigHash.ALL]);
     buyer.finalizeIdx(1);
     const buyerFundedPsbtHex = bytesToHex(buyer.toPSBT(0));
+    const buyerAuthorization = {
+      walletAddress: plan.buyerDestinationAddress,
+      payload: {
+        protocol: COMMUNITY_PURCHASES_PROTOCOL,
+        version: 1,
+        network: 'mainnet',
+        action: 'create-sale-offer',
+        campaignId: held.id,
+        buyerId: plan.buyerId,
+        buyerDestinationAddress: plan.buyerDestinationAddress,
+        offerDigest: plan.offerDigest,
+        grossOfferSats: plan.grossOfferSats,
+        signedPsbtHash: '90'.repeat(32),
+        offerExpiresAtMs: plan.expiresAtMs,
+        createdAt: NOW + 31,
+        expiresAt: NOW + 600,
+        nonce: 'buyer-offer-authorization',
+      } satisfies CreateSaleOfferPayloadV1,
+      signature: 'buyer-bip322-signature',
+    };
     let coordinated = saleStore.publishCommunitySale({
       campaignId: held.id,
       policy,
       plan,
       preflight,
       buyerFundedPsbtHex,
+      buyerAuthorization,
       nowMs: NOW * 1000 + 32_000,
     });
     expect(coordinated.sale).toMatchObject({
@@ -517,6 +539,14 @@ describe('Community Purchases coordination', () => {
       requiredUnitCount: 69,
       grossOfferSats: '100000',
     });
+    const publishedEvent = dbModule
+      .getDb()
+      .prepare(
+        `SELECT detail_json FROM community_campaign_events
+         WHERE campaign_id = ? AND event_type = 'sale-offer-published'`
+      )
+      .get(held.id) as { detail_json: string };
+    expect(JSON.parse(publishedEvent.detail_json).buyerAuthorization).toEqual(buyerAuthorization);
 
     let randomByte = 1;
     for (let index = 0; index < 4; index += 1) {

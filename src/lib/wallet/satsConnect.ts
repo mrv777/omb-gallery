@@ -12,7 +12,10 @@ import {
 } from 'sats-connect';
 import type { MarketplaceContext } from '@/lib/marketplace/types';
 import type { CommunityVaultAcquisitionProviderContextV1 } from '@drey/core/domain/community-vault/acquisition-provider';
-import type { CommunitySaleProviderContextV1 } from '@/lib/community-purchases/contracts';
+import type {
+  CommunitySaleBuyerProviderContextV1,
+  CommunitySaleProviderContextV1,
+} from '@/lib/community-purchases/contracts';
 import {
   DREY_CHROME_STORE_URL,
   DREY_PROVIDER_ICON,
@@ -21,6 +24,7 @@ import {
 
 export const DREY_MIN_BUY_VERSION = '0.11.0';
 export const DREY_COMMUNITY_CAPABILITY = 'community-vault-v1';
+export const DREY_COMMUNITY_OFFERS_CAPABILITY = 'community-vault-offers-v1';
 export const DREY_COMMUNITY_UPGRADE_MESSAGE = 'Reload the latest Drey build, then reconnect.';
 export {
   DREY_CHROME_STORE_URL,
@@ -257,6 +261,7 @@ export async function signPurchasePsbt(args: {
   marketplaceContext?: MarketplaceContext;
   communityVaultAcquisitionContext?: CommunityVaultAcquisitionProviderContextV1;
   communityVaultSaleContext?: CommunitySaleProviderContextV1 & { ownerId: string };
+  communityVaultSaleBuyerContext?: CommunitySaleBuyerProviderContextV1;
 }): Promise<{ signedPsbt: string; txid?: string }> {
   if (process.env.NEXT_PUBLIC_MARKETPLACE_MOCK === 'true')
     return { signedPsbt: `mock-signed:${args.psbt}` };
@@ -272,6 +277,9 @@ export async function signPurchasePsbt(args: {
         : {}),
       ...(args.communityVaultSaleContext
         ? { communityVaultSaleContext: args.communityVaultSaleContext }
+        : {}),
+      ...(args.communityVaultSaleBuyerContext
+        ? { communityVaultSaleBuyerContext: args.communityVaultSaleBuyerContext }
         : {}),
     });
     return { signedPsbt: result.psbt, txid: result.txid };
@@ -338,6 +346,13 @@ export function isDreyCommunitySupported(wallet: ConnectedWallet): boolean {
   return (
     wallet.providerId === DREY_PROVIDER_ID &&
     wallet.providerCapabilities.includes(DREY_COMMUNITY_CAPABILITY)
+  );
+}
+
+export function isDreyCommunityOffersSupported(wallet: ConnectedWallet): boolean {
+  return (
+    isDreyCommunitySupported(wallet) &&
+    wallet.providerCapabilities.includes(DREY_COMMUNITY_OFFERS_CAPABILITY)
   );
 }
 

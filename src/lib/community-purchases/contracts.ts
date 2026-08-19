@@ -1,5 +1,13 @@
 import type { CommunityVaultAcquisitionProviderContextV1 } from '@drey/core/domain/community-vault/acquisition-provider';
-import type { CommunityVaultSaleProviderContextV1 } from '@drey/core/domain/community-vault/sale-provider';
+import type { CommunityVaultPolicyV1 } from '@drey/core/domain/community-vault/contracts';
+import type {
+  CommunityVaultSalePlanV1,
+  CommunityVaultSalePreflightV1,
+} from '@drey/core/domain/community-vault/sale-contracts';
+import type {
+  CommunityVaultSaleBuyerProviderContextV1,
+  CommunityVaultSaleProviderContextV1,
+} from '@drey/core/domain/community-vault/sale-provider';
 
 export const COMMUNITY_PURCHASES_TERMS_VERSION = 'omb-community-purchases-2026-08-18' as const;
 export const COMMUNITY_PURCHASES_PROTOCOL = 'omb-community-purchases' as const;
@@ -127,6 +135,23 @@ export type ApproveSalePayloadV1 = {
   nonce: string;
 };
 
+export type CreateSaleOfferPayloadV1 = {
+  protocol: typeof COMMUNITY_PURCHASES_PROTOCOL;
+  version: 1;
+  network: 'mainnet';
+  action: 'create-sale-offer';
+  campaignId: string;
+  buyerId: string;
+  buyerDestinationAddress: string;
+  offerDigest: string;
+  grossOfferSats: string;
+  signedPsbtHash: string;
+  offerExpiresAtMs: string;
+  createdAt: number;
+  expiresAt: number;
+  nonce: string;
+};
+
 export type CommunityAcquisitionView = {
   status: 'signing' | 'ready' | 'expired' | 'failed';
   planDigest: string;
@@ -139,6 +164,16 @@ export type CommunityAcquisitionView = {
 };
 
 export type CommunitySaleProviderContextV1 = Omit<CommunityVaultSaleProviderContextV1, 'ownerId'>;
+export type CommunitySaleBuyerProviderContextV1 = CommunityVaultSaleBuyerProviderContextV1;
+
+export type CommunityPreparedSaleOffer = {
+  policy: CommunityVaultPolicyV1;
+  plan: CommunityVaultSalePlanV1;
+  preflight: CommunityVaultSalePreflightV1;
+  signingPsbtBase64: string;
+  buyerInputIndexes: number[];
+  feeRateSatPerVb: number;
+};
 
 export type CommunitySaleView = {
   status: 'signing' | 'ready' | 'expired' | 'failed';
@@ -207,6 +242,7 @@ export function communityMessage(
     | ConfirmReadinessPayloadV1
     | ApproveAcquisitionPayloadV1
     | ApproveSalePayloadV1
+    | CreateSaleOfferPayloadV1
 ): string {
   return `OMB Community Purchases\n${JSON.stringify(payload)}`;
 }

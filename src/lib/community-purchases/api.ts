@@ -2,7 +2,12 @@ import 'server-only';
 
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { BUYER_COOKIE_NAME, parseBuyerSession, verifyBuyerSignature } from '@/lib/buyerSession';
+import {
+  BUYER_COOKIE_NAME,
+  parseBuyerSession,
+  verifyBuyerSignature,
+  type BuyerSession,
+} from '@/lib/buyerSession';
 import { clientIpKey } from '@/lib/clientIp';
 import { checkAndConsumePerIp } from '@/lib/rateLimit';
 import { communityMessage } from './contracts';
@@ -61,6 +66,13 @@ export function authenticatedCommunityAction<T extends Parameters<typeof communi
     );
   }
   return { payload, signature, walletAddress: session.ord_addr };
+}
+
+export function requireCommunityBuyerSession(request: NextRequest): BuyerSession {
+  const session = parseBuyerSession(request.cookies.get(BUYER_COOKIE_NAME)?.value);
+  if (!session)
+    throw new CommunityPurchaseError('wallet-session-required', 'Connect Drey first.', 401);
+  return session;
 }
 
 export function communityErrorResponse(error: unknown): NextResponse {
