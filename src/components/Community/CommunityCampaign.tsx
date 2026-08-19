@@ -27,6 +27,10 @@ import {
   assertConfirmedCommunityFunding,
   requiredCommunityFundingSats,
 } from '@/lib/community-purchases/funding';
+import {
+  communityParticipantState,
+  communityProgressLabel,
+} from '@/lib/community-purchases/presentation';
 
 export default function CommunityCampaign({
   initial,
@@ -54,6 +58,7 @@ export default function CommunityCampaign({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [shareMessage, setShareMessage] = useState<string | null>(null);
   const image = lookupInscription(campaign.inscriptionNumber);
   const me = wallet
     ? campaign.participants.find(item => item.walletAddress === wallet.ordAddr)
@@ -77,6 +82,7 @@ export default function CommunityCampaign({
     !campaign.sale.signedOwnerIds.includes(me.ownerId);
   const dreyReady = wallet ? isDreyCommunitySupported(wallet) : false;
   const dreyOffersReady = wallet ? isDreyCommunityOffersSupported(wallet) : false;
+  const progressLabel = communityProgressLabel(campaign.status);
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pb-10 sm:px-6">
@@ -106,7 +112,7 @@ export default function CommunityCampaign({
             <span>·</span>
             <span>{campaign.eligibilityMode === 'anyone' ? 'anyone' : 'holders only'}</span>
           </div>
-          <h1 className="mt-3 text-3xl text-bone sm:text-4xl">OMB {campaign.inscriptionNumber}</h1>
+          <h1 className="mt-3 text-3xl text-bone sm:text-4xl">OMB #{campaign.inscriptionNumber}</h1>
           <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.08em] text-bone-dim">
             {formatBtcCompact(Number(campaign.maxLandedCostSats))} maximum · no platform fee
           </p>
@@ -121,17 +127,20 @@ export default function CommunityCampaign({
           </div>
           <div className="mt-2 flex flex-wrap justify-between gap-2 font-mono text-[10px] uppercase tracking-[0.08em] text-bone-dim">
             <span>
-              {campaign.allocatedUnitCount}/100 assigned
+              {campaign.allocatedUnitCount}/100 {progressLabel}
               {campaign.waitlistedUnitCount ? ` · ${campaign.waitlistedUnitCount} waitlisted` : ''}
             </span>
             {['open', 'readiness'].includes(campaign.status) && (
-              <span>{formatTimeUntil(campaign.readinessDeadline ?? campaign.expiresAt)}</span>
+              <span>
+                {campaign.status === 'open' ? 'closes ' : 'readiness '}
+                {formatTimeUntil(campaign.readinessDeadline ?? campaign.expiresAt)}
+              </span>
             )}
           </div>
           {campaign.ownershipMode === 'anchored' && (
             <p className="mt-5 border-l-2 border-accent-orange pl-3 text-xs leading-relaxed text-bone-dim">
-              The creator permanently holds 33 units. The other 67 units cannot move this OMB
-              without at least two creator signatures.
+              Anchored: the creator keeps 33% and must approve any sale or transfer. The creator
+              cannot move the OMB alone either.
             </p>
           )}
         </div>
@@ -145,7 +154,8 @@ export default function CommunityCampaign({
                 Public cap table
               </h2>
               <p className="mt-1 text-xs text-bone-dim">
-                Confirmed Matrica siblings count together. On-chain links are warnings only.
+                Who owns the 100 units. Confirmed Matrica siblings count together; on-chain links
+                are warnings only.
               </p>
             </div>
             <span className="font-mono text-[9px] uppercase text-bone-dim">
@@ -189,7 +199,7 @@ export default function CommunityCampaign({
                       )}
                     </td>
                     <td className="p-3 text-bone-dim">
-                      {participant.allocatedUnits.length ? participant.readiness : 'waitlisted'}
+                      {communityParticipantState(campaign.status, participant)}
                     </td>
                   </tr>
                 ))}
@@ -244,14 +254,33 @@ export default function CommunityCampaign({
           {me && !canReady && !campaign.acquisition && (
             <div className="border border-ink-2 bg-ink-1 p-4">
               <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-accent-green">
-                You joined
+                {me.isCreator ? 'Group buy started' : 'You joined'}
               </div>
               <p className="mt-2 text-xs leading-relaxed text-bone-dim">
                 {me.allocatedUnits.length
-                  ? `${me.allocatedUnits.length} units assigned.`
+                  ? `${me.allocatedUnits.length} units ${progressLabel}.`
                   : 'Your reservation is waitlisted.'}{' '}
                 {me.readiness === 'ready' ? 'Readiness confirmed.' : ''}
               </p>
+              {campaign.status === 'open' && (
+                <>
+                  <p className="mt-2 text-xs leading-relaxed text-bone-dim">
+                    Share this page. Readiness begins automatically when all 100 units are reserved.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void copyGroupBuyLink()}
+                    className="mt-4 h-9 border border-bone px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-bone hover:bg-bone hover:text-ink-0"
+                  >
+                    copy group buy link
+                  </button>
+                  {shareMessage && (
+                    <p role="status" className="mt-2 text-[10px] text-bone-dim">
+                      {shareMessage}
+                    </p>
+                  )}
+                </>
+              )}
             </div>
           )}
           {!wallet && (
@@ -267,7 +296,7 @@ export default function CommunityCampaign({
               <li>• one unit = 1% of sale proceeds</li>
               <li>• units cannot be sold or redeemed separately</li>
               <li>• reservations never move BTC</li>
-              <li>• 69 units can authorize the whole OMB</li>
+              <li>• 69 of 100 units must approve a move</li>
               <li>• Drey and the gallery have no vault key</li>
             </ul>
             <p className="mt-3 border-t border-ink-2 pt-3">
@@ -278,6 +307,15 @@ export default function CommunityCampaign({
       </section>
     </div>
   );
+
+  async function copyGroupBuyLink() {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setShareMessage('Link copied.');
+    } catch {
+      setShareMessage('Could not copy the link. Copy it from your browser instead.');
+    }
+  }
 
   function JoinPanel() {
     const unitCount = Math.max(1, Math.min(20, Number(units) || 1));

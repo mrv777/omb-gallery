@@ -44,6 +44,33 @@ export type CommunityEnrollmentV1 = {
   };
 };
 
+const COMMUNITY_ENROLLMENT_XPUB = /^xpub[1-9A-HJ-NP-Za-km-z]{107}$/u;
+const COMMUNITY_ENROLLMENT_FINGERPRINT = /^[0-9a-f]{8}$/u;
+
+export function isCommunityEnrollmentFor(
+  value: unknown,
+  campaignId: string,
+  ownerId: string
+): value is CommunityEnrollmentV1 {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const enrollment = value as Record<string, unknown>;
+  const rootValue = enrollment.campaignRoot;
+  if (rootValue === null || typeof rootValue !== 'object' || Array.isArray(rootValue)) return false;
+  const root = rootValue as Record<string, unknown>;
+  return (
+    enrollment.version === 1 &&
+    enrollment.network === 'mainnet' &&
+    enrollment.campaignId === campaignId &&
+    enrollment.ownerId === ownerId &&
+    root.version === 1 &&
+    root.originPath === 'm' &&
+    typeof root.masterFingerprintHex === 'string' &&
+    COMMUNITY_ENROLLMENT_FINGERPRINT.test(root.masterFingerprintHex) &&
+    typeof root.campaignXpub === 'string' &&
+    COMMUNITY_ENROLLMENT_XPUB.test(root.campaignXpub)
+  );
+}
+
 export type CreateCampaignPayloadV1 = {
   protocol: typeof COMMUNITY_PURCHASES_PROTOCOL;
   version: 1;

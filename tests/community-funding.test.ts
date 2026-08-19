@@ -8,6 +8,7 @@ describe('group buy funding checks', () => {
   it('rounds each owner maximum up to the next satoshi', () => {
     expect(requiredCommunityFundingSats('10001', 1)).toBe(101n);
     expect(requiredCommunityFundingSats('10001', 20)).toBe(2001n);
+    expect(requiredCommunityFundingSats('2020000', 33)).toBe(666600n);
   });
 
   it('accepts exactly enough confirmed clean BTC and ignores unconfirmed BTC', () => {

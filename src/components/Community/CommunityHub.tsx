@@ -9,9 +9,13 @@ import {
   communityMessage,
   newActionNonce,
   type CommunityCampaignView,
-  type CommunityEnrollmentV1,
   type CreateCampaignPayloadV1,
 } from '@/lib/community-purchases/contracts';
+import { isGroupBuyFormReady, parseCommunityEnrollmentFor } from '@/lib/community-purchases/form';
+import {
+  assertConfirmedCommunityFunding,
+  requiredCommunityFundingSats,
+} from '@/lib/community-purchases/funding';
 import { useWallet } from '@/components/wallet/WalletProvider';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { formatBtcPreciseCompact } from '@/lib/format';
@@ -34,7 +38,7 @@ export default function CommunityHub({
   listings: MarketplaceListing[];
 }) {
   const router = useRouter();
-  const { wallet, connecting, connect, signMessage } = useWallet();
+  const { wallet, connecting, connect, signMessage, getSpendableBalance } = useWallet();
   const [creating, setCreating] = useState(false);
   const campaignId = initialCampaignId;
   const ownerId = initialOwnerId;
@@ -78,6 +82,22 @@ export default function CommunityHub({
       .slice(0, 60);
   }, [listingSearch, listings]);
   const dreyReady = wallet ? isDreyCommunitySupported(wallet) : false;
+  const formReady = isGroupBuyFormReady({
+    dreyReady,
+    payoutAddress: wallet?.payAddr || '',
+    source,
+    hasSelectedListing: selectedListing !== undefined,
+    frontedInscriptionNumber,
+    frontedIntentId,
+    maxCost,
+    enrollmentText,
+    campaignId,
+    ownerId,
+    mode,
+    creatorUnits,
+    anchorAccepted,
+    consent,
+  });
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pb-10 sm:px-6">
@@ -358,11 +378,11 @@ export default function CommunityHub({
             )}
             <button
               type="button"
-              disabled={busy || !dreyReady}
+              disabled={busy || !formReady}
               onClick={() => void submit()}
               className="mt-5 h-11 border border-bone bg-bone px-5 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-0 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {busy ? 'signing…' : 'review & start group buy'}
+              {busy ? 'checking & starting…' : 'review & start group buy'}
             </button>
           </div>
         </section>
@@ -444,12 +464,8 @@ export default function CommunityHub({
     setError(null);
     if (!wallet || !isDreyCommunitySupported(wallet))
       return setError(DREY_COMMUNITY_UPGRADE_MESSAGE);
-    let enrollment: CommunityEnrollmentV1;
-    try {
-      enrollment = JSON.parse(enrollmentText) as CommunityEnrollmentV1;
-    } catch {
-      return setError('Paste the enrollment package copied from Drey.');
-    }
+    const enrollment = parseCommunityEnrollmentFor(enrollmentText, campaignId, ownerId);
+    if (!enrollment) return setError('Paste the enrollment package copied from Drey.');
     const inscriptionNumber =
       source === 'listed' ? selectedListing?.listing.inscription_number : Number.NaN;
     if (source === 'listed' && !selectedListing) return setError('Choose one active listing.');
@@ -459,35 +475,39 @@ export default function CommunityHub({
       return setError('Enter the maximum total cost in sats.');
     if (!consent || (mode === 'anchored' && !anchorAccepted))
       return setError('Complete the required confirmations.');
-    const now = Math.floor(Date.now() / 1000);
-    const payload: CreateCampaignPayloadV1 = {
-      protocol: COMMUNITY_PURCHASES_PROTOCOL,
-      version: 1,
-      network: 'mainnet',
-      action: 'create-campaign',
-      campaignId,
-      creatorOwnerId: ownerId,
-      inscriptionNumber:
-        source === 'listed' ? inscriptionNumber! : Number(frontedInscriptionNumber),
-      source,
-      ownershipMode: mode,
-      eligibilityMode: eligibility,
-      creatorUnits,
-      maxLandedCostSats: maxCost,
-      listingId: selectedListing?.option.listing_id ?? null,
-      marketplace: selectedListing?.option.marketplace ?? null,
-      frontedBuyIntentId: source === 'creator-fronted' ? Number(frontedIntentId) : null,
-      payoutAddress: wallet.payAddr || '',
-      enrollment,
-      recoveryConfirmed: true,
-      permanentAnchorAccepted: mode === 'anchored' ? anchorAccepted : false,
-      identityDisclosureConsent: true,
-      termsVersion: COMMUNITY_PURCHASES_TERMS_VERSION,
-      expiresAt: now + (source === 'listed' ? 60 * 60 : 72 * 60 * 60),
-      nonce: newActionNonce(),
-    };
     setBusy(true);
     try {
+      if (source === 'listed') {
+        const required = requiredCommunityFundingSats(maxCost, creatorUnits);
+        assertConfirmedCommunityFunding(await getSpendableBalance(), required);
+      }
+      const now = Math.floor(Date.now() / 1000);
+      const payload: CreateCampaignPayloadV1 = {
+        protocol: COMMUNITY_PURCHASES_PROTOCOL,
+        version: 1,
+        network: 'mainnet',
+        action: 'create-campaign',
+        campaignId,
+        creatorOwnerId: ownerId,
+        inscriptionNumber:
+          source === 'listed' ? inscriptionNumber! : Number(frontedInscriptionNumber),
+        source,
+        ownershipMode: mode,
+        eligibilityMode: eligibility,
+        creatorUnits,
+        maxLandedCostSats: maxCost,
+        listingId: selectedListing?.option.listing_id ?? null,
+        marketplace: selectedListing?.option.marketplace ?? null,
+        frontedBuyIntentId: source === 'creator-fronted' ? Number(frontedIntentId) : null,
+        payoutAddress: wallet.payAddr || '',
+        enrollment,
+        recoveryConfirmed: true,
+        permanentAnchorAccepted: mode === 'anchored' ? anchorAccepted : false,
+        identityDisclosureConsent: true,
+        termsVersion: COMMUNITY_PURCHASES_TERMS_VERSION,
+        expiresAt: now + (source === 'listed' ? 60 * 60 : 72 * 60 * 60),
+        nonce: newActionNonce(),
+      };
       const signature = await signMessage(wallet.ordAddr, communityMessage(payload));
       const response = await fetch('/api/community/campaigns', {
         method: 'POST',

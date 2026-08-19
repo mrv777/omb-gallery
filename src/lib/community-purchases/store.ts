@@ -10,12 +10,14 @@ import type {
 import { getDb } from '@/lib/db';
 import { getRawTransaction, type RawTx } from '@/lib/bitcoind';
 import { estimateMarketplaceBuyerCost } from '@/lib/marketplace/fees';
+import { looksLikeAddress } from '@/lib/format';
 import {
   ANCHORED_CREATOR_UNITS,
   COMMUNITY_PURCHASES_IDENTITY_CAP,
   COMMUNITY_PURCHASES_PROTOCOL,
   COMMUNITY_PURCHASES_TERMS_VERSION,
   COMMUNITY_PURCHASES_UNIT_COUNT,
+  isCommunityEnrollmentFor,
   type CommunityCampaignView,
   type CommunityEnrollmentV1,
   type CommunityParticipantView,
@@ -26,8 +28,6 @@ import {
 import { installPublicPolicyCrypto } from './dreyCrypto';
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
-const XPUB = /^xpub[1-9A-HJ-NP-Za-km-z]{107}$/u;
-const HEX_8 = /^[0-9a-f]{8}$/u;
 const OUTPOINT = /^([0-9a-f]{64}):(0|[1-9][0-9]*)$/u;
 const ACTION_WINDOW_SEC = 15 * 60;
 const LISTED_DURATION_SEC = 60 * 60;
@@ -163,7 +163,10 @@ export function getCommunityCampaign(id: string, now = unixNow()): CommunityCamp
     payoutAddress: row.payout_address,
     matricaUserId: row.matrica_user_id,
     matricaUsername: row.matrica_username,
-    identityLabel: row.matrica_username ? `@${row.matrica_username}` : 'identity unknown',
+    identityLabel:
+      row.matrica_username && !looksLikeAddress(row.matrica_username)
+        ? `@${row.matrica_username}`
+        : 'identity unknown',
     isCreator: row.is_creator === 1,
     requestedUnits: row.requested_units,
     allocatedUnits: byParticipant.get(row.id) ?? [],
@@ -1005,16 +1008,7 @@ function validateCommonEnrollment(
   campaignId: string,
   ownerId: string
 ): void {
-  if (
-    enrollment.version !== 1 ||
-    enrollment.network !== 'mainnet' ||
-    enrollment.campaignId !== campaignId ||
-    enrollment.ownerId !== ownerId ||
-    enrollment.campaignRoot.version !== 1 ||
-    enrollment.campaignRoot.originPath !== 'm' ||
-    !HEX_8.test(enrollment.campaignRoot.masterFingerprintHex) ||
-    !XPUB.test(enrollment.campaignRoot.campaignXpub)
-  ) {
+  if (!isCommunityEnrollmentFor(enrollment, campaignId, ownerId)) {
     throw new CommunityPurchaseError(
       'invalid-enrollment',
       'Paste the complete matching Drey Community Vault enrollment package.'
