@@ -808,8 +808,8 @@ describe('Community Purchases coordination', () => {
     expect(
       restarted.participants.find(row => row.ownerId === 'owner-5')?.allocatedUnits
     ).toHaveLength(20);
-    expect(restarted.participants.filter(row => row.allocatedUnits.length > 0)).toSatisfy(rows =>
-      rows.every(row => row.readiness === 'waiting')
+    expect(restarted.participants.filter(row => row.allocatedUnits.length > 0)).toSatisfy(
+      (rows: typeof restarted.participants) => rows.every(row => row.readiness === 'waiting')
     );
     expect(db.prepare(`SELECT COUNT(*) AS n FROM community_acquisition_signatures`).get()).toEqual({
       n: 0,

@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@drey/core':
-        specifier: git+https://github.com/dreywallet/core.git#v0.14.2
-        version: https://codeload.github.com/dreywallet/core/tar.gz/ff7ec9ff1cb152dd95660642e4b8fda960b795e1
+        specifier: git+https://github.com/dreywallet/core.git#v0.14.3
+        version: https://codeload.github.com/dreywallet/core/tar.gz/1f67289fd5ed1de0bb975795cbd5925003b2f4ac
       '@radix-ui/react-hover-card':
         specifier: ^1.1.15
         version: 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -185,9 +185,9 @@ packages:
   '@bitcoinerlab/secp256k1@1.2.0':
     resolution: {integrity: sha512-jeujZSzb3JOZfmJYI0ph1PVpCRV5oaexCgy+RvCXV8XlY+XFB/2n3WOcvBsKLsOw78KYgnQrQWb2HrKE4be88Q==}
 
-  '@drey/core@https://codeload.github.com/dreywallet/core/tar.gz/ff7ec9ff1cb152dd95660642e4b8fda960b795e1':
-    resolution: {tarball: https://codeload.github.com/dreywallet/core/tar.gz/ff7ec9ff1cb152dd95660642e4b8fda960b795e1}
-    version: 0.14.2
+  '@drey/core@https://codeload.github.com/dreywallet/core/tar.gz/1f67289fd5ed1de0bb975795cbd5925003b2f4ac':
+    resolution: {tarball: https://codeload.github.com/dreywallet/core/tar.gz/1f67289fd5ed1de0bb975795cbd5925003b2f4ac}
+    version: 0.14.3
 
   '@emnapi/core@1.10.0':
     resolution: {integrity: sha512-yq6OkJ4p82CAfPl0u9mQebQHKPJkY7WrIuk205cTYnYe+k2Z8YBh11FrbRG/H6ihirqcacOgl2BIO8oyMQLeXw==}
@@ -3162,7 +3162,7 @@ snapshots:
     dependencies:
       '@noble/curves': 1.9.7
 
-  '@drey/core@https://codeload.github.com/dreywallet/core/tar.gz/ff7ec9ff1cb152dd95660642e4b8fda960b795e1':
+  '@drey/core@https://codeload.github.com/dreywallet/core/tar.gz/1f67289fd5ed1de0bb975795cbd5925003b2f4ac':
     dependencies:
       '@noble/curves': 1.9.7
       '@scure/base': 1.2.6

@@ -13,7 +13,13 @@ import {
   type CreateCampaignPayloadV1,
 } from '@/lib/community-purchases/contracts';
 import { useWallet } from '@/components/wallet/WalletProvider';
-import { DREY_MIN_COMMUNITY_VERSION, isDreyCommunitySupported } from '@/lib/wallet/satsConnect';
+import { Tooltip } from '@/components/ui/Tooltip';
+import { formatBtcPreciseCompact } from '@/lib/format';
+import {
+  DREY_COMMUNITY_UPGRADE_MESSAGE,
+  isDreyCommunitySupported,
+  openDreyCommunitySetup,
+} from '@/lib/wallet/satsConnect';
 import CommunityCard from './CommunityCard';
 
 export default function CommunityHub({
@@ -37,11 +43,12 @@ export default function CommunityHub({
   const [eligibility, setEligibility] = useState<'anyone' | 'omb-holders-only'>('anyone');
   const [creatorUnits, setCreatorUnits] = useState(33);
   const [listingChoice, setListingChoice] = useState('');
+  const [listingSearch, setListingSearch] = useState('');
   const [frontedInscriptionNumber, setFrontedInscriptionNumber] = useState('');
   const [frontedIntentId, setFrontedIntentId] = useState('');
   const [maxCost, setMaxCost] = useState('');
-  const [payoutAddress, setPayoutAddress] = useState('');
   const [enrollmentText, setEnrollmentText] = useState('');
+  const [setupOpened, setSetupOpened] = useState(false);
   const [anchorAccepted, setAnchorAccepted] = useState(false);
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -57,6 +64,19 @@ export default function CommunityHub({
         ),
     [listingChoice, listings]
   );
+  const listingOptions = useMemo(() => {
+    const query = listingSearch.trim().toLowerCase().replace(/^#/, '');
+    return listings
+      .flatMap(listing => listing.options.map(option => ({ listing, option })))
+      .filter(
+        item =>
+          !query ||
+          String(item.listing.inscription_number).includes(query) ||
+          item.option.marketplace.toLowerCase().includes(query)
+      )
+      .toSorted((a, b) => a.option.estimated_buyer_total_sats - b.option.estimated_buyer_total_sats)
+      .slice(0, 60);
+  }, [listingSearch, listings]);
   const dreyReady = wallet ? isDreyCommunitySupported(wallet) : false;
 
   return (
@@ -114,13 +134,14 @@ export default function CommunityHub({
               </p>
             ) : !dreyReady ? (
               <p className="mt-5 border border-accent-orange/50 p-3 font-mono text-[10px] uppercase text-accent-orange">
-                Update to Drey {DREY_MIN_COMMUNITY_VERSION} or newer, then reconnect.
+                {DREY_COMMUNITY_UPGRADE_MESSAGE}
               </p>
             ) : null}
 
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               <Select
                 label="purchase path"
+                help="Use a live marketplace listing, or use a purchase you already completed through this gallery."
                 value={source}
                 onChange={value => setSource(value as typeof source)}
                 options={[
@@ -130,6 +151,7 @@ export default function CommunityHub({
               />
               <Select
                 label="ownership"
+                help="Anchored keeps the creator at 33 units. Open lets the creator choose 1–20 units. Every move still needs 69 of 100 units."
                 value={mode}
                 onChange={value => {
                   setMode(value as typeof mode);
@@ -142,6 +164,7 @@ export default function CommunityHub({
               />
               <Select
                 label="who can join"
+                help="Choose whether any Drey user can reserve units or only wallets that currently hold an OMB."
                 value={eligibility}
                 onChange={value => setEligibility(value as typeof eligibility)}
                 options={[
@@ -151,6 +174,7 @@ export default function CommunityHub({
               />
               <Field
                 label="creator units"
+                help="Your fixed share of the 100 ownership units."
                 type="number"
                 min={mode === 'anchored' ? 33 : 1}
                 max={mode === 'anchored' ? 33 : 20}
@@ -161,37 +185,66 @@ export default function CommunityHub({
             </div>
 
             {source === 'listed' ? (
-              <label className="mt-4 block font-mono text-[10px] uppercase tracking-[0.08em] text-bone-dim">
-                active listing
-                <select
-                  value={listingChoice}
-                  onChange={event => {
-                    setListingChoice(event.target.value);
-                    const item = listings
-                      .flatMap(listing => listing.options.map(option => ({ listing, option })))
-                      .find(
-                        candidate =>
-                          `${candidate.listing.inscription_number}:${candidate.option.marketplace}:${candidate.option.listing_id}` ===
-                          event.target.value
-                      );
-                    if (item) setMaxCost(String(item.option.estimated_buyer_total_sats + 25_000));
-                  }}
-                  className="mt-1 h-11 w-full border border-ink-2 bg-ink-0 px-3 text-xs text-bone outline-none focus:border-bone"
-                >
-                  <option value="">choose an OMB</option>
-                  {listings.flatMap(listing =>
-                    listing.options.map(option => (
-                      <option
-                        key={`${option.marketplace}:${option.listing_id}`}
-                        value={`${listing.inscription_number}:${option.marketplace}:${option.listing_id}`}
+              <div className="mt-4">
+                <FieldLabel
+                  label="choose an active listing"
+                  help="Pick the exact OMB and marketplace offer the group will fund. Cheapest estimated total appears first."
+                />
+                <input
+                  type="search"
+                  value={listingSearch}
+                  onChange={event => setListingSearch(event.target.value)}
+                  placeholder="search OMB # or marketplace"
+                  aria-label="Search active listings"
+                  className="mt-1 h-11 w-full border border-ink-2 bg-ink-0 px-3 text-xs text-bone outline-none placeholder:text-bone-dim/50 focus:border-bone"
+                />
+                <div className="mt-2 grid max-h-80 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                  {listingOptions.map(item => {
+                    const value = `${item.listing.inscription_number}:${item.option.marketplace}:${item.option.listing_id}`;
+                    const selected = value === listingChoice;
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => {
+                          setListingChoice(value);
+                          setMaxCost(String(item.option.estimated_buyer_total_sats + 25_000));
+                        }}
+                        className={`grid grid-cols-[56px_minmax(0,1fr)] gap-3 border p-2 text-left transition-colors ${
+                          selected
+                            ? 'border-accent-blue bg-accent-blue/10'
+                            : 'border-ink-2 bg-ink-0 hover:border-bone-dim'
+                        }`}
                       >
-                        OMB {listing.inscription_number} · {option.marketplace} ·{' '}
-                        {option.estimated_buyer_total_sats.toLocaleString()} sats before network
-                      </option>
-                    ))
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={item.listing.thumbnail}
+                          alt=""
+                          className="h-14 w-14 bg-ink-2 object-cover"
+                          loading="lazy"
+                        />
+                        <span className="min-w-0 self-center font-mono uppercase">
+                          <span className="block truncate text-xs text-bone">
+                            OMB #{item.listing.inscription_number}
+                          </span>
+                          <span className="mt-1 block truncate text-[9px] text-bone-dim">
+                            {item.option.marketplace} · estimated total
+                          </span>
+                          <span className="mt-1 block text-[10px] text-bone">
+                            {formatBtcPreciseCompact(item.option.estimated_buyer_total_sats)}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {listingOptions.length === 0 && (
+                    <p className="border border-dashed border-ink-2 p-4 font-mono text-[10px] uppercase text-bone-dim sm:col-span-2">
+                      No matching active listings.
+                    </p>
                   )}
-                </select>
-              </label>
+                </div>
+              </div>
             ) : (
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <Field
@@ -212,14 +265,17 @@ export default function CommunityHub({
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <Field
                 label="maximum total cost · sats"
+                help="The group will never sign above this all-in ceiling. For listings, we start with the current estimate plus a small network-fee cushion."
                 inputMode="numeric"
                 value={maxCost}
                 onChange={setMaxCost}
               />
               <Field
-                label="your payout address"
-                value={payoutAddress || wallet?.payAddr || ''}
-                onChange={setPayoutAddress}
+                label="your payout address · from Drey"
+                help="Locked to the connected Drey payment address so sale proceeds cannot be redirected by a typo or page edit."
+                value={wallet?.payAddr || ''}
+                onChange={() => undefined}
+                disabled
               />
             </div>
 
@@ -227,23 +283,46 @@ export default function CommunityHub({
               <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-accent-blue">
                 Set up in Drey
               </div>
-              <ol className="mt-3 space-y-2 text-xs leading-relaxed text-bone-dim">
-                <li>1. Drey → Settings → Community Vault → Join campaign.</li>
-                <li>
-                  2. Campaign ID: <CopyValue value={campaignId} />
-                </li>
-                <li>
-                  3. Owner ID: <CopyValue value={ownerId} />
-                </li>
-                <li>4. Finish the recovery check, then copy the enrollment package.</li>
-              </ol>
-              <textarea
-                value={enrollmentText}
-                onChange={event => setEnrollmentText(event.target.value)}
-                rows={5}
-                placeholder="paste Drey enrollment package"
-                className="mt-4 w-full resize-y border border-ink-2 bg-ink-1 p-3 font-mono text-[10px] text-bone outline-none placeholder:text-bone-dim/50 focus:border-bone"
-              />
+              <p className="mt-3 text-xs leading-relaxed text-bone-dim">
+                Drey will fill in this group buy automatically. Finish the recovery check there;
+                your private owner key and recovery words never leave Drey.
+              </p>
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  disabled={!dreyReady}
+                  onClick={() => void beginDreySetup()}
+                  className="h-11 border border-accent-blue bg-accent-blue px-4 font-mono text-[10px] uppercase tracking-[0.1em] text-white disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Continue in Drey
+                </button>
+                <button
+                  type="button"
+                  disabled={!setupOpened}
+                  onClick={() => void pasteEnrollment()}
+                  className="h-11 border border-bone px-4 font-mono text-[10px] uppercase tracking-[0.1em] text-bone disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Paste setup from Drey
+                </button>
+              </div>
+              {setupOpened && (
+                <p className="mt-3 text-[11px] leading-relaxed text-bone-dim">
+                  Drey opened with the IDs filled in. After recovery is verified, copy the public
+                  enrollment details and return here.
+                </p>
+              )}
+              <details className="mt-3 text-[10px] text-bone-dim">
+                <summary className="cursor-pointer font-mono uppercase tracking-[0.08em]">
+                  paste manually
+                </summary>
+                <textarea
+                  value={enrollmentText}
+                  onChange={event => setEnrollmentText(event.target.value)}
+                  rows={5}
+                  placeholder="paste Drey enrollment package"
+                  className="mt-3 w-full resize-y border border-ink-2 bg-ink-1 p-3 font-mono text-[10px] text-bone outline-none placeholder:text-bone-dim/50 focus:border-bone"
+                />
+              </details>
             </div>
 
             {mode === 'anchored' && (
@@ -306,10 +385,41 @@ export default function CommunityHub({
     setCreatorUnits(Number(value.replace(/\D/g, '')) || 0);
   }
 
+  async function beginDreySetup() {
+    setError(null);
+    if (!wallet || !isDreyCommunitySupported(wallet)) {
+      setError(DREY_COMMUNITY_UPGRADE_MESSAGE);
+      return;
+    }
+    try {
+      await openDreyCommunitySetup(wallet, {
+        campaignId,
+        ownerId,
+        ...(selectedListing ? { label: `OMB #${selectedListing.listing.inscription_number}` } : {}),
+      });
+      setSetupOpened(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not open Drey setup.');
+    }
+  }
+
+  async function pasteEnrollment() {
+    setError(null);
+    try {
+      const text = await navigator.clipboard.readText();
+      JSON.parse(text);
+      setEnrollmentText(text);
+    } catch {
+      setError(
+        'Could not read the clipboard. Open “paste manually” below and paste the public setup details.'
+      );
+    }
+  }
+
   async function submit() {
     setError(null);
     if (!wallet || !isDreyCommunitySupported(wallet))
-      return setError(`Drey ${DREY_MIN_COMMUNITY_VERSION} or newer is required.`);
+      return setError(DREY_COMMUNITY_UPGRADE_MESSAGE);
     let enrollment: CommunityEnrollmentV1;
     try {
       enrollment = JSON.parse(enrollmentText) as CommunityEnrollmentV1;
@@ -343,7 +453,7 @@ export default function CommunityHub({
       listingId: selectedListing?.option.listing_id ?? null,
       marketplace: selectedListing?.option.marketplace ?? null,
       frontedBuyIntentId: source === 'creator-fronted' ? Number(frontedIntentId) : null,
-      payoutAddress: payoutAddress || wallet.payAddr || '',
+      payoutAddress: wallet.payAddr || '',
       enrollment,
       recoveryConfirmed: true,
       permanentAnchorAccepted: mode === 'anchored' ? anchorAccepted : false,
@@ -377,42 +487,45 @@ export default function CommunityHub({
 
 function Field({
   label,
+  help,
   className = '',
   onChange,
   ...props
-}: { label: string; className?: string; onChange(value: string): void } & Omit<
+}: { label: string; help?: string; className?: string; onChange(value: string): void } & Omit<
   React.InputHTMLAttributes<HTMLInputElement>,
   'onChange'
 >) {
   return (
-    <label
-      className={`block font-mono text-[10px] uppercase tracking-[0.08em] text-bone-dim ${className}`}
-    >
-      {label}
+    <div className={`block ${className}`}>
+      <FieldLabel label={label} help={help} />
       <input
         {...props}
+        aria-label={label}
         onChange={event => onChange(event.target.value)}
         className="mt-1 h-11 w-full border border-ink-2 bg-ink-0 px-3 text-xs text-bone outline-none focus:border-bone disabled:opacity-60"
       />
-    </label>
+    </div>
   );
 }
 
 function Select({
   label,
+  help,
   value,
   onChange,
   options,
 }: {
   label: string;
+  help?: string;
   value: string;
   onChange(value: string): void;
   options: Array<[string, string]>;
 }) {
   return (
-    <label className="block font-mono text-[10px] uppercase tracking-[0.08em] text-bone-dim">
-      {label}
+    <div className="block">
+      <FieldLabel label={label} help={help} />
       <select
+        aria-label={label}
         value={value}
         onChange={event => onChange(event.target.value)}
         className="mt-1 h-11 w-full border border-ink-2 bg-ink-0 px-3 text-xs text-bone outline-none focus:border-bone"
@@ -423,7 +536,26 @@ function Select({
           </option>
         ))}
       </select>
-    </label>
+    </div>
+  );
+}
+
+function FieldLabel({ label, help }: { label: string; help?: string }) {
+  return (
+    <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-bone-dim">
+      <span>{label}</span>
+      {help ? (
+        <Tooltip content={help} side="top" align="start" openOnClick>
+          <button
+            type="button"
+            aria-label={`About ${label}`}
+            className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-bone-dim/50 text-[9px] leading-none text-bone-dim hover:border-bone hover:text-bone"
+          >
+            ?
+          </button>
+        </Tooltip>
+      ) : null}
+    </div>
   );
 }
 
@@ -446,18 +578,5 @@ function Check({
       />
       <span>{label}</span>
     </label>
-  );
-}
-
-function CopyValue({ value }: { value: string }) {
-  return (
-    <button
-      type="button"
-      onClick={() => void navigator.clipboard.writeText(value)}
-      className="break-all text-left text-bone underline decoration-ink-2 underline-offset-4 hover:decoration-bone"
-      title="Copy"
-    >
-      {value}
-    </button>
   );
 }

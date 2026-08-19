@@ -18,7 +18,7 @@ vi.mock('sats-connect', () => ({
 
 import {
   DREY_MIN_BUY_VERSION,
-  DREY_MIN_COMMUNITY_VERSION,
+  DREY_COMMUNITY_CAPABILITY,
   DREY_PROVIDER_ICON,
   LEATHER_PROVIDER_ICON,
   LEATHER_PROVIDER_ID,
@@ -28,6 +28,7 @@ import {
   isDreyBuySupported,
   isDreyCommunitySupported,
   listenForDreyInitialization,
+  openDreyCommunitySetup,
   probeDreyConnection,
   signPurchasePsbt,
   type ConnectedWallet,
@@ -47,6 +48,7 @@ function dreyWallet(overrides: Partial<ConnectedWallet> = {}): ConnectedWallet {
     providerId: 'drey',
     providerVersion: DREY_MIN_BUY_VERSION,
     providerPlatform: 'web',
+    providerCapabilities: [],
     ...overrides,
   };
 }
@@ -161,12 +163,20 @@ describe('Drey wallet adapter', () => {
 
   it('connects directly with the exact mainnet address purposes and records provider metadata', async () => {
     const request = installDrey(method => {
-      if (method === 'getInfo') return { version: '0.11.2', platform: 'web' };
+      if (method === 'getInfo')
+        return {
+          version: '0.11.2',
+          platform: 'web',
+          capabilities: [DREY_COMMUNITY_CAPABILITY],
+        };
       if (method === 'wallet_connect') return { addresses };
       throw new Error(`unexpected method ${method}`);
     });
     await expect(connectSatsWallet('drey')).resolves.toEqual(
-      dreyWallet({ providerVersion: '0.11.2' })
+      dreyWallet({
+        providerVersion: '0.11.2',
+        providerCapabilities: [DREY_COMMUNITY_CAPABILITY],
+      })
     );
     expect(request).toHaveBeenNthCalledWith(2, 'wallet_connect', {
       network: 'Mainnet',
@@ -232,6 +242,31 @@ describe('Drey wallet adapter', () => {
     );
   });
 
+  it('opens a prefilled Drey setup only when the explicit capability is present', async () => {
+    const request = installDrey(method => {
+      if (method === 'getAccounts') return addresses;
+      if (method === 'drey_openCommunityVault') return null;
+      throw new Error(`unexpected method ${method}`);
+    });
+    const wallet = dreyWallet({ providerCapabilities: [DREY_COMMUNITY_CAPABILITY] });
+    await expect(
+      openDreyCommunitySetup(wallet, {
+        campaignId: 'cp_123',
+        ownerId: 'owner_456',
+        label: 'OMB #123',
+      })
+    ).resolves.toBeUndefined();
+    expect(request).toHaveBeenLastCalledWith('drey_openCommunityVault', {
+      campaignId: 'cp_123',
+      ownerId: 'owner_456',
+      label: 'OMB #123',
+    });
+
+    await expect(
+      openDreyCommunitySetup(dreyWallet(), { campaignId: 'cp_123', ownerId: 'owner_456' })
+    ).rejects.toThrow(/latest Drey build/u);
+  });
+
   it('returns only Drey confirmed spendable balance after revalidating the account', async () => {
     const request = installDrey(method => {
       if (method === 'getAccounts') return addresses;
@@ -279,6 +314,12 @@ describe('Drey wallet adapter', () => {
 
     installDrey(method => {
       if (method === 'wallet_getCurrentPermissions') return [{ type: 'wallet' }];
+      if (method === 'getInfo')
+        return {
+          version: '0.11.2',
+          platform: 'web',
+          capabilities: [DREY_COMMUNITY_CAPABILITY],
+        };
       if (method === 'getAccounts') return addresses;
       throw new Error(`unexpected method ${method}`);
     });
@@ -294,13 +335,23 @@ describe('Drey wallet adapter', () => {
     );
   });
 
-  it('gates Community Purchases at Drey 0.14.0', () => {
-    expect(DREY_MIN_COMMUNITY_VERSION).toBe('0.14.0');
-    expect(isDreyCommunitySupported(dreyWallet({ providerVersion: '0.13.1' }))).toBe(false);
-    expect(isDreyCommunitySupported(dreyWallet({ providerVersion: '0.14.0' }))).toBe(true);
-    expect(isDreyCommunitySupported(dreyWallet({ providerVersion: '0.14.0' }))).toBe(true);
+  it('gates Group Buys on an explicit Drey capability rather than product version', () => {
+    expect(isDreyCommunitySupported(dreyWallet({ providerVersion: '99.0.0' }))).toBe(false);
     expect(
-      isDreyCommunitySupported(dreyWallet({ providerId: 'XverseProviders.BitcoinProvider' }))
+      isDreyCommunitySupported(
+        dreyWallet({
+          providerVersion: '0.11.2',
+          providerCapabilities: [DREY_COMMUNITY_CAPABILITY],
+        })
+      )
+    ).toBe(true);
+    expect(
+      isDreyCommunitySupported(
+        dreyWallet({
+          providerId: 'XverseProviders.BitcoinProvider',
+          providerCapabilities: [DREY_COMMUNITY_CAPABILITY],
+        })
+      )
     ).toBe(false);
   });
 });

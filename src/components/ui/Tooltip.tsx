@@ -1,7 +1,7 @@
 'use client';
 
 import * as TooltipPrimitive from '@radix-ui/react-tooltip';
-import { ReactNode } from 'react';
+import { ReactNode, useState } from 'react';
 
 type Side = 'top' | 'right' | 'bottom' | 'left';
 type Align = 'start' | 'center' | 'end';
@@ -15,6 +15,7 @@ interface TooltipProps {
   delayDuration?: number;
   contentClassName?: string;
   disabled?: boolean;
+  openOnClick?: boolean;
 }
 
 function isEmpty(content: ReactNode): boolean {
@@ -32,12 +33,24 @@ export function Tooltip({
   delayDuration,
   contentClassName,
   disabled,
+  openOnClick = false,
 }: TooltipProps) {
+  const [clickOpen, setClickOpen] = useState(false);
+
   if (disabled || isEmpty(content)) return <>{children}</>;
 
   return (
-    <TooltipPrimitive.Root delayDuration={delayDuration}>
-      <TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger>
+    <TooltipPrimitive.Root
+      delayDuration={delayDuration}
+      open={openOnClick ? clickOpen : undefined}
+      onOpenChange={openOnClick ? setClickOpen : undefined}
+    >
+      <TooltipPrimitive.Trigger
+        asChild
+        onClick={openOnClick ? () => setClickOpen(open => !open) : undefined}
+      >
+        {children}
+      </TooltipPrimitive.Trigger>
       <TooltipPrimitive.Portal>
         <TooltipPrimitive.Content
           side={side}

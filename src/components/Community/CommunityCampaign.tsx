@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import SafeImg from '@/components/SafeImg';
 import { useWallet } from '@/components/wallet/WalletProvider';
-import { DREY_MIN_COMMUNITY_VERSION, isDreyCommunitySupported } from '@/lib/wallet/satsConnect';
+import { DREY_COMMUNITY_UPGRADE_MESSAGE, isDreyCommunitySupported } from '@/lib/wallet/satsConnect';
 import {
   COMMUNITY_PURCHASES_PROTOCOL,
   COMMUNITY_PURCHASES_TERMS_VERSION,
@@ -275,7 +275,7 @@ export default function CommunityCampaign({
         {!dreyReady && (
           <p className="mt-3 border border-accent-orange/50 p-3 font-mono text-[9px] uppercase leading-relaxed text-accent-orange">
             {wallet?.providerId === 'drey'
-              ? `Update to Drey ${DREY_MIN_COMMUNITY_VERSION} or newer, then reconnect.`
+              ? DREY_COMMUNITY_UPGRADE_MESSAGE
               : 'Reconnect with Drey to join.'}
           </p>
         )}
@@ -518,7 +518,7 @@ export default function CommunityCampaign({
     setError(null);
     setNotice(null);
     if (!wallet || !isDreyCommunitySupported(wallet))
-      return setError(`Drey ${DREY_MIN_COMMUNITY_VERSION} or newer is required.`);
+      return setError(DREY_COMMUNITY_UPGRADE_MESSAGE);
     if (!noAlt || !consent) return setError('Complete both confirmations.');
     if (!/^(?:0|[1-9][0-9]*)$/u.test(maxContribution)) {
       return setError('Enter a whole-number maximum in sats.');
@@ -571,7 +571,7 @@ export default function CommunityCampaign({
     setError(null);
     setNotice(null);
     if (!wallet || !me || !isDreyCommunitySupported(wallet))
-      return setError(`Drey ${DREY_MIN_COMMUNITY_VERSION} or newer is required.`);
+      return setError(DREY_COMMUNITY_UPGRADE_MESSAGE);
     const fundingOutpoints = funding
       .split(/[\s,]+/u)
       .map(value => value.trim())
@@ -615,7 +615,7 @@ export default function CommunityCampaign({
     setError(null);
     setNotice(null);
     if (!wallet || !me || !campaign.acquisition || !isDreyCommunitySupported(wallet)) {
-      return setError(`Drey ${DREY_MIN_COMMUNITY_VERSION} or newer is required.`);
+      return setError(DREY_COMMUNITY_UPGRADE_MESSAGE);
     }
     const acquisition = campaign.acquisition;
     const context = { ...acquisition.context, ownerId: me.ownerId };
@@ -674,7 +674,7 @@ export default function CommunityCampaign({
     setError(null);
     setNotice(null);
     if (!wallet || !me || !campaign.sale || !isDreyCommunitySupported(wallet)) {
-      return setError(`Drey ${DREY_MIN_COMMUNITY_VERSION} or newer is required.`);
+      return setError(DREY_COMMUNITY_UPGRADE_MESSAGE);
     }
     const sale = campaign.sale;
     const context = { ...sale.context, ownerId: me.ownerId };

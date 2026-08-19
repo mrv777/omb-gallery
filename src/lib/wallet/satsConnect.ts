@@ -20,7 +20,8 @@ import {
 } from '@/lib/wallet/dreyProvider';
 
 export const DREY_MIN_BUY_VERSION = '0.11.0';
-export const DREY_MIN_COMMUNITY_VERSION = '0.14.0';
+export const DREY_COMMUNITY_CAPABILITY = 'community-vault-v1';
+export const DREY_COMMUNITY_UPGRADE_MESSAGE = 'Reload the latest Drey build, then reconnect.';
 export {
   DREY_CHROME_STORE_URL,
   DREY_INITIALIZED_EVENT,
@@ -41,6 +42,7 @@ export type ConnectedWallet = {
   providerId: string;
   providerVersion: string | null;
   providerPlatform: string | null;
+  providerCapabilities: string[];
 };
 
 export type DreySpendableBalance = {
@@ -67,7 +69,11 @@ type WalletRpcError = { code?: number; message?: string; data?: unknown };
 type DreyProvider = {
   request(method: string, params?: unknown): Promise<{ result?: unknown; error?: WalletRpcError }>;
 };
-type DreyInfo = { version: string; platform: 'web' | 'mobile' };
+type DreyInfo = {
+  version: string;
+  platform: 'web' | 'mobile';
+  capabilities?: unknown;
+};
 type DiscoveredProvider = Partial<SupportedWallet> & {
   id?: unknown;
   name?: unknown;
@@ -160,7 +166,7 @@ export async function connectSatsWallet(providerId?: string): Promise<ConnectedW
   );
   if (response.status === 'error') throw walletResponseError(response.error);
   setDefaultProvider(selectedProviderId);
-  return walletFromAddresses(response.result as SatsAddress[], selectedProviderId, null, null);
+  return walletFromAddresses(response.result as SatsAddress[], selectedProviderId, null, null, []);
 }
 
 async function connectDreyWallet(): Promise<ConnectedWallet> {
@@ -171,14 +177,21 @@ async function connectDreyWallet(): Promise<ConnectedWallet> {
     message: CONNECT_MESSAGE,
   });
   setDefaultProvider(DREY_PROVIDER_ID);
-  return walletFromAddresses(account.addresses, DREY_PROVIDER_ID, info.version, info.platform);
+  return walletFromAddresses(
+    account.addresses,
+    DREY_PROVIDER_ID,
+    info.version,
+    info.platform,
+    normalizeCapabilities(info.capabilities)
+  );
 }
 
 function walletFromAddresses(
   addresses: SatsAddress[],
   providerId: string,
   providerVersion: string | null,
-  providerPlatform: string | null
+  providerPlatform: string | null,
+  providerCapabilities: string[]
 ): ConnectedWallet {
   const ord = addresses.find(addr => String(addr.purpose) === 'ordinals');
   const pay = addresses.find(addr => String(addr.purpose) === 'payment');
@@ -191,6 +204,7 @@ function walletFromAddresses(
     providerId,
     providerVersion,
     providerPlatform,
+    providerCapabilities,
   };
 }
 
@@ -271,6 +285,15 @@ export async function signPurchasePsbt(args: {
   return { signedPsbt: response.result.psbt, txid: response.result.txid };
 }
 
+export async function openDreyCommunitySetup(
+  wallet: ConnectedWallet,
+  input: { campaignId: string; ownerId: string; label?: string }
+): Promise<void> {
+  if (!isDreyCommunitySupported(wallet)) throw new Error(DREY_COMMUNITY_UPGRADE_MESSAGE);
+  await assertWalletAddresses(wallet);
+  await dreyRequest<null>('drey_openCommunityVault', input);
+}
+
 export async function disconnectSatsWallet(providerId?: string): Promise<void> {
   const selected = providerId ?? getDefaultProvider();
   if (selected === DREY_PROVIDER_ID && hasDreyProvider())
@@ -281,14 +304,26 @@ export async function disconnectSatsWallet(providerId?: string): Promise<void> {
 }
 
 export async function probeDreyConnection(expected: ConnectedWallet): Promise<boolean> {
-  if (expected.providerId !== DREY_PROVIDER_ID || !hasDreyProvider()) return false;
+  return (await refreshDreyConnection(expected)) !== null;
+}
+
+export async function refreshDreyConnection(
+  expected: ConnectedWallet
+): Promise<ConnectedWallet | null> {
+  if (expected.providerId !== DREY_PROVIDER_ID || !hasDreyProvider()) return null;
   try {
     const permissions = await dreyRequest<unknown[]>('wallet_getCurrentPermissions');
-    if (permissions.length === 0) return false;
+    if (permissions.length === 0) return null;
+    const info = await dreyRequest<DreyInfo>('getInfo');
     await assertWalletAddresses(expected);
-    return true;
+    return {
+      ...expected,
+      providerVersion: info.version,
+      providerPlatform: info.platform,
+      providerCapabilities: normalizeCapabilities(info.capabilities),
+    };
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -302,7 +337,7 @@ export function isDreyBuySupported(wallet: ConnectedWallet): boolean {
 export function isDreyCommunitySupported(wallet: ConnectedWallet): boolean {
   return (
     wallet.providerId === DREY_PROVIDER_ID &&
-    compareSemver(wallet.providerVersion, DREY_MIN_COMMUNITY_VERSION) >= 0
+    wallet.providerCapabilities.includes(DREY_COMMUNITY_CAPABILITY)
   );
 }
 
@@ -327,6 +362,7 @@ export function mockConnectedWallet(): ConnectedWallet {
     providerId: 'mock',
     providerVersion: null,
     providerPlatform: null,
+    providerCapabilities: [],
   };
 }
 
@@ -340,7 +376,8 @@ async function assertWalletAddresses(expected: ConnectedWallet): Promise<void> {
     addresses,
     DREY_PROVIDER_ID,
     expected.providerVersion,
-    expected.providerPlatform
+    expected.providerPlatform,
+    expected.providerCapabilities
   );
   if (current.ordAddr !== expected.ordAddr || current.payAddr !== expected.payAddr) {
     throw new Error('Drey account changed. Reconnect Drey before signing.');
@@ -373,6 +410,14 @@ function discoveredWallets(target: WalletWindow): DiscoveredProvider[] {
 function hasDreyProvider(): boolean {
   return (
     typeof window !== 'undefined' && typeof (window as WalletWindow).drey?.request === 'function'
+  );
+}
+
+function normalizeCapabilities(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((item): item is string => typeof item === 'string'))].slice(
+    0,
+    32
   );
 }
 

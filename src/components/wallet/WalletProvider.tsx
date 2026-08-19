@@ -205,13 +205,15 @@ async function refreshSession(cached: BuyerSessionState | null): Promise<BuyerSe
 }
 
 async function initializeWallet(): Promise<BuyerSessionState | null> {
-  const cached = readCachedWallet();
+  let cached = readCachedWallet();
   if (cached?.providerId === 'drey') {
     const walletModule = await import('@/lib/wallet/satsConnect');
-    if (!(await walletModule.probeDreyConnection(cached))) {
+    const current = await walletModule.refreshDreyConnection(cached);
+    if (!current) {
       window.localStorage.removeItem(STORAGE_KEY);
       return null;
     }
+    cached = { ...cached, ...current };
   }
   const refreshed = await refreshSession(cached);
   return refreshed ?? cached;
@@ -221,14 +223,19 @@ function readCachedWallet(): BuyerSessionState | null {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as BuyerSessionState | { version: 2; wallet: BuyerSessionState };
-    if ('version' in parsed && parsed.version === 2) return parsed.wallet;
-    if (!('ordAddr' in parsed)) return null;
+    const parsed = JSON.parse(raw) as
+      | BuyerSessionState
+      | { version: 2 | 3; wallet: BuyerSessionState };
+    const stored = 'version' in parsed ? parsed.wallet : parsed;
+    if (!('ordAddr' in stored)) return null;
     return {
-      ...parsed,
-      providerId: parsed.providerId ?? 'unknown',
-      providerVersion: parsed.providerVersion ?? null,
-      providerPlatform: parsed.providerPlatform ?? null,
+      ...stored,
+      providerId: stored.providerId ?? 'unknown',
+      providerVersion: stored.providerVersion ?? null,
+      providerPlatform: stored.providerPlatform ?? null,
+      providerCapabilities: Array.isArray(stored.providerCapabilities)
+        ? stored.providerCapabilities.filter((item): item is string => typeof item === 'string')
+        : [],
     };
   } catch {
     window.localStorage.removeItem(STORAGE_KEY);
@@ -312,12 +319,13 @@ function sessionResponseToState(
     providerId: provider?.providerId ?? 'unknown',
     providerVersion: provider?.providerVersion ?? null,
     providerPlatform: provider?.providerPlatform ?? null,
+    providerCapabilities: provider?.providerCapabilities ?? [],
     acceptedTermsAt: session.accepted_terms_at,
   };
 }
 
 function writeCachedWallet(wallet: BuyerSessionState): void {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, wallet }));
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 3, wallet }));
 }
 
 function walletErrorMessage(err: unknown): string {
