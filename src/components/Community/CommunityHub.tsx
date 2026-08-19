@@ -34,7 +34,7 @@ export default function CommunityHub({
   listings: MarketplaceListing[];
 }) {
   const router = useRouter();
-  const { wallet, signMessage } = useWallet();
+  const { wallet, connecting, connect, signMessage } = useWallet();
   const [creating, setCreating] = useState(false);
   const campaignId = initialCampaignId;
   const ownerId = initialOwnerId;
@@ -124,20 +124,6 @@ export default function CommunityHub({
               One short setup. Drey creates your independent campaign key; the gallery only receives
               its public enrollment package.
             </p>
-            {!wallet ? (
-              <p className="mt-5 border border-accent-orange/50 p-3 font-mono text-[10px] uppercase text-accent-orange">
-                Connect Drey above to continue.
-              </p>
-            ) : wallet.providerId !== 'drey' ? (
-              <p className="mt-5 border border-accent-orange/50 p-3 font-mono text-[10px] uppercase text-accent-orange">
-                Group Buys uses Drey. Reconnect with Drey to create or join.
-              </p>
-            ) : !dreyReady ? (
-              <p className="mt-5 border border-accent-orange/50 p-3 font-mono text-[10px] uppercase text-accent-orange">
-                {DREY_COMMUNITY_UPGRADE_MESSAGE}
-              </p>
-            ) : null}
-
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               <Select
                 label="purchase path"
@@ -151,7 +137,12 @@ export default function CommunityHub({
               />
               <Select
                 label="ownership"
-                help="Anchored keeps the creator at 33 units. Open lets the creator choose 1–20 units. Every move still needs 69 of 100 units."
+                help="Choose Anchored when the creator should remain required for every move. Choose Open for easier long-term transfers without depending on the creator. Every move still needs 69 of 100 units."
+                description={
+                  mode === 'anchored'
+                    ? 'Creator approval is required for every move.'
+                    : 'Owners can move without the creator.'
+                }
                 value={mode}
                 onChange={value => {
                   setMode(value as typeof mode);
@@ -284,45 +275,61 @@ export default function CommunityHub({
                 Set up in Drey
               </div>
               <p className="mt-3 text-xs leading-relaxed text-bone-dim">
-                Drey will fill in this group buy automatically. Finish the recovery check there;
-                your private owner key and recovery words never leave Drey.
+                {setupOpened
+                  ? 'Finish the recovery check in Drey, then paste the public setup here.'
+                  : !wallet || wallet.providerId !== 'drey'
+                    ? 'Connect Drey to create your owner key.'
+                    : !dreyReady
+                      ? 'Reload the latest next extension build, then check again.'
+                      : 'Continue in Drey and finish the recovery check.'}
               </p>
-              <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              {setupOpened ? (
+                <>
+                  <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                    <button
+                      type="button"
+                      onClick={() => void pasteEnrollment()}
+                      className="h-11 border border-accent-blue bg-accent-blue px-4 font-mono text-[10px] uppercase tracking-[0.1em] text-white"
+                    >
+                      Paste setup from Drey
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void beginDreySetup()}
+                      className="h-11 border border-bone px-4 font-mono text-[10px] uppercase tracking-[0.1em] text-bone"
+                    >
+                      Open Drey again
+                    </button>
+                  </div>
+                  <details className="mt-3 text-[10px] text-bone-dim">
+                    <summary className="cursor-pointer font-mono uppercase tracking-[0.08em]">
+                      paste manually
+                    </summary>
+                    <textarea
+                      value={enrollmentText}
+                      onChange={event => setEnrollmentText(event.target.value)}
+                      rows={5}
+                      placeholder="paste Drey enrollment package"
+                      className="mt-3 w-full resize-y border border-ink-2 bg-ink-1 p-3 font-mono text-[10px] text-bone outline-none placeholder:text-bone-dim/50 focus:border-bone"
+                    />
+                  </details>
+                </>
+              ) : (
                 <button
                   type="button"
-                  disabled={!dreyReady}
-                  onClick={() => void beginDreySetup()}
-                  className="h-11 border border-accent-blue bg-accent-blue px-4 font-mono text-[10px] uppercase tracking-[0.1em] text-white disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={connecting}
+                  onClick={() => void advanceDreySetup()}
+                  className="mt-4 h-11 border border-accent-blue bg-accent-blue px-4 font-mono text-[10px] uppercase tracking-[0.1em] text-white disabled:cursor-wait disabled:opacity-60"
                 >
-                  Continue in Drey
+                  {connecting
+                    ? 'Connecting…'
+                    : !wallet || wallet.providerId !== 'drey'
+                      ? 'Connect Drey'
+                      : !dreyReady
+                        ? 'Check Drey again'
+                        : 'Continue in Drey'}
                 </button>
-                <button
-                  type="button"
-                  disabled={!setupOpened}
-                  onClick={() => void pasteEnrollment()}
-                  className="h-11 border border-bone px-4 font-mono text-[10px] uppercase tracking-[0.1em] text-bone disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Paste setup from Drey
-                </button>
-              </div>
-              {setupOpened && (
-                <p className="mt-3 text-[11px] leading-relaxed text-bone-dim">
-                  Drey opened with the IDs filled in. After recovery is verified, copy the public
-                  enrollment details and return here.
-                </p>
               )}
-              <details className="mt-3 text-[10px] text-bone-dim">
-                <summary className="cursor-pointer font-mono uppercase tracking-[0.08em]">
-                  paste manually
-                </summary>
-                <textarea
-                  value={enrollmentText}
-                  onChange={event => setEnrollmentText(event.target.value)}
-                  rows={5}
-                  placeholder="paste Drey enrollment package"
-                  className="mt-3 w-full resize-y border border-ink-2 bg-ink-1 p-3 font-mono text-[10px] text-bone outline-none placeholder:text-bone-dim/50 focus:border-bone"
-                />
-              </details>
             </div>
 
             {mode === 'anchored' && (
@@ -401,6 +408,23 @@ export default function CommunityHub({
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not open Drey setup.');
     }
+  }
+
+  async function advanceDreySetup() {
+    setError(null);
+    if (!wallet || wallet.providerId !== 'drey') {
+      try {
+        await connect('drey');
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'Could not connect Drey.');
+      }
+      return;
+    }
+    if (!dreyReady) {
+      window.location.reload();
+      return;
+    }
+    await beginDreySetup();
   }
 
   async function pasteEnrollment() {
@@ -511,12 +535,14 @@ function Field({
 function Select({
   label,
   help,
+  description,
   value,
   onChange,
   options,
 }: {
   label: string;
   help?: string;
+  description?: string;
   value: string;
   onChange(value: string): void;
   options: Array<[string, string]>;
@@ -536,6 +562,9 @@ function Select({
           </option>
         ))}
       </select>
+      {description ? (
+        <p className="mt-1 text-[11px] leading-relaxed text-bone-dim">{description}</p>
+      ) : null}
     </div>
   );
 }
