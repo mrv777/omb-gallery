@@ -112,11 +112,8 @@ export default function CommunityCampaign({
             <span>·</span>
             <span>{campaign.eligibilityMode === 'anyone' ? 'anyone' : 'holders only'}</span>
           </div>
-          <h1 className="mt-3 flex items-baseline gap-3 font-mono uppercase tracking-[0.04em]">
-            <span className="text-base text-bone-dim">OMB</span>
-            <span className="text-3xl text-bone tabular-nums sm:text-4xl">
-              #{campaign.inscriptionNumber}
-            </span>
+          <h1 className="mt-3 font-mono text-3xl text-bone tabular-nums sm:text-4xl">
+            OMB #{campaign.inscriptionNumber}
           </h1>
           <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.08em] text-bone-dim">
             {formatBtcCompact(Number(campaign.maxLandedCostSats))} maximum · no platform fee
