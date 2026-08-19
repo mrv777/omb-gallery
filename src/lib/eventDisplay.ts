@@ -58,8 +58,8 @@ export const EVENT_DISPLAY: Record<EventType, EventDisplay> = {
   },
   'loan-originated': {
     label: 'LOAN ORIGINATED',
-    color: 'text-accent-blue',
-    bg: 'bg-accent-blue/10 border-accent-blue/40',
+    color: 'text-accent-orange',
+    bg: 'bg-accent-orange/10 border-accent-orange/40',
     subtitle: 'collateral locked in escrow',
   },
   'loan-defaulted': {
@@ -70,8 +70,8 @@ export const EVENT_DISPLAY: Record<EventType, EventDisplay> = {
   },
   'loan-repaid': {
     label: 'LOAN REPAID',
-    color: 'text-accent-blue',
-    bg: 'bg-accent-blue/10 border-accent-blue/40',
+    color: 'text-accent-orange',
+    bg: 'bg-accent-orange/10 border-accent-orange/40',
     subtitle: 'borrower paid lender',
   },
   'loan-unlocked': {

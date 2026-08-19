@@ -204,7 +204,7 @@ export default function CommunityHub({
                         }}
                         className={`grid grid-cols-[56px_minmax(0,1fr)] gap-3 border p-2 text-left transition-colors ${
                           selected
-                            ? 'border-accent-blue bg-accent-blue/10'
+                            ? 'border-accent-orange bg-accent-orange/10'
                             : 'border-ink-2 bg-ink-0 hover:border-bone-dim'
                         }`}
                       >
@@ -270,8 +270,8 @@ export default function CommunityHub({
               />
             </div>
 
-            <div className="mt-6 border-l-2 border-accent-blue bg-ink-0 p-4">
-              <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-accent-blue">
+            <div className="mt-6 border-l-2 border-accent-orange bg-ink-0 p-4">
+              <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-accent-orange">
                 Set up in Drey
               </div>
               <p className="mt-3 text-xs leading-relaxed text-bone-dim">
@@ -289,7 +289,7 @@ export default function CommunityHub({
                     <button
                       type="button"
                       onClick={() => void pasteEnrollment()}
-                      className="h-11 border border-accent-blue bg-accent-blue px-4 font-mono text-[10px] uppercase tracking-[0.1em] text-white"
+                      className="h-11 border border-accent-orange bg-accent-orange px-4 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-0"
                     >
                       Paste setup from Drey
                     </button>
@@ -319,7 +319,7 @@ export default function CommunityHub({
                   type="button"
                   disabled={connecting}
                   onClick={() => void advanceDreySetup()}
-                  className="mt-4 h-11 border border-accent-blue bg-accent-blue px-4 font-mono text-[10px] uppercase tracking-[0.1em] text-white disabled:cursor-wait disabled:opacity-60"
+                  className="mt-4 h-11 border border-accent-orange bg-accent-orange px-4 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-0 disabled:cursor-wait disabled:opacity-60"
                 >
                   {connecting
                     ? 'Connecting…'

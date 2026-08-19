@@ -319,7 +319,7 @@ export default function CommunityCampaign({
           value={payout || wallet?.payAddr || ''}
           onChange={setPayout}
         />
-        <div className="mt-4 border-l-2 border-accent-blue bg-ink-0 p-3 text-[11px] leading-relaxed text-bone-dim">
+        <div className="mt-4 border-l-2 border-accent-orange bg-ink-0 p-3 text-[11px] leading-relaxed text-bone-dim">
           In Drey, create a Community Vault owner with:
           <br />
           campaign <CopyValue value={campaign.id} />
@@ -490,8 +490,8 @@ export default function CommunityCampaign({
 
   function MakeOfferPanel() {
     return (
-      <div className="border border-accent-blue/50 bg-ink-1 p-4">
-        <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-accent-blue">
+      <div className="border border-accent-orange/50 bg-ink-1 p-4">
+        <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-accent-orange">
           Buy the whole OMB
         </div>
         <div className="mt-1 font-mono text-sm uppercase tracking-[0.1em] text-bone">
@@ -540,7 +540,7 @@ export default function CommunityCampaign({
           type="button"
           disabled={busy || !dreyOffersReady}
           onClick={() => void makeOffer()}
-          className="mt-4 h-10 w-full border border-accent-blue bg-accent-blue font-mono text-[10px] uppercase tracking-[0.1em] text-bone disabled:opacity-40"
+          className="mt-4 h-10 w-full border border-accent-orange bg-accent-orange font-mono text-[10px] uppercase tracking-[0.1em] text-ink-0 disabled:opacity-40"
         >
           {busy ? 'opening Drey…' : 'review and fund in Drey'}
         </button>
