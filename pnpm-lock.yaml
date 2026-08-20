@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@drey/core':
-        specifier: git+https://github.com/mrv777/drey-wallet-core.git#v0.15.1
-        version: git+https://github.com/mrv777/drey-wallet-core.git#c99321927bf9034c3865cef3733b58a4397c04e7
+        specifier: file:vendor/drey-core-0.15.1.tgz
+        version: file:vendor/drey-core-0.15.1.tgz
       '@radix-ui/react-hover-card':
         specifier: ^1.1.15
         version: 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -188,8 +188,8 @@ packages:
   '@bitcoinerlab/secp256k1@1.2.0':
     resolution: {integrity: sha512-jeujZSzb3JOZfmJYI0ph1PVpCRV5oaexCgy+RvCXV8XlY+XFB/2n3WOcvBsKLsOw78KYgnQrQWb2HrKE4be88Q==}
 
-  '@drey/core@git+https://github.com/mrv777/drey-wallet-core.git#c99321927bf9034c3865cef3733b58a4397c04e7':
-    resolution: {commit: c99321927bf9034c3865cef3733b58a4397c04e7, repo: https://github.com/mrv777/drey-wallet-core.git, type: git}
+  '@drey/core@file:vendor/drey-core-0.15.1.tgz':
+    resolution: {integrity: sha512-BxBAwFf+TmCFdGrBWL8+6UDdCDb14mdA4x5hkvC+un6hjJqntFrNfEQLM9p95hW3RBYJEYCWEz7q++37ijBkqg==, tarball: file:vendor/drey-core-0.15.1.tgz}
     version: 0.15.1
 
   '@emnapi/core@1.10.0':
@@ -3172,7 +3172,7 @@ snapshots:
     dependencies:
       '@noble/curves': 1.9.7
 
-  '@drey/core@git+https://github.com/mrv777/drey-wallet-core.git#c99321927bf9034c3865cef3733b58a4397c04e7':
+  '@drey/core@file:vendor/drey-core-0.15.1.tgz':
     dependencies:
       '@noble/curves': 1.9.7
       '@scure/base': 1.2.6

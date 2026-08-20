@@ -16,6 +16,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY package.json pnpm-lock.yaml ./
+COPY vendor/drey-core-0.15.1.tgz ./vendor/drey-core-0.15.1.tgz
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
 
