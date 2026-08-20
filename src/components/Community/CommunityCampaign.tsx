@@ -296,7 +296,7 @@ export default function CommunityCampaign({
                 Ownership change in progress
               </div>
               <p className="mt-2 text-xs leading-relaxed text-bone-dim">
-                The public cap table stays unchanged until Bitcoin confirms the new vault.
+                The public cap table stays unchanged until the transfer is confirmed on-chain.
               </p>
             </div>
           )}
@@ -356,7 +356,8 @@ export default function CommunityCampaign({
               <li>• Drey and the gallery have no vault key</li>
             </ul>
             <p className="mt-3 border-t border-ink-2 pt-3">
-              Bitcoin does not guarantee minority payout against a malicious 69-unit coalition.
+              The on-chain rule does not guarantee a fair payout to the minority if a malicious
+              coalition controls 69 units.
             </p>
           </div>
         </aside>
@@ -744,7 +745,7 @@ export default function CommunityCampaign({
         </div>
         <p className="mt-2 text-xs leading-relaxed text-bone-dim">
           Set one price and share one private 24-hour link. Units cannot be split. The cap table
-          changes only after 69 unit approvals and a Bitcoin confirmation.
+          changes only after 69 unit approvals and the transfer is confirmed on-chain.
         </p>
         {!dreyTransferReady && (
           <p className="mt-3 border border-accent-orange/50 p-3 font-mono text-[9px] uppercase leading-relaxed text-accent-orange">

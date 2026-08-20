@@ -405,7 +405,7 @@ export default function CommunityHub({
             />
             <p className="mt-3 text-[11px] leading-relaxed text-bone-dim">
               No platform fee. Reservations move no BTC. A valid 69-unit coalition can bypass Drey,
-              so minority payout is not guaranteed by Bitcoin consensus.
+              so the on-chain rule does not guarantee a fair payout to the minority.
             </p>
             {error && (
               <p

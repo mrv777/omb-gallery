@@ -10,14 +10,14 @@ const FAQ_ITEMS = [
       'You first reserve some of 100 fixed units. If the purchase completes, each unit represents 1% of the agreed proceeds when the OMB is sold.',
   },
   {
-    question: 'Is everything on Bitcoin?',
+    question: 'Is everything on-chain?',
     answer:
-      'The OMB and the rules for moving it are on Bitcoin. Reservations, progress, the public owner list, and private invitation links are coordinated by the gallery.',
+      'No. The OMB and its 69-signature spending rule are on the Bitcoin blockchain. Reservations, progress, the public owner list, and private invitation links are handled by the gallery.',
   },
   {
     question: 'What does 69 of 100 mean?',
     answer:
-      'Bitcoin requires valid signatures for at least 69 ownership units before the OMB can move. One person signs once in Drey for all of their units, so this does not mean 69 different people.',
+      'The on-chain rule requires valid signatures covering at least 69 ownership units before the OMB can move. One person signs once in Drey for all of their units, so this does not mean 69 different people.',
   },
   {
     question: 'Does reserving move or lock my BTC?',
@@ -42,7 +42,7 @@ const FAQ_ITEMS = [
   {
     question: 'What is the main risk?',
     answer:
-      'A malicious group controlling 69 units could move the OMB without guaranteeing payment to the other owners. Bitcoin enforces the signatures, not a fair payout to the minority.',
+      'A malicious group controlling 69 units could move the OMB without guaranteeing payment to the other owners. The on-chain rule requires the signatures; it does not guarantee a fair payout to the minority.',
   },
 ] as const;
 

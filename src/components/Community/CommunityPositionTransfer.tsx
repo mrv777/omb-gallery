@@ -108,8 +108,8 @@ export default function CommunityPositionTransfer({
               />
             </dl>
             <p className="mt-4 text-xs leading-relaxed text-bone-dim">
-              The complete position moves at once. Bitcoin pays the seller and moves the OMB into a
-              new 69-of-100 vault in the same transaction.
+              The complete position moves at once. The same on-chain transaction pays the seller and
+              moves the OMB into a new 69-of-100 vault.
             </p>
           </>
         )}
@@ -253,14 +253,14 @@ export default function CommunityPositionTransfer({
                 ? 'Your funding is signed. The current owners now need to approve 69 units.'
                 : transfer.status === 'ready'
                   ? 'The exact transaction has enough approvals and passed final checks.'
-                  : 'The cap table will change only after Bitcoin confirms the new vault.'
+                  : 'The cap table will change only after the transfer is confirmed on-chain.'
             }
           />
         )}
         {transfer?.status === 'confirmed' && (
           <Status
             title="Transfer complete"
-            body="Bitcoin confirmed the new vault and the public cap table now shows the new owner."
+            body="The transfer is confirmed on-chain, and the public cap table now shows the new owner."
           />
         )}
         {transfer && ['expired', 'cancelled', 'failed'].includes(transfer.status) && (
