@@ -61,6 +61,8 @@ type CampaignRow = {
   policy_id: string | null;
   vault_address: string | null;
   policy_json: string | null;
+  active_operation_kind: 'sale' | 'position-transfer' | null;
+  active_operation_id: string | null;
 };
 
 type ParticipantRow = {
@@ -135,6 +137,29 @@ export function getCommunityCampaign(id: string, now = unixNow()): CommunityCamp
       `UPDATE community_sales SET status = 'expired', updated_at = ?
        WHERE campaign_id = ? AND status = 'signing' AND expires_at_ms <= ?`
     ).run(now, id, now * 1000);
+    const expiredTransfer = db
+      .prepare(
+        `UPDATE community_position_transfers SET status = 'expired', updated_at = ?
+       WHERE campaign_id = ? AND status IN ('invited','buyer-accepted','authorized','signing','ready')
+         AND expires_at_ms <= ?`
+      )
+      .run(now, id, now * 1000);
+    if (expiredTransfer.changes > 0) {
+      db.prepare(
+        `UPDATE community_campaigns
+         SET active_operation_kind = NULL, active_operation_id = NULL, updated_at = ?
+         WHERE id = ? AND active_operation_kind = 'position-transfer'`
+      ).run(now, id);
+    }
+    db.prepare(
+      `UPDATE community_campaigns
+       SET active_operation_kind = NULL, active_operation_id = NULL, updated_at = ?
+       WHERE id = ? AND active_operation_kind = 'sale'
+         AND EXISTS (
+           SELECT 1 FROM community_sales s
+           WHERE s.campaign_id = community_campaigns.id AND s.status IN ('expired','failed')
+         )`
+    ).run(now, id);
   })();
   const campaign = db.prepare(`SELECT * FROM community_campaigns WHERE id = ?`).get(id) as
     | CampaignRow
@@ -224,6 +249,24 @@ export function getCommunityCampaign(id: string, now = unixNow()): CommunityCamp
         .all(id) as Array<{ owner_id: string; signed_units_json: string }>)
     : [];
   const salePlan = sale ? JSON.parse(sale.plan_json) : null;
+  const positionTransfer = db
+    .prepare(
+      `SELECT id, status FROM community_position_transfers
+     WHERE campaign_id = ? AND status NOT IN ('confirmed','expired','cancelled','failed')
+     ORDER BY created_at DESC LIMIT 1`
+    )
+    .get(id) as { id: string; status: string } | undefined;
+  const transferSignedUnits = positionTransfer
+    ? new Set(
+        (
+          db
+            .prepare(
+              `SELECT signed_units_json FROM community_position_transfer_signatures WHERE transfer_id = ?`
+            )
+            .all(positionTransfer.id) as Array<{ signed_units_json: string }>
+        ).flatMap(row => JSON.parse(row.signed_units_json) as number[])
+      ).size
+    : 0;
   const policy = campaign.policy_json ? JSON.parse(campaign.policy_json) : null;
   return {
     id: campaign.id,
@@ -291,6 +334,24 @@ export function getCommunityCampaign(id: string, now = unixNow()): CommunityCamp
             txid: sale.txid,
           }
         : null,
+    ownershipChange: positionTransfer
+      ? {
+          stage:
+            positionTransfer.status === 'invited'
+              ? 'awaiting-buyer'
+              : positionTransfer.status === 'buyer-accepted'
+                ? 'awaiting-seller'
+                : positionTransfer.status === 'authorized'
+                  ? 'awaiting-buyer-funding'
+                  : positionTransfer.status === 'signing'
+                    ? 'approvals'
+                    : positionTransfer.status === 'ready'
+                      ? 'ready'
+                      : 'broadcast',
+          signedUnitCount: transferSignedUnits,
+          requiredUnitCount: 69,
+        }
+      : null,
   };
 }
 

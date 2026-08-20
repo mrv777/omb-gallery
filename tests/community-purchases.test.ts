@@ -74,9 +74,9 @@ afterEach(() => {
 });
 
 describe('Community Purchases coordination', () => {
-  it('creates public-only schema at v43', () => {
+  it('creates public-only schema at v44', () => {
     const db = dbModule.getDb();
-    expect(db.pragma('user_version', { simple: true })).toBe(43);
+    expect(db.pragma('user_version', { simple: true })).toBe(44);
     const tables = db
       .prepare(
         `SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'community_%' ORDER BY name`
@@ -88,6 +88,8 @@ describe('Community Purchases coordination', () => {
       'community_campaign_events',
       'community_campaigns',
       'community_participants',
+      'community_position_transfer_signatures',
+      'community_position_transfers',
       'community_sale_signatures',
       'community_sales',
       'community_units',

@@ -16,6 +16,10 @@ import type {
   CommunitySaleBuyerProviderContextV1,
   CommunitySaleProviderContextV1,
 } from '@/lib/community-purchases/contracts';
+import type {
+  CommunityVaultPositionTransferBuyerProviderContextV1,
+  CommunityVaultPositionTransferOwnerProviderContextV1,
+} from '@drey/core/domain/community-vault/position-transfer-provider';
 
 type BuyerSessionState = ConnectedWallet & {
   acceptedTermsAt: number | null;
@@ -36,7 +40,10 @@ type WalletContextValue = {
     marketplaceContext?: MarketplaceContext,
     communityVaultAcquisitionContext?: CommunityVaultAcquisitionProviderContextV1,
     communityVaultSaleContext?: CommunitySaleProviderContextV1 & { ownerId: string },
-    communityVaultSaleBuyerContext?: CommunitySaleBuyerProviderContextV1
+    communityVaultSaleBuyerContext?: CommunitySaleBuyerProviderContextV1,
+    communityVaultPositionTransferContext?:
+      | { role: 'buyer'; context: CommunityVaultPositionTransferBuyerProviderContextV1 }
+      | { role: 'owner'; context: CommunityVaultPositionTransferOwnerProviderContextV1 }
   ) => Promise<string>;
 };
 
@@ -125,7 +132,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       marketplaceContext?: MarketplaceContext,
       communityVaultAcquisitionContext?: CommunityVaultAcquisitionProviderContextV1,
       communityVaultSaleContext?: CommunitySaleProviderContextV1 & { ownerId: string },
-      communityVaultSaleBuyerContext?: CommunitySaleBuyerProviderContextV1
+      communityVaultSaleBuyerContext?: CommunitySaleBuyerProviderContextV1,
+      communityVaultPositionTransferContext?:
+        | { role: 'buyer'; context: CommunityVaultPositionTransferBuyerProviderContextV1 }
+        | { role: 'owner'; context: CommunityVaultPositionTransferOwnerProviderContextV1 }
     ) => {
       if (!wallet) throw new Error('Reconnect your wallet before signing.');
       const { signPurchasePsbt } = await import('@/lib/wallet/satsConnect');
@@ -137,6 +147,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         communityVaultAcquisitionContext,
         communityVaultSaleContext,
         communityVaultSaleBuyerContext,
+        communityVaultPositionTransferContext,
       });
       return signed.signedPsbt;
     },

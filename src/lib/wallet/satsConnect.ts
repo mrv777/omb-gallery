@@ -16,6 +16,10 @@ import type {
   CommunitySaleBuyerProviderContextV1,
   CommunitySaleProviderContextV1,
 } from '@/lib/community-purchases/contracts';
+import type {
+  CommunityVaultPositionTransferBuyerProviderContextV1,
+  CommunityVaultPositionTransferOwnerProviderContextV1,
+} from '@drey/core/domain/community-vault/position-transfer-provider';
 import {
   DREY_CHROME_STORE_URL,
   DREY_PROVIDER_ICON,
@@ -25,6 +29,7 @@ import {
 export const DREY_MIN_BUY_VERSION = '0.11.0';
 export const DREY_COMMUNITY_CAPABILITY = 'community-vault-v1';
 export const DREY_COMMUNITY_OFFERS_CAPABILITY = 'community-vault-offers-v1';
+export const DREY_COMMUNITY_POSITION_TRANSFER_CAPABILITY = 'community-vault-position-transfer-v1';
 export const DREY_COMMUNITY_UPGRADE_MESSAGE = 'Reload the latest Drey build, then reconnect.';
 export {
   DREY_CHROME_STORE_URL,
@@ -262,6 +267,9 @@ export async function signPurchasePsbt(args: {
   communityVaultAcquisitionContext?: CommunityVaultAcquisitionProviderContextV1;
   communityVaultSaleContext?: CommunitySaleProviderContextV1 & { ownerId: string };
   communityVaultSaleBuyerContext?: CommunitySaleBuyerProviderContextV1;
+  communityVaultPositionTransferContext?:
+    | { role: 'buyer'; context: CommunityVaultPositionTransferBuyerProviderContextV1 }
+    | { role: 'owner'; context: CommunityVaultPositionTransferOwnerProviderContextV1 };
 }): Promise<{ signedPsbt: string; txid?: string }> {
   if (process.env.NEXT_PUBLIC_MARKETPLACE_MOCK === 'true')
     return { signedPsbt: `mock-signed:${args.psbt}` };
@@ -280,6 +288,18 @@ export async function signPurchasePsbt(args: {
         : {}),
       ...(args.communityVaultSaleBuyerContext
         ? { communityVaultSaleBuyerContext: args.communityVaultSaleBuyerContext }
+        : {}),
+      ...(args.communityVaultPositionTransferContext?.role === 'buyer'
+        ? {
+            communityVaultPositionTransferBuyerContext:
+              args.communityVaultPositionTransferContext.context,
+          }
+        : {}),
+      ...(args.communityVaultPositionTransferContext?.role === 'owner'
+        ? {
+            communityVaultPositionTransferOwnerContext:
+              args.communityVaultPositionTransferContext.context,
+          }
         : {}),
     });
     return { signedPsbt: result.psbt, txid: result.txid };
@@ -353,6 +373,13 @@ export function isDreyCommunityOffersSupported(wallet: ConnectedWallet): boolean
   return (
     isDreyCommunitySupported(wallet) &&
     wallet.providerCapabilities.includes(DREY_COMMUNITY_OFFERS_CAPABILITY)
+  );
+}
+
+export function isDreyCommunityPositionTransferSupported(wallet: ConnectedWallet): boolean {
+  return (
+    isDreyCommunitySupported(wallet) &&
+    wallet.providerCapabilities.includes(DREY_COMMUNITY_POSITION_TRANSFER_CAPABILITY)
   );
 }
 

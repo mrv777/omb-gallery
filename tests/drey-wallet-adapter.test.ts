@@ -20,6 +20,7 @@ import {
   DREY_MIN_BUY_VERSION,
   DREY_COMMUNITY_CAPABILITY,
   DREY_COMMUNITY_OFFERS_CAPABILITY,
+  DREY_COMMUNITY_POSITION_TRANSFER_CAPABILITY,
   DREY_PROVIDER_ICON,
   LEATHER_PROVIDER_ICON,
   LEATHER_PROVIDER_ID,
@@ -29,6 +30,7 @@ import {
   isDreyBuySupported,
   isDreyCommunitySupported,
   isDreyCommunityOffersSupported,
+  isDreyCommunityPositionTransferSupported,
   listenForDreyInitialization,
   openDreyCommunitySetup,
   probeDreyConnection,
@@ -267,6 +269,29 @@ describe('Drey wallet adapter', () => {
     });
   });
 
+  it('passes the position-transfer role and exact context only to Drey', async () => {
+    const context = { version: 1, exact: 'position-transfer' } as never;
+    const request = installDrey(method => {
+      if (method === 'getAccounts') return addresses;
+      if (method === 'signPsbt') return { psbt: 'position-transfer-signed' };
+      throw new Error(`unexpected method ${method}`);
+    });
+    await expect(
+      signPurchasePsbt({
+        wallet: dreyWallet(),
+        psbt: 'unsigned-transfer',
+        signInputs: { bc1qpayment: [1] },
+        communityVaultPositionTransferContext: { role: 'buyer', context },
+      })
+    ).resolves.toEqual({ signedPsbt: 'position-transfer-signed', txid: undefined });
+    expect(request).toHaveBeenLastCalledWith('signPsbt', {
+      psbt: 'unsigned-transfer',
+      signInputs: { bc1qpayment: [1] },
+      broadcast: false,
+      communityVaultPositionTransferBuyerContext: context,
+    });
+  });
+
   it('opens a prefilled Drey setup only when the explicit capability is present', async () => {
     const request = installDrey(method => {
       if (method === 'getAccounts') return addresses;
@@ -390,6 +415,24 @@ describe('Drey wallet adapter', () => {
       isDreyCommunityOffersSupported(
         dreyWallet({
           providerCapabilities: [DREY_COMMUNITY_CAPABILITY, DREY_COMMUNITY_OFFERS_CAPABILITY],
+        })
+      )
+    ).toBe(true);
+  });
+
+  it('gates complete-position transfers on their separate capability', () => {
+    expect(
+      isDreyCommunityPositionTransferSupported(
+        dreyWallet({ providerCapabilities: [DREY_COMMUNITY_CAPABILITY] })
+      )
+    ).toBe(false);
+    expect(
+      isDreyCommunityPositionTransferSupported(
+        dreyWallet({
+          providerCapabilities: [
+            DREY_COMMUNITY_CAPABILITY,
+            DREY_COMMUNITY_POSITION_TRANSFER_CAPABILITY,
+          ],
         })
       )
     ).toBe(true);

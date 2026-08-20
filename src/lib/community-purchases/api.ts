@@ -13,11 +13,16 @@ import { checkAndConsumePerIp } from '@/lib/rateLimit';
 import { communityMessage } from './contracts';
 import { CommunityPurchaseError, communityPurchasesEnabled } from './store';
 
+const PRIVATE_RESPONSE_HEADERS = {
+  'Cache-Control': 'private, no-store',
+  'Referrer-Policy': 'no-referrer',
+};
+
 export function requireCommunityEnabled(): NextResponse | null {
   if (communityPurchasesEnabled()) return null;
   return NextResponse.json(
     { error: 'community purchases disabled' },
-    { status: 404, headers: { 'Cache-Control': 'private, no-store' } }
+    { status: 404, headers: PRIVATE_RESPONSE_HEADERS }
   );
 }
 
@@ -36,7 +41,10 @@ export function communityRateLimit(
   if (result.ok) return null;
   return NextResponse.json(
     { error: 'rate limited', retry_after_sec: result.retryAfterSec },
-    { status: 429, headers: { 'retry-after': String(result.retryAfterSec) } }
+    {
+      status: 429,
+      headers: { ...PRIVATE_RESPONSE_HEADERS, 'retry-after': String(result.retryAfterSec) },
+    }
   );
 }
 
@@ -79,11 +87,11 @@ export function communityErrorResponse(error: unknown): NextResponse {
   if (error instanceof CommunityPurchaseError) {
     return NextResponse.json(
       { error: error.message, code: error.code },
-      { status: error.status, headers: { 'Cache-Control': 'private, no-store' } }
+      { status: error.status, headers: PRIVATE_RESPONSE_HEADERS }
     );
   }
   return NextResponse.json(
     { error: 'Community Purchases request failed.' },
-    { status: 500, headers: { 'Cache-Control': 'private, no-store' } }
+    { status: 500, headers: PRIVATE_RESPONSE_HEADERS }
   );
 }

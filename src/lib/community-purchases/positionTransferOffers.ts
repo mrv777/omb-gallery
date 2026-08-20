@@ -1,18 +1,18 @@
 import 'server-only';
 
-import { createHash, randomBytes } from 'node:crypto';
 import { address, networks } from 'bitcoinjs-lib';
 import {
-  constructCommunityVaultSalePsbt,
-  createCommunityVaultSalePlan,
-} from '@drey/core/domain/community-vault/sale';
+  constructCommunityVaultPositionTransferPsbt,
+  createCommunityVaultPositionTransferPlan,
+} from '@drey/core/domain/community-vault/position-transfer';
 import type {
-  CommunityVaultSaleBuyerInputV1,
-  CommunityVaultSalePlanV1,
-  CommunityVaultSalePreflightV1,
-} from '@drey/core/domain/community-vault/sale-contracts';
-import { assertCommunityVaultPolicy } from '@drey/core/domain/community-vault/policy';
+  CommunityVaultPositionTransferBuyerV1,
+  CommunityVaultPositionTransferPlanV1,
+  CommunityVaultPositionTransferPreflightV1,
+  CommunityVaultPositionTransferSellerAuthorizationV1,
+} from '@drey/core/domain/community-vault/position-transfer-contracts';
 import type { CommunityVaultPolicyV1 } from '@drey/core/domain/community-vault/contracts';
+import type { CommunityVaultSaleBuyerInputV1 } from '@drey/core/domain/community-vault/sale-contracts';
 import { scriptDustSats } from '@drey/core/domain/transactions/fees';
 import { estimateFeeRateSatPerVb, getBlockchainInfo, getTxOut, type TxOut } from '@/lib/bitcoind';
 import {
@@ -21,16 +21,14 @@ import {
   fetchOutputsBatch,
   type OrdOutputInfo,
 } from '@/lib/ord';
-import type { BuyerSession } from '@/lib/buyerSession';
-import { CommunityPurchaseError, getCommunityCampaign } from './store';
+import { CommunityPurchaseError } from './store';
 import { installPublicPolicyCrypto } from './dreyCrypto';
 
 const MAX_INPUTS = 499;
 const RBF_SEQUENCE = 0xffff_fffd;
-const OFFER_DURATIONS_HOURS = new Set([6, 24, 72]);
 const MAINNET_TX_WEIGHT_LIMIT = 400_000;
 
-export type SaleOfferDependencies = {
+export type PositionTransferOfferDependencies = {
   fetchAddressOutputs: typeof fetchAddressCardinalOutputs;
   fetchOutputs: typeof fetchOutputsBatch;
   fetchInscription: typeof fetchInscriptionDetail;
@@ -38,10 +36,9 @@ export type SaleOfferDependencies = {
   getChainInfo: typeof getBlockchainInfo;
   estimateFeeRate: typeof estimateFeeRateSatPerVb;
   nowMs(): number;
-  random32(): Buffer;
 };
 
-const dependencies: SaleOfferDependencies = {
+const dependencies: PositionTransferOfferDependencies = {
   fetchAddressOutputs: fetchAddressCardinalOutputs,
   fetchOutputs: fetchOutputsBatch,
   fetchInscription: fetchInscriptionDetail,
@@ -49,143 +46,117 @@ const dependencies: SaleOfferDependencies = {
   getChainInfo: getBlockchainInfo,
   estimateFeeRate: estimateFeeRateSatPerVb,
   nowMs: Date.now,
-  random32: () => randomBytes(32),
 };
 
-export type PreparedCommunitySaleOffer = {
-  policy: CommunityVaultPolicyV1;
-  plan: CommunityVaultSalePlanV1;
-  preflight: CommunityVaultSalePreflightV1;
-  signingPsbtBase64: string;
-  buyerInputIndexes: number[];
-  feeRateSatPerVb: number;
-};
-
-export async function prepareCommunitySaleOffer(args: {
+export async function prepareCommunityPositionTransfer(args: {
   campaignId: string;
-  session: BuyerSession;
-  grossOfferSats: string;
-  durationHours: number;
-  deps?: Partial<SaleOfferDependencies>;
-}): Promise<PreparedCommunitySaleOffer> {
+  inscriptionId: string;
+  currentOutpoint: string;
+  currentPolicy: CommunityVaultPolicyV1;
+  nextPolicy: CommunityVaultPolicyV1;
+  transferId: string;
+  sellerOwnerId: string;
+  buyer: CommunityVaultPositionTransferBuyerV1;
+  sellerPriceSats: string;
+  expiresAtMs: string;
+  sellerAuthorization: {
+    payload: CommunityVaultPositionTransferSellerAuthorizationV1;
+    signature: string;
+  };
+  deps?: Partial<PositionTransferOfferDependencies>;
+}): Promise<{
+  plan: CommunityVaultPositionTransferPlanV1;
+  preflight: CommunityVaultPositionTransferPreflightV1;
+  signingPsbtHex: string;
+}> {
   installPublicPolicyCrypto();
   const deps = { ...dependencies, ...args.deps };
-  const campaign = getCommunityCampaign(args.campaignId);
-  if (
-    !campaign ||
-    campaign.status !== 'held' ||
-    !campaign.policy ||
-    campaign.sale ||
-    campaign.ownershipChange
-  ) {
+  const paymentScript = outputScript(args.buyer.payoutAddress);
+  if (paymentScript !== args.buyer.payoutScriptPubKeyHex) {
     throw new CommunityPurchaseError(
-      'sale-offer-unavailable',
-      campaign?.sale || campaign?.ownershipChange
-        ? 'This OMB already has an ownership action in progress.'
-        : 'This OMB is not ready for offers.',
+      'buyer-address-changed',
+      'The buyer payment address changed.',
       409
     );
   }
-  if (!args.session.pay_addr) {
-    throw new CommunityPurchaseError(
-      'payment-address-required',
-      'Reconnect Drey with a payment address before making an offer.',
-      409
-    );
-  }
-  if (!/^(?:[1-9][0-9]*)$/u.test(args.grossOfferSats)) {
-    throw new CommunityPurchaseError('offer-amount-invalid', 'Enter an offer greater than zero.');
-  }
-  if (!OFFER_DURATIONS_HOURS.has(args.durationHours)) {
-    throw new CommunityPurchaseError(
-      'offer-duration-invalid',
-      'Choose 6 hours, 24 hours, or 3 days.'
-    );
-  }
-
-  const policy = campaign.policy as CommunityVaultPolicyV1;
-  assertCommunityVaultPolicy(policy);
-  const paymentScript = outputScript(args.session.pay_addr);
-  const destinationScript = outputScript(args.session.ord_addr);
-  const [asset, inscription, addressOutputs, feeRateSatPerVb] = await Promise.all([
-    exactTxOut(campaign.currentOutpoint, deps.fetchTxOut),
-    deps.fetchInscription(campaign.inscriptionId),
-    deps.fetchAddressOutputs(args.session.pay_addr),
+  const [asset, inscription, outputs, feeRateSatPerVb] = await Promise.all([
+    exactTxOut(args.currentOutpoint, deps.fetchTxOut),
+    deps.fetchInscription(args.inscriptionId),
+    deps.fetchAddressOutputs(args.buyer.payoutAddress),
     deps.estimateFeeRate(),
   ]);
   if (
     asset.confirmations < 1 ||
-    asset.scriptPubKey.hex.toLowerCase() !== policy.scriptPubKeyHex ||
-    inscription.output !== campaign.currentOutpoint ||
-    !inscription.satpoint?.startsWith(`${campaign.currentOutpoint}:`)
+    asset.scriptPubKey.hex.toLowerCase() !== args.currentPolicy.scriptPubKeyHex ||
+    inscription.output !== args.currentOutpoint ||
+    !inscription.satpoint?.startsWith(`${args.currentOutpoint}:`)
   ) {
     throw new CommunityPurchaseError(
       'vault-output-changed',
-      'The held OMB changed before the offer could be prepared.',
+      'The held OMB changed before the transfer could be prepared.',
       409
     );
   }
   const inscriptionOffset = parseSatpointOffset(inscription.satpoint);
   const vaultValueSats = btcToSats(asset.value);
   if (inscriptionOffset >= BigInt(vaultValueSats)) {
-    throw new CommunityPurchaseError(
-      'ordinal-route-invalid',
-      'The OMB satpoint is outside its vault output.',
-      409
-    );
+    throw new CommunityPurchaseError('ordinal-route-invalid', 'The OMB satpoint is invalid.', 409);
   }
-
   const candidates = await verifiedFundingCandidates({
-    outputs: addressOutputs,
+    outputs,
     expectedScript: paymentScript,
     fetchTxOut: deps.fetchTxOut,
   });
-  const selected = selectCommunitySaleFunding({
-    policy,
+  const seller = args.currentPolicy.owners.find(owner => owner.ownerId === args.sellerOwnerId);
+  if (!seller)
+    throw new CommunityPurchaseError('seller-missing', 'The seller is no longer an owner.', 409);
+  const selected = selectPositionTransferFunding({
+    policy: args.currentPolicy,
     candidates,
-    grossOfferSats: args.grossOfferSats,
-    destinationScriptPubKeyHex: destinationScript,
+    sellerPriceSats: args.sellerPriceSats,
+    nextVaultScriptPubKeyHex: args.nextPolicy.scriptPubKeyHex,
+    sellerPayoutScriptPubKeyHex: seller.payoutScriptPubKeyHex,
     changeScriptPubKeyHex: paymentScript,
     feeRateSatPerVb,
   });
-  const createdAtMs = deps.nowMs();
-  const plan = createCommunityVaultSalePlan({
-    policy,
-    vaultOutpoint: parseOutpoint(campaign.currentOutpoint),
-    offerId: deps.random32().toString('hex'),
-    buyerId: buyerId(args.session.ord_addr),
-    nonceHex: deps.random32().toString('hex'),
-    createdAtMs: String(createdAtMs),
-    expiresAtMs: String(createdAtMs + args.durationHours * 60 * 60 * 1_000),
+  const nowMs = deps.nowMs();
+  const plan = createCommunityVaultPositionTransferPlan({
+    currentPolicy: args.currentPolicy,
+    nextPolicy: args.nextPolicy,
+    transferId: args.transferId,
+    vaultOutpoint: parseOutpoint(args.currentOutpoint),
     vaultValueSats,
     inscriptionInputOffsetSats: inscriptionOffset.toString(),
     postageSats: (BigInt(vaultValueSats) - inscriptionOffset).toString(),
-    grossOfferSats: args.grossOfferSats,
+    sellerOwnerId: args.sellerOwnerId,
+    buyer: args.buyer,
+    sellerPriceSats: args.sellerPriceSats,
     settlementFeeSats: selected.feeSats,
-    buyerDestinationAddress: args.session.ord_addr,
-    buyerDestinationScriptPubKeyHex: destinationScript,
     buyerInputs: selected.inputs,
     buyerChange: selected.changeSats
       ? { valueSats: selected.changeSats, scriptPubKeyHex: paymentScript }
       : null,
+    createdAtMs: String(nowMs),
+    expiresAtMs: args.expiresAtMs,
+    sellerAuthorization: args.sellerAuthorization,
   });
-  const preflight = await refreshCommunitySalePlanPreflight({ policy, plan, deps });
-  const signingPsbtHex = constructCommunityVaultSalePsbt(policy, plan);
+  const preflight = await refreshCommunityPositionTransferPreflight({
+    currentPolicy: args.currentPolicy,
+    plan,
+    deps,
+  });
   return {
-    policy,
     plan,
     preflight,
-    signingPsbtBase64: Buffer.from(signingPsbtHex, 'hex').toString('base64'),
-    buyerInputIndexes: plan.buyerInputs.map((_input, index) => index + 1),
-    feeRateSatPerVb,
+    signingPsbtHex: constructCommunityVaultPositionTransferPsbt(args.currentPolicy, plan),
   };
 }
 
-export async function refreshCommunitySalePlanPreflight(args: {
-  policy: CommunityVaultPolicyV1;
-  plan: CommunityVaultSalePlanV1;
-  deps?: Partial<SaleOfferDependencies>;
-}): Promise<CommunityVaultSalePreflightV1> {
+export async function refreshCommunityPositionTransferPreflight(args: {
+  currentPolicy: CommunityVaultPolicyV1;
+  plan: CommunityVaultPositionTransferPlanV1;
+  deps?: Partial<PositionTransferOfferDependencies>;
+}): Promise<CommunityVaultPositionTransferPreflightV1> {
   const deps = { ...dependencies, ...args.deps };
   const planned = args.plan.spendPlan.inputs;
   const outpoints = planned.map(input => `${input.txid}:${input.vout}`);
@@ -206,8 +177,7 @@ export async function refreshCommunitySalePlanPreflight(args: {
     const outpoint = outpoints[inputIndex]!;
     const ordOutput = ordByOutpoint.get(outpoint);
     const txOutput = txOutputs[inputIndex] as TxOut | null;
-    const expectedInscriptions =
-      inputIndex === args.plan.spendPlan.vaultInputIndex ? [args.plan.inscriptionId] : [];
+    const inscriptions = inputIndex === 0 ? [args.currentPolicy.inscriptionId] : [];
     if (
       !ordOutput ||
       !txOutput ||
@@ -218,14 +188,14 @@ export async function refreshCommunitySalePlanPreflight(args: {
       btcToSats(txOutput.value) !== input.valueSats ||
       ordOutput.scriptPubKeyHex !== input.scriptPubKeyHex ||
       txOutput.scriptPubKey.hex.toLowerCase() !== input.scriptPubKeyHex ||
-      JSON.stringify(ordOutput.inscriptionIds) !== JSON.stringify(expectedInscriptions) ||
+      JSON.stringify(ordOutput.inscriptionIds) !== JSON.stringify(inscriptions) ||
       ordOutput.runeIds.length > 0
     ) {
       throw new CommunityPurchaseError(
-        'sale-funds-changed',
+        'position-transfer-funds-changed',
         inputIndex === 0
-          ? 'The held OMB changed. This offer cannot continue.'
-          : 'The buyer funds moved or are no longer clean. This offer is closed.',
+          ? 'The held OMB changed. This transfer cannot continue.'
+          : 'The buyer funds moved or are no longer clean. This transfer is closed.',
         409
       );
     }
@@ -236,7 +206,7 @@ export async function refreshCommunitySalePlanPreflight(args: {
       valueSats: input.valueSats,
       scriptPubKeyHex: input.scriptPubKeyHex,
       unspent: true,
-      inscriptionIds: expectedInscriptions,
+      inscriptionIds: inscriptions,
       runeIds: [],
     };
   });
@@ -251,34 +221,25 @@ export async function refreshCommunitySalePlanPreflight(args: {
   };
 }
 
-export type SaleFundingSelection = {
-  inputs: CommunityVaultSaleBuyerInputV1[];
-  feeSats: string;
-  changeSats: string | null;
-  vsize: number;
-};
-
-export function selectCommunitySaleFunding(args: {
+export function selectPositionTransferFunding(args: {
   policy: CommunityVaultPolicyV1;
   candidates: CommunityVaultSaleBuyerInputV1[];
-  grossOfferSats: string;
-  destinationScriptPubKeyHex: string;
+  sellerPriceSats: string;
+  nextVaultScriptPubKeyHex: string;
+  sellerPayoutScriptPubKeyHex: string;
   changeScriptPubKeyHex: string;
   feeRateSatPerVb: number;
-}): SaleFundingSelection {
-  const gross = BigInt(args.grossOfferSats);
-  if (gross <= 0n || !Number.isFinite(args.feeRateSatPerVb) || args.feeRateSatPerVb < 1) {
-    throw new CommunityPurchaseError(
-      'offer-amount-invalid',
-      'The offer amount or fee rate is invalid.'
-    );
+}): { inputs: CommunityVaultSaleBuyerInputV1[]; feeSats: string; changeSats: string | null } {
+  const price = BigInt(args.sellerPriceSats);
+  if (price <= 0n || !Number.isFinite(args.feeRateSatPerVb) || args.feeRateSatPerVb < 1) {
+    throw new CommunityPurchaseError('transfer-price-invalid', 'The price or fee rate is invalid.');
   }
   const candidates = [...args.candidates]
-    .sort((left, right) => {
-      const valueOrder = BigInt(right.valueSats) - BigInt(left.valueSats);
-      return valueOrder > 0n
+    .toSorted((left, right) => {
+      const order = BigInt(right.valueSats) - BigInt(left.valueSats);
+      return order > 0n
         ? 1
-        : valueOrder < 0n
+        : order < 0n
           ? -1
           : `${left.txid}:${left.vout}`.localeCompare(`${right.txid}:${right.vout}`);
     })
@@ -288,62 +249,49 @@ export function selectCommunitySaleFunding(args: {
   for (const candidate of candidates) {
     selected.push(candidate);
     total += BigInt(candidate.valueSats);
-    const withChangeVsize = estimateCommunitySaleVsize({
-      policy: args.policy,
+    const withChange = estimatePositionTransferVsize({
+      ...args,
       buyerInputs: selected,
-      destinationScriptPubKeyHex: args.destinationScriptPubKeyHex,
-      changeScriptPubKeyHex: args.changeScriptPubKeyHex,
+      includeChange: true,
     });
-    const withChangeFee = feeForVsize(withChangeVsize, args.feeRateSatPerVb);
-    if (total >= gross + withChangeFee) {
-      const change = total - gross - withChangeFee;
-      if (change >= scriptDustSats(args.changeScriptPubKeyHex)) {
-        return {
-          inputs: selected,
-          feeSats: withChangeFee.toString(),
-          changeSats: change.toString(),
-          vsize: withChangeVsize,
-        };
-      }
+    const withChangeFee = feeForVsize(withChange, args.feeRateSatPerVb);
+    const change = total - price - withChangeFee;
+    if (change >= scriptDustSats(args.changeScriptPubKeyHex)) {
+      return { inputs: selected, feeSats: withChangeFee.toString(), changeSats: change.toString() };
     }
-    const withoutChangeVsize = estimateCommunitySaleVsize({
-      policy: args.policy,
+    const withoutChange = estimatePositionTransferVsize({
+      ...args,
       buyerInputs: selected,
-      destinationScriptPubKeyHex: args.destinationScriptPubKeyHex,
+      includeChange: false,
     });
-    const withoutChangeFee = feeForVsize(withoutChangeVsize, args.feeRateSatPerVb);
-    const remainder = total - gross;
+    const withoutChangeFee = feeForVsize(withoutChange, args.feeRateSatPerVb);
+    const remainder = total - price;
     if (
       remainder >= withoutChangeFee &&
       remainder < withoutChangeFee + scriptDustSats(args.changeScriptPubKeyHex)
     ) {
-      return {
-        inputs: selected,
-        feeSats: remainder.toString(),
-        changeSats: null,
-        vsize: withoutChangeVsize,
-      };
+      return { inputs: selected, feeSats: remainder.toString(), changeSats: null };
     }
   }
   throw new CommunityPurchaseError(
-    'offer-funds-insufficient',
-    'Drey does not have enough confirmed, clean BTC for this offer and its network fee.',
+    'transfer-funds-insufficient',
+    'Drey does not have enough confirmed, clean BTC for the price and network fee.',
     409
   );
 }
 
-export function estimateCommunitySaleVsize(args: {
+function estimatePositionTransferVsize(args: {
   policy: CommunityVaultPolicyV1;
   buyerInputs: CommunityVaultSaleBuyerInputV1[];
-  destinationScriptPubKeyHex: string;
-  changeScriptPubKeyHex?: string;
+  nextVaultScriptPubKeyHex: string;
+  sellerPayoutScriptPubKeyHex: string;
+  changeScriptPubKeyHex: string;
+  includeChange: boolean;
 }): number {
   const scripts = [
-    args.destinationScriptPubKeyHex,
-    ...args.policy.owners
-      .toSorted((left, right) => left.capTableOrder - right.capTableOrder)
-      .map(owner => owner.payoutScriptPubKeyHex),
-    ...(args.changeScriptPubKeyHex ? [args.changeScriptPubKeyHex] : []),
+    args.nextVaultScriptPubKeyHex,
+    args.sellerPayoutScriptPubKeyHex,
+    ...(args.includeChange ? [args.changeScriptPubKeyHex] : []),
   ];
   const inputCount = 1 + args.buyerInputs.length;
   const strippedBytes =
@@ -360,7 +308,7 @@ export function estimateCommunitySaleVsize(args: {
   const controlBlockBytes = args.policy.controlBlockHex.length / 2;
   const vaultWitnessBytes =
     compactSizeBytes(102) +
-    69 * (1 + 64) +
+    69 * 65 +
     31 +
     compactSizeBytes(tapscriptBytes) +
     tapscriptBytes +
@@ -373,8 +321,8 @@ export function estimateCommunitySaleVsize(args: {
   const weight = strippedBytes * 4 + 2 + vaultWitnessBytes + buyerWitnessBytes;
   if (weight > MAINNET_TX_WEIGHT_LIMIT) {
     throw new CommunityPurchaseError(
-      'sale-transaction-too-large',
-      'This offer needs too many funding inputs.',
+      'transfer-too-large',
+      'This transfer needs too many funding inputs.',
       409
     );
   }
@@ -408,9 +356,9 @@ async function verifiedFundingCandidates(args: {
       )
         return null;
       const scriptKind = /^0014[0-9a-f]{40}$/u.test(args.expectedScript)
-        ? 'p2wpkh'
+        ? ('p2wpkh' as const)
         : /^5120[0-9a-f]{64}$/u.test(args.expectedScript)
-          ? 'p2tr'
+          ? ('p2tr' as const)
           : null;
       if (!scriptKind) return null;
       return {
@@ -431,7 +379,7 @@ async function exactTxOut(outpoint: string, fetchTxOut: typeof getTxOut): Promis
   const { txid, vout } = parseOutpoint(outpoint);
   const output = await fetchTxOut(txid, vout);
   if (!output)
-    throw new CommunityPurchaseError('output-spent', 'The required output is already spent.', 409);
+    throw new CommunityPurchaseError('output-spent', 'The required output is spent.', 409);
   return output;
 }
 
@@ -471,10 +419,6 @@ function btcToSats(value: number): string {
     );
   }
   return String(sats);
-}
-
-function buyerId(ordAddress: string): string {
-  return `buyer-${createHash('sha256').update(ordAddress).digest('hex').slice(0, 24)}`;
 }
 
 function feeForVsize(vsize: number, feeRateSatPerVb: number): bigint {

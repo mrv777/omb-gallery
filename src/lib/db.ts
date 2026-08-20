@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_BRAVOCADO_DISTRIBUTION_LIST, SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 43;
+const SCHEMA_VERSION = 44;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -175,6 +175,7 @@ function migrate(db: DB): void {
         upgradeV40ToV41(db);
         upgradeV41ToV42(db);
         upgradeV42ToV43(db);
+        upgradeV43ToV44(db);
       } else {
         initSchemaLatest(db);
       }
@@ -221,6 +222,7 @@ function migrate(db: DB): void {
       if (current < 41) upgradeV40ToV41(db);
       if (current < 42) upgradeV41ToV42(db);
       if (current < 43) upgradeV42ToV43(db);
+      if (current < 44) upgradeV43ToV44(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -710,8 +712,11 @@ function initSchemaLatest(db: DB): void {
       policy_id              TEXT,
       vault_address          TEXT,
       policy_json            TEXT,
+      active_operation_kind  TEXT CHECK (active_operation_kind IS NULL OR active_operation_kind IN ('sale','position-transfer')),
+      active_operation_id    TEXT,
       created_at             INTEGER NOT NULL,
-      updated_at             INTEGER NOT NULL
+      updated_at             INTEGER NOT NULL,
+      CHECK ((active_operation_kind IS NULL) = (active_operation_id IS NULL))
     );
     CREATE INDEX IF NOT EXISTS idx_community_campaign_status
       ON community_campaigns (status, opened_at DESC);
@@ -843,6 +848,72 @@ function initSchemaLatest(db: DB): void {
       PRIMARY KEY (campaign_id, owner_id),
       UNIQUE (campaign_id, psbt_hash),
       UNIQUE (campaign_id, approval_nonce)
+    );
+
+    CREATE TABLE IF NOT EXISTS community_position_transfers (
+      id                              TEXT PRIMARY KEY,
+      campaign_id                     TEXT NOT NULL REFERENCES community_campaigns (id) ON DELETE CASCADE,
+      status                          TEXT NOT NULL CHECK (status IN ('invited','buyer-accepted','authorized','signing','ready','broadcast','confirmed','expired','cancelled','failed')),
+      previous_policy_id              TEXT NOT NULL,
+      previous_cap_table_hash         TEXT NOT NULL,
+      previous_cap_table_version      INTEGER NOT NULL,
+      previous_vault_outpoint         TEXT NOT NULL,
+      seller_participant_id           INTEGER NOT NULL REFERENCES community_participants (id),
+      seller_owner_id                 TEXT NOT NULL,
+      transferred_units_json          TEXT NOT NULL,
+      seller_price_sats               INTEGER NOT NULL CHECK (seller_price_sats > 0),
+      invite_token_hash               TEXT NOT NULL UNIQUE,
+      buyer_owner_id                  TEXT,
+      buyer_identity_key              TEXT,
+      buyer_identity_commitment_hex   TEXT,
+      buyer_wallet_address            TEXT,
+      buyer_payout_address            TEXT,
+      buyer_payout_script_pubkey_hex  TEXT,
+      buyer_matrica_user_id            TEXT,
+      buyer_matrica_username           TEXT,
+      buyer_qualifying_inscription_number INTEGER,
+      buyer_root_fingerprint_hex       TEXT,
+      buyer_campaign_xpub              TEXT,
+      buyer_inferred_links_json        TEXT,
+      buyer_acceptance_payload_json    TEXT,
+      buyer_acceptance_signature       TEXT,
+      buyer_acceptance_nonce           TEXT UNIQUE,
+      previous_policy_json             TEXT NOT NULL,
+      next_policy_json                 TEXT,
+      seller_authorization_payload_json TEXT,
+      seller_authorization_signature   TEXT,
+      seller_authorization_nonce        TEXT UNIQUE,
+      plan_json                         TEXT,
+      preflight_json                    TEXT,
+      signing_psbt_hex                  TEXT,
+      buyer_funded_psbt_hex             TEXT,
+      combined_psbt_hex                 TEXT,
+      transaction_hex                   TEXT,
+      txid                              TEXT,
+      expires_at_ms                     INTEGER NOT NULL,
+      created_at                        INTEGER NOT NULL,
+      updated_at                        INTEGER NOT NULL,
+      broadcast_at                      INTEGER,
+      confirmed_at                      INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_community_position_transfers_campaign
+      ON community_position_transfers (campaign_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_community_position_transfers_status
+      ON community_position_transfers (status, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS community_position_transfer_signatures (
+      transfer_id          TEXT NOT NULL REFERENCES community_position_transfers (id) ON DELETE CASCADE,
+      owner_id             TEXT NOT NULL,
+      psbt_hash            TEXT NOT NULL,
+      signed_psbt_hex      TEXT NOT NULL,
+      signed_units_json    TEXT NOT NULL,
+      approval_payload_json TEXT NOT NULL,
+      approval_signature   TEXT NOT NULL,
+      approval_nonce       TEXT NOT NULL,
+      created_at           INTEGER NOT NULL,
+      PRIMARY KEY (transfer_id, owner_id),
+      UNIQUE (transfer_id, psbt_hash),
+      UNIQUE (transfer_id, approval_nonce)
     );
   `);
 }
@@ -2268,6 +2339,80 @@ function upgradeV42ToV43(db: DB): void {
       PRIMARY KEY (campaign_id, owner_id),
       UNIQUE (campaign_id, psbt_hash),
       UNIQUE (campaign_id, approval_nonce)
+    );
+  `);
+}
+
+function upgradeV43ToV44(db: DB): void {
+  db.exec(`
+    ALTER TABLE community_campaigns ADD COLUMN active_operation_kind TEXT
+      CHECK (active_operation_kind IS NULL OR active_operation_kind IN ('sale','position-transfer'));
+    ALTER TABLE community_campaigns ADD COLUMN active_operation_id TEXT;
+
+    CREATE TABLE IF NOT EXISTS community_position_transfers (
+      id                              TEXT PRIMARY KEY,
+      campaign_id                     TEXT NOT NULL REFERENCES community_campaigns (id) ON DELETE CASCADE,
+      status                          TEXT NOT NULL CHECK (status IN ('invited','buyer-accepted','authorized','signing','ready','broadcast','confirmed','expired','cancelled','failed')),
+      previous_policy_id              TEXT NOT NULL,
+      previous_cap_table_hash         TEXT NOT NULL,
+      previous_cap_table_version      INTEGER NOT NULL,
+      previous_vault_outpoint         TEXT NOT NULL,
+      seller_participant_id           INTEGER NOT NULL REFERENCES community_participants (id),
+      seller_owner_id                 TEXT NOT NULL,
+      transferred_units_json          TEXT NOT NULL,
+      seller_price_sats               INTEGER NOT NULL CHECK (seller_price_sats > 0),
+      invite_token_hash               TEXT NOT NULL UNIQUE,
+      buyer_owner_id                  TEXT,
+      buyer_identity_key              TEXT,
+      buyer_identity_commitment_hex   TEXT,
+      buyer_wallet_address            TEXT,
+      buyer_payout_address            TEXT,
+      buyer_payout_script_pubkey_hex  TEXT,
+      buyer_matrica_user_id            TEXT,
+      buyer_matrica_username           TEXT,
+      buyer_qualifying_inscription_number INTEGER,
+      buyer_root_fingerprint_hex       TEXT,
+      buyer_campaign_xpub              TEXT,
+      buyer_inferred_links_json        TEXT,
+      buyer_acceptance_payload_json    TEXT,
+      buyer_acceptance_signature       TEXT,
+      buyer_acceptance_nonce           TEXT UNIQUE,
+      previous_policy_json             TEXT NOT NULL,
+      next_policy_json                 TEXT,
+      seller_authorization_payload_json TEXT,
+      seller_authorization_signature   TEXT,
+      seller_authorization_nonce        TEXT UNIQUE,
+      plan_json                         TEXT,
+      preflight_json                    TEXT,
+      signing_psbt_hex                  TEXT,
+      buyer_funded_psbt_hex             TEXT,
+      combined_psbt_hex                 TEXT,
+      transaction_hex                   TEXT,
+      txid                              TEXT,
+      expires_at_ms                     INTEGER NOT NULL,
+      created_at                        INTEGER NOT NULL,
+      updated_at                        INTEGER NOT NULL,
+      broadcast_at                      INTEGER,
+      confirmed_at                      INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_community_position_transfers_campaign
+      ON community_position_transfers (campaign_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_community_position_transfers_status
+      ON community_position_transfers (status, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS community_position_transfer_signatures (
+      transfer_id          TEXT NOT NULL REFERENCES community_position_transfers (id) ON DELETE CASCADE,
+      owner_id             TEXT NOT NULL,
+      psbt_hash            TEXT NOT NULL,
+      signed_psbt_hex      TEXT NOT NULL,
+      signed_units_json    TEXT NOT NULL,
+      approval_payload_json TEXT NOT NULL,
+      approval_signature   TEXT NOT NULL,
+      approval_nonce       TEXT NOT NULL,
+      created_at           INTEGER NOT NULL,
+      PRIMARY KEY (transfer_id, owner_id),
+      UNIQUE (transfer_id, psbt_hash),
+      UNIQUE (transfer_id, approval_nonce)
     );
   `);
 }

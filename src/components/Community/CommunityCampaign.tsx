@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import SafeImg from '@/components/SafeImg';
 import { useWallet } from '@/components/wallet/WalletProvider';
 import {
   DREY_COMMUNITY_UPGRADE_MESSAGE,
   isDreyCommunityOffersSupported,
+  isDreyCommunityPositionTransferSupported,
   isDreyCommunitySupported,
   openDreyCommunitySetup,
 } from '@/lib/wallet/satsConnect';
@@ -18,10 +19,12 @@ import {
   type CommunityCampaignView,
   type CommunityEnrollmentV1,
   type CommunityPreparedSaleOffer,
+  type CommunityPositionTransferOwnerView,
   type ConfirmReadinessPayloadV1,
   type CreateSaleOfferPayloadV1,
   type ReserveUnitsPayloadV1,
 } from '@/lib/community-purchases/contracts';
+import { communityVaultPositionTransferSellerMessage } from '@drey/core/domain/community-vault/position-transfer';
 import { formatBtcCompact, formatTimeUntil, truncateAddr } from '@/lib/format';
 import { lookupInscription } from '@/lib/inscriptionLookup';
 import {
@@ -58,6 +61,11 @@ export default function CommunityCampaign({
   const [funding, setFunding] = useState('');
   const [offerBtc, setOfferBtc] = useState('');
   const [offerDuration, setOfferDuration] = useState('24');
+  const [transferBtc, setTransferBtc] = useState('');
+  const [privateTransferLink, setPrivateTransferLink] = useState<string | null>(null);
+  const [ownerTransfer, setOwnerTransfer] = useState<CommunityPositionTransferOwnerView | null>(
+    null
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -85,9 +93,34 @@ export default function CommunityCampaign({
     !campaign.sale.signedOwnerIds.includes(me.ownerId);
   const dreyReady = wallet ? isDreyCommunitySupported(wallet) : false;
   const dreyOffersReady = wallet ? isDreyCommunityOffersSupported(wallet) : false;
+  const dreyTransferReady = wallet ? isDreyCommunityPositionTransferSupported(wallet) : false;
   const progressLabel = communityProgressLabel(campaign.status);
   const joinEnrollmentLinked =
     parseCommunityEnrollmentFor(enrollmentText, campaign.id, ownerId) !== null;
+  const canCreatePositionTransfer =
+    !!privateTransferLink ||
+    (campaign.status === 'held' &&
+      !!me &&
+      !me.isCreator &&
+      !campaign.sale &&
+      !campaign.ownershipChange);
+  const loadOwnerTransfer = useCallback(async () => {
+    if (!wallet || !campaign.ownershipChange) return;
+    const response = await fetch(`/api/community/campaigns/${campaign.id}/position-transfers`, {
+      cache: 'no-store',
+    });
+    const json = (await response.json().catch(() => null)) as {
+      transfer?: CommunityPositionTransferOwnerView;
+    } | null;
+    if (response.ok && json?.transfer) setOwnerTransfer(json.transfer);
+  }, [campaign.id, campaign.ownershipChange, wallet]);
+
+  useEffect(() => {
+    void loadOwnerTransfer();
+    if (!campaign.ownershipChange) return;
+    const timer = window.setInterval(() => void loadOwnerTransfer(), 20_000);
+    return () => window.clearInterval(timer);
+  }, [campaign.ownershipChange, loadOwnerTransfer]);
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pb-10 sm:px-6">
@@ -254,7 +287,23 @@ export default function CommunityCampaign({
           {canApprove && <AcquisitionPanel />}
           {canApproveSale && <SalePanel />}
           {campaign.sale && !canApproveSale && <SaleStatus />}
-          {campaign.status === 'held' && !campaign.sale && <MakeOfferPanel />}
+          {campaign.ownershipChange && ownerTransfer && !privateTransferLink && (
+            <PositionTransferOwnerPanel />
+          )}
+          {campaign.ownershipChange && !ownerTransfer && !privateTransferLink && (
+            <div className="border border-ink-2 bg-ink-1 p-4">
+              <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-accent-orange">
+                Ownership change in progress
+              </div>
+              <p className="mt-2 text-xs leading-relaxed text-bone-dim">
+                The public cap table stays unchanged until Bitcoin confirms the new vault.
+              </p>
+            </div>
+          )}
+          {canCreatePositionTransfer && <TransferPositionPanel />}
+          {campaign.status === 'held' && !campaign.sale && !campaign.ownershipChange && !me && (
+            <MakeOfferPanel />
+          )}
           {campaign.acquisition && !canApprove && !campaign.sale && campaign.status !== 'held' && (
             <AcquisitionStatus />
           )}
@@ -684,6 +733,131 @@ export default function CommunityCampaign({
     );
   }
 
+  function TransferPositionPanel() {
+    return (
+      <div className="border border-accent-orange/50 bg-ink-1 p-4">
+        <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-accent-orange">
+          Your complete {me!.allocatedUnits.length}% position
+        </div>
+        <div className="mt-1 font-mono text-sm uppercase tracking-[0.1em] text-bone">
+          Transfer privately
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-bone-dim">
+          Set one price and share one private 24-hour link. Units cannot be split. The cap table
+          changes only after 69 unit approvals and a Bitcoin confirmation.
+        </p>
+        {!dreyTransferReady && (
+          <p className="mt-3 border border-accent-orange/50 p-3 font-mono text-[9px] uppercase leading-relaxed text-accent-orange">
+            {DREY_COMMUNITY_UPGRADE_MESSAGE}
+          </p>
+        )}
+        {!privateTransferLink && (
+          <Field
+            className="mt-4"
+            label="price · BTC"
+            value={transferBtc}
+            inputMode="decimal"
+            placeholder="0.00"
+            onChange={setTransferBtc}
+          />
+        )}
+        {privateTransferLink && (
+          <div className="mt-4 border border-accent-green/50 p-3">
+            <div className="font-mono text-[9px] uppercase text-accent-green">
+              Private link created
+            </div>
+            <p className="mt-2 break-all font-mono text-[9px] text-bone-dim">
+              {privateTransferLink}
+            </p>
+            <button
+              type="button"
+              onClick={() => void copyPrivateTransferLink()}
+              className="mt-3 h-9 border border-bone px-3 font-mono text-[9px] uppercase text-bone"
+            >
+              Copy private link
+            </button>
+          </div>
+        )}
+        <Feedback />
+        {!privateTransferLink && (
+          <button
+            type="button"
+            disabled={busy || !dreyTransferReady}
+            onClick={() => void createPositionTransfer()}
+            className="mt-4 h-10 w-full border border-accent-orange bg-accent-orange font-mono text-[10px] uppercase tracking-[0.1em] text-ink-0 disabled:opacity-40"
+          >
+            {busy ? 'signing…' : 'Create private link'}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  function PositionTransferOwnerPanel() {
+    const transfer = ownerTransfer!;
+    const approved = transfer.signedOwnerIds.includes(me!.ownerId);
+    const canAuthorize =
+      transfer.status === 'buyer-accepted' &&
+      transfer.sellerOwnerId === me!.ownerId &&
+      !!transfer.sellerAuthorizationPayload;
+    const canApproveTransfer =
+      transfer.status === 'signing' &&
+      !approved &&
+      !!transfer.ownerContext &&
+      !!transfer.signingPsbtBase64;
+    return (
+      <div className="border border-accent-green/50 bg-ink-1 p-4">
+        <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-accent-green">
+          Ownership transfer
+        </div>
+        <div className="mt-1 font-mono text-sm uppercase tracking-[0.1em] text-bone">
+          {canAuthorize
+            ? 'Confirm the buyer'
+            : canApproveTransfer
+              ? 'Approve in Drey'
+              : transfer.status === 'ready'
+                ? 'Ready for broadcast'
+                : transfer.status === 'broadcast'
+                  ? 'Waiting for confirmation'
+                  : approved
+                    ? 'Your approval is in'
+                    : 'In progress'}
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-bone-dim">
+          {transfer.transferredUnits.length}% moves as one position. The seller receives{' '}
+          {formatBtcCompact(Number(transfer.sellerPriceSats))} in the same transaction. Every other
+          position stays unchanged.
+        </p>
+        {transfer.status === 'signing' && (
+          <p className="mt-3 font-mono text-[9px] uppercase leading-relaxed text-bone-dim">
+            {transfer.signedUnitCount}/69 units approved · nothing broadcasts here
+          </p>
+        )}
+        {canAuthorize && (
+          <button
+            type="button"
+            disabled={busy || !dreyTransferReady}
+            onClick={() => void authorizePositionTransfer()}
+            className="mt-4 h-10 w-full border border-accent-orange bg-accent-orange font-mono text-[10px] uppercase tracking-[0.1em] text-ink-0 disabled:opacity-40"
+          >
+            {busy ? 'checking funds…' : 'Confirm buyer and price'}
+          </button>
+        )}
+        {canApproveTransfer && (
+          <button
+            type="button"
+            disabled={busy || !dreyTransferReady}
+            onClick={() => void approvePositionTransfer()}
+            className="mt-4 h-10 w-full border border-accent-green bg-accent-green font-mono text-[10px] uppercase tracking-[0.1em] text-ink-0 disabled:opacity-40"
+          >
+            {busy ? 'opening Drey…' : 'Review and approve'}
+          </button>
+        )}
+        <Feedback />
+      </div>
+    );
+  }
+
   function Feedback() {
     return (
       <>
@@ -1044,6 +1218,154 @@ export default function CommunityCampaign({
       setNotice('Offer funded. Owners can now review it.');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'The offer could not be completed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createPositionTransfer() {
+    setError(null);
+    setNotice(null);
+    if (!wallet || !me || !isDreyCommunityPositionTransferSupported(wallet)) {
+      return setError(DREY_COMMUNITY_UPGRADE_MESSAGE);
+    }
+    let sellerPriceSats: string;
+    try {
+      sellerPriceSats = btcTextToSats(transferBtc);
+    } catch (reason) {
+      return setError(reason instanceof Error ? reason.message : 'Enter a valid BTC price.');
+    }
+    setBusy(true);
+    try {
+      const now = Math.floor(Date.now() / 1_000);
+      const payload = {
+        protocol: COMMUNITY_PURCHASES_PROTOCOL,
+        version: 1 as const,
+        network: 'mainnet' as const,
+        action: 'create-position-transfer-invite' as const,
+        campaignId: campaign.id,
+        sellerOwnerId: me.ownerId,
+        sellerPriceSats,
+        expiresAt: now + 24 * 60 * 60,
+        nonce: newActionNonce(),
+      };
+      const signature = await signMessage(wallet.ordAddr, communityMessage(payload));
+      const response = await fetch(`/api/community/campaigns/${campaign.id}/position-transfers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payload, signature }),
+      });
+      const json = (await response.json().catch(() => null)) as {
+        campaign?: CommunityCampaignView;
+        private_url?: string;
+        error?: string;
+      } | null;
+      if (!response.ok || !json?.campaign || !json.private_url) {
+        throw new Error(json?.error ?? 'Could not create the private link.');
+      }
+      setCampaign(json.campaign);
+      setPrivateTransferLink(json.private_url);
+      setNotice('Private link created. Send it only to the intended buyer.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not create the private link.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyPrivateTransferLink() {
+    if (!privateTransferLink) return;
+    try {
+      await navigator.clipboard.writeText(privateTransferLink);
+      setNotice('Private link copied.');
+    } catch {
+      setError('Could not copy the link. Copy it from the box instead.');
+    }
+  }
+
+  async function authorizePositionTransfer() {
+    if (!wallet || !me || !ownerTransfer?.sellerAuthorizationPayload) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const signature = await signMessage(
+        me.payoutAddress,
+        communityVaultPositionTransferSellerMessage(ownerTransfer.sellerAuthorizationPayload)
+      );
+      const response = await fetch(
+        `/api/community/campaigns/${campaign.id}/position-transfers/${ownerTransfer.transferId}/authorize`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ signature }),
+        }
+      );
+      const json = (await response.json().catch(() => null)) as {
+        transfer?: CommunityPositionTransferOwnerView;
+        error?: string;
+      } | null;
+      if (!response.ok || !json?.transfer)
+        throw new Error(json?.error ?? 'Could not authorize the buyer.');
+      setOwnerTransfer(json.transfer);
+      setNotice('Buyer and price confirmed. The buyer can now fund the transfer.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not authorize the buyer.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approvePositionTransfer() {
+    if (!wallet || !me || !ownerTransfer?.ownerContext || !ownerTransfer.signingPsbtBase64) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const context = ownerTransfer.ownerContext;
+      const vaultInputIndex = context.plan.spendPlan.vaultInputIndex;
+      const signedPsbt = await signPsbt(
+        ownerTransfer.signingPsbtBase64,
+        { [wallet.ordAddr]: [vaultInputIndex] },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { role: 'owner', context }
+      );
+      const now = Math.floor(Date.now() / 1_000);
+      const payload = {
+        protocol: COMMUNITY_PURCHASES_PROTOCOL,
+        version: 1 as const,
+        network: 'mainnet' as const,
+        action: 'approve-position-transfer' as const,
+        campaignId: campaign.id,
+        transferId: ownerTransfer.transferId,
+        ownerId: me.ownerId,
+        capTableVersion: campaign.capTableVersion,
+        transferDigest: context.plan.transferDigest,
+        signedPsbtHash: await sha256Base64(signedPsbt),
+        approvedAt: now,
+        expiresAt: now + 10 * 60,
+        nonce: newActionNonce(),
+      };
+      const signature = await signMessage(wallet.ordAddr, communityMessage(payload));
+      const response = await fetch(
+        `/api/community/campaigns/${campaign.id}/position-transfers/${ownerTransfer.transferId}/approvals`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ payload, signature, signed_psbt: signedPsbt }),
+        }
+      );
+      const json = (await response.json().catch(() => null)) as {
+        transfer?: CommunityPositionTransferOwnerView;
+        error?: string;
+      } | null;
+      if (!response.ok || !json?.transfer)
+        throw new Error(json?.error ?? 'Transfer approval failed.');
+      setOwnerTransfer(json.transfer);
+      setNotice('Ownership transfer approval saved.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Transfer approval failed.');
     } finally {
       setBusy(false);
     }

@@ -79,6 +79,8 @@ export function publishCommunitySale(args: {
         policy_id: string | null;
         cap_table_hash: string | null;
         cap_table_version: number;
+        active_operation_kind: string | null;
+        active_operation_id: string | null;
       }
     | undefined;
   if (
@@ -142,9 +144,13 @@ export function publishCommunitySale(args: {
       409
     );
   }
-  const existing = db
+  let existing = db
     .prepare(`SELECT * FROM community_sales WHERE campaign_id = ?`)
     .get(campaign.id) as SaleRow | undefined;
+  if (existing && ['expired', 'failed'].includes(existing.status)) {
+    db.prepare(`DELETE FROM community_sales WHERE campaign_id = ?`).run(campaign.id);
+    existing = undefined;
+  }
   if (existing) {
     if (
       existing.offer_digest !== args.plan.offerDigest ||
@@ -156,13 +162,55 @@ export function publishCommunitySale(args: {
         409
       );
     }
-    db.prepare(
-      `UPDATE community_sales SET preflight_json = ?, updated_at = ? WHERE campaign_id = ?`
-    ).run(JSON.stringify(args.preflight), Math.floor(nowMs / 1000), campaign.id);
+    db.transaction(() => {
+      const operation = db
+        .prepare(
+          `SELECT active_operation_kind, active_operation_id FROM community_campaigns WHERE id = ?`
+        )
+        .get(campaign.id) as {
+        active_operation_kind: string | null;
+        active_operation_id: string | null;
+      };
+      if (operation.active_operation_kind === null) {
+        db.prepare(
+          `UPDATE community_campaigns SET active_operation_kind = 'sale', active_operation_id = ?, updated_at = ?
+           WHERE id = ? AND active_operation_kind IS NULL`
+        ).run(campaign.id, Math.floor(nowMs / 1000), campaign.id);
+      } else if (
+        operation.active_operation_kind !== 'sale' ||
+        operation.active_operation_id !== campaign.id
+      ) {
+        throw new CommunityPurchaseError(
+          'ownership-action-active',
+          'Another ownership action is already in progress.',
+          409
+        );
+      }
+      db.prepare(
+        `UPDATE community_sales SET preflight_json = ?, updated_at = ? WHERE campaign_id = ?`
+      ).run(JSON.stringify(args.preflight), Math.floor(nowMs / 1000), campaign.id);
+    })();
     return requireCampaign(campaign.id, Math.floor(nowMs / 1000));
   }
   const now = Math.floor(nowMs / 1000);
   db.transaction(() => {
+    const locked = db
+      .prepare(
+        `UPDATE community_campaigns
+       SET active_operation_kind = 'sale', active_operation_id = ?, updated_at = ?
+       WHERE id = ? AND status = 'held' AND (
+         active_operation_kind IS NULL OR
+         (active_operation_kind = 'sale' AND active_operation_id = ?)
+       )`
+      )
+      .run(campaign.id, now, campaign.id, campaign.id);
+    if (locked.changes !== 1) {
+      throw new CommunityPurchaseError(
+        'ownership-action-active',
+        'Another sale or ownership transfer is already in progress.',
+        409
+      );
+    }
     db.prepare(
       `INSERT INTO community_sales (
          campaign_id, offer_digest, plan_json, preflight_json, signing_psbt_hex,
@@ -242,6 +290,11 @@ export async function refreshCommunitySale(args: {
         db.prepare(
           `UPDATE community_sales SET status = 'failed', updated_at = ?
            WHERE campaign_id = ? AND status = 'signing'`
+        ).run(now, args.campaignId);
+        db.prepare(
+          `UPDATE community_campaigns
+           SET active_operation_kind = NULL, active_operation_id = NULL, updated_at = ?
+           WHERE id = ? AND active_operation_kind = 'sale'`
         ).run(now, args.campaignId);
         db.prepare(
           `INSERT INTO community_campaign_events
@@ -525,7 +578,8 @@ export async function confirmCommunitySaleSold(args: {
   db.transaction(() => {
     db.prepare(
       `UPDATE community_campaigns
-       SET status = 'sold', current_outpoint = ?, updated_at = ?
+       SET status = 'sold', current_outpoint = ?, active_operation_kind = NULL,
+           active_operation_id = NULL, updated_at = ?
        WHERE id = ? AND status = 'held'`
     ).run(expectedOutpoint, now, args.campaignId);
     db.prepare(
@@ -622,12 +676,18 @@ function validateApprovalPayload(payload: ApproveSalePayloadV1, campaignId: stri
 }
 
 function expireSale(campaignId: string, now: number) {
-  getDb()
-    .prepare(
+  const db = getDb();
+  db.transaction(() => {
+    db.prepare(
       `UPDATE community_sales SET status = 'expired', updated_at = ?
        WHERE campaign_id = ? AND status = 'signing'`
-    )
-    .run(now, campaignId);
+    ).run(now, campaignId);
+    db.prepare(
+      `UPDATE community_campaigns
+       SET active_operation_kind = NULL, active_operation_id = NULL, updated_at = ?
+       WHERE id = ? AND active_operation_kind = 'sale'`
+    ).run(now, campaignId);
+  })();
 }
 
 function base64PsbtToHex(value: string): string {

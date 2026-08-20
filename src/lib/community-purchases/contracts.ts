@@ -8,6 +8,15 @@ import type {
   CommunityVaultSaleBuyerProviderContextV1,
   CommunityVaultSaleProviderContextV1,
 } from '@drey/core/domain/community-vault/sale-provider';
+import type {
+  CommunityVaultPositionTransferPlanV1,
+  CommunityVaultPositionTransferPreflightV1,
+  CommunityVaultPositionTransferSellerAuthorizationV1,
+} from '@drey/core/domain/community-vault/position-transfer-contracts';
+import type {
+  CommunityVaultPositionTransferBuyerProviderContextV1,
+  CommunityVaultPositionTransferOwnerProviderContextV1,
+} from '@drey/core/domain/community-vault/position-transfer-provider';
 
 export const COMMUNITY_PURCHASES_TERMS_VERSION = 'omb-community-purchases-2026-08-18' as const;
 export const COMMUNITY_PURCHASES_PROTOCOL = 'omb-community-purchases' as const;
@@ -162,6 +171,52 @@ export type ApproveSalePayloadV1 = {
   nonce: string;
 };
 
+export type CreatePositionTransferInvitePayloadV1 = {
+  protocol: typeof COMMUNITY_PURCHASES_PROTOCOL;
+  version: 1;
+  network: 'mainnet';
+  action: 'create-position-transfer-invite';
+  campaignId: string;
+  sellerOwnerId: string;
+  sellerPriceSats: string;
+  expiresAt: number;
+  nonce: string;
+};
+
+export type AcceptPositionTransferPayloadV1 = {
+  protocol: typeof COMMUNITY_PURCHASES_PROTOCOL;
+  version: 1;
+  network: 'mainnet';
+  action: 'accept-position-transfer';
+  campaignId: string;
+  transferId: string;
+  buyerOwnerId: string;
+  payoutAddress: string;
+  qualifyingInscriptionNumber: number | null;
+  enrollment: CommunityEnrollmentV1;
+  recoveryConfirmed: true;
+  noAlternateIdentityAttestation: true;
+  identityDisclosureConsent: true;
+  expiresAt: number;
+  nonce: string;
+};
+
+export type ApprovePositionTransferPayloadV1 = {
+  protocol: typeof COMMUNITY_PURCHASES_PROTOCOL;
+  version: 1;
+  network: 'mainnet';
+  action: 'approve-position-transfer';
+  campaignId: string;
+  transferId: string;
+  ownerId: string;
+  capTableVersion: number;
+  transferDigest: string;
+  signedPsbtHash: string;
+  approvedAt: number;
+  expiresAt: number;
+  nonce: string;
+};
+
 export type CreateSaleOfferPayloadV1 = {
   protocol: typeof COMMUNITY_PURCHASES_PROTOCOL;
   version: 1;
@@ -215,6 +270,70 @@ export type CommunitySaleView = {
   txid: string | null;
 };
 
+export type CommunityPositionTransferSummary = {
+  stage:
+    | 'awaiting-buyer'
+    | 'awaiting-seller'
+    | 'awaiting-buyer-funding'
+    | 'approvals'
+    | 'ready'
+    | 'broadcast';
+  signedUnitCount: number;
+  requiredUnitCount: 69;
+};
+
+export type CommunityPositionTransferPrivateView = {
+  transferId: string;
+  campaignId: string;
+  inscriptionNumber: number;
+  eligibilityMode: CommunityEligibilityMode;
+  status:
+    | 'invited'
+    | 'buyer-accepted'
+    | 'authorized'
+    | 'signing'
+    | 'ready'
+    | 'broadcast'
+    | 'confirmed'
+    | 'expired'
+    | 'cancelled'
+    | 'failed';
+  sellerOwnerId: string;
+  transferredUnits: number[];
+  sellerPriceSats: string;
+  expiresAtMs: string;
+  buyerOwnerId: string | null;
+  buyerWalletAddress: string | null;
+  buyerContext: CommunityVaultPositionTransferBuyerProviderContextV1 | null;
+  signingPsbtBase64: string | null;
+  buyerInputIndexes: number[];
+};
+
+export type CommunityPositionTransferOwnerView = {
+  transferId: string;
+  status: CommunityPositionTransferPrivateView['status'];
+  sellerOwnerId: string;
+  buyerOwnerId: string | null;
+  buyerIdentityLabel: string | null;
+  transferredUnits: number[];
+  sellerPriceSats: string;
+  expiresAtMs: string;
+  sellerAuthorizationPayload: CommunityVaultPositionTransferSellerAuthorizationV1 | null;
+  ownerContext: CommunityVaultPositionTransferOwnerProviderContextV1 | null;
+  signingPsbtBase64: string | null;
+  signedOwnerIds: string[];
+  signedUnitCount: number;
+  requiredUnitCount: 69;
+};
+
+export type PreparedCommunityPositionTransfer = {
+  policy: CommunityVaultPolicyV1;
+  plan: CommunityVaultPositionTransferPlanV1;
+  preflight: CommunityVaultPositionTransferPreflightV1;
+  signingPsbtBase64: string;
+  buyerInputIndexes: number[];
+};
+
 export type CommunityParticipantView = {
   ownerId: string;
   capTableOrder: number;
@@ -260,6 +379,7 @@ export type CommunityCampaignView = {
   participants: CommunityParticipantView[];
   acquisition: CommunityAcquisitionView | null;
   sale: CommunitySaleView | null;
+  ownershipChange: CommunityPositionTransferSummary | null;
 };
 
 export function communityMessage(
@@ -269,6 +389,9 @@ export function communityMessage(
     | ConfirmReadinessPayloadV1
     | ApproveAcquisitionPayloadV1
     | ApproveSalePayloadV1
+    | CreatePositionTransferInvitePayloadV1
+    | AcceptPositionTransferPayloadV1
+    | ApprovePositionTransferPayloadV1
     | CreateSaleOfferPayloadV1
 ): string {
   return `OMB Community Purchases\n${JSON.stringify(payload)}`;
