@@ -8,6 +8,7 @@ import {
   DREY_COMMUNITY_UPGRADE_MESSAGE,
   isDreyCommunityOffersSupported,
   isDreyCommunitySupported,
+  openDreyCommunitySetup,
 } from '@/lib/wallet/satsConnect';
 import {
   COMMUNITY_PURCHASES_PROTOCOL,
@@ -31,6 +32,7 @@ import {
   communityParticipantState,
   communityProgressLabel,
 } from '@/lib/community-purchases/presentation';
+import { parseCommunityEnrollmentFor } from '@/lib/community-purchases/form';
 
 export default function CommunityCampaign({
   initial,
@@ -50,6 +52,7 @@ export default function CommunityCampaign({
   const [qualifying, setQualifying] = useState('');
   const [payout, setPayout] = useState('');
   const [enrollmentText, setEnrollmentText] = useState('');
+  const [joinSetupOpened, setJoinSetupOpened] = useState(false);
   const [noAlt, setNoAlt] = useState(false);
   const [consent, setConsent] = useState(false);
   const [funding, setFunding] = useState('');
@@ -83,6 +86,8 @@ export default function CommunityCampaign({
   const dreyReady = wallet ? isDreyCommunitySupported(wallet) : false;
   const dreyOffersReady = wallet ? isDreyCommunityOffersSupported(wallet) : false;
   const progressLabel = communityProgressLabel(campaign.status);
+  const joinEnrollmentLinked =
+    parseCommunityEnrollmentFor(enrollmentText, campaign.id, ownerId) !== null;
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pb-10 sm:px-6">
@@ -359,26 +364,96 @@ export default function CommunityCampaign({
           value={payout || wallet?.payAddr || ''}
           onChange={setPayout}
         />
-        <div className="mt-4 border-l-2 border-accent-orange bg-ink-0 p-3 text-[11px] leading-relaxed text-bone-dim">
-          In Drey, create a Community Vault owner with:
-          <br />
-          campaign <CopyValue value={campaign.id} />
-          <br />
-          owner <CopyValue value={ownerId} />
-          <br />
-          Finish recovery, then paste the enrollment package.
+        <div className="mt-4 border-l-2 border-accent-orange bg-ink-0 p-3">
+          <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-accent-orange">
+            Set up your owner key in Drey
+          </div>
+          <p className="mt-2 text-[11px] leading-relaxed text-bone-dim">
+            Drey makes you verify a recovery backup before it can sign. Never paste recovery words
+            into the Gallery—only Drey’s public setup package.
+          </p>
+          {joinEnrollmentLinked ? (
+            <div className="mt-3 border border-accent-green/50 p-3 text-accent-green">
+              <div className="font-mono text-[9px] uppercase tracking-[0.08em]">
+                Public Drey setup linked
+              </div>
+              <p className="mt-1 text-[10px] text-bone-dim">
+                Drey requires recovery verification before signing.
+              </p>
+            </div>
+          ) : joinSetupOpened ? (
+            <>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => void pasteJoinEnrollment()}
+                  className="h-10 border border-accent-orange bg-accent-orange px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-ink-0"
+                >
+                  Paste setup from Drey
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void beginJoinDreySetup()}
+                  className="h-10 border border-bone px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-bone"
+                >
+                  Open Drey again
+                </button>
+              </div>
+              <details className="mt-3 text-[10px] text-bone-dim">
+                <summary className="cursor-pointer font-mono uppercase tracking-[0.08em]">
+                  paste manually
+                </summary>
+                <textarea
+                  value={enrollmentText}
+                  onChange={event => setEnrollmentText(event.target.value)}
+                  rows={5}
+                  placeholder="paste Drey enrollment package"
+                  className="mt-3 w-full resize-y border border-ink-2 bg-ink-1 p-3 font-mono text-[10px] text-bone outline-none placeholder:text-bone-dim/50 focus:border-bone"
+                />
+              </details>
+            </>
+          ) : (
+            <button
+              type="button"
+              disabled={!dreyReady}
+              onClick={() => void beginJoinDreySetup()}
+              className="mt-3 h-10 border border-accent-orange bg-accent-orange px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-ink-0 disabled:opacity-40"
+            >
+              Continue in Drey
+            </button>
+          )}
+          {joinEnrollmentLinked && (
+            <details className="mt-3 text-[10px] text-bone-dim">
+              <summary className="cursor-pointer font-mono uppercase tracking-[0.08em]">
+                replace public setup
+              </summary>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => void pasteJoinEnrollment()}
+                  className="h-9 border border-bone px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-bone"
+                >
+                  Paste from Drey
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void beginJoinDreySetup()}
+                  className="h-9 border border-bone px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-bone"
+                >
+                  Open Drey
+                </button>
+              </div>
+            </details>
+          )}
+          <p className="mt-3 text-[10px] leading-relaxed text-bone-dim">
+            For succession, keep the backup secure with separate estate instructions. Updating the
+            recognized owner is a separate group-approved step.
+          </p>
         </div>
         <p className="mt-3 text-[10px] leading-relaxed text-bone-dim">
           Drey checks that you have enough confirmed, clean BTC before reserving. Your BTC stays in
           your wallet and is not locked.
         </p>
-        <textarea
-          value={enrollmentText}
-          onChange={event => setEnrollmentText(event.target.value)}
-          rows={5}
-          placeholder="paste Drey enrollment package"
-          className="mt-3 w-full resize-y border border-ink-2 bg-ink-0 p-3 font-mono text-[9px] text-bone outline-none placeholder:text-bone-dim/50 focus:border-bone"
-        />
         <Check
           checked={noAlt}
           onChange={setNoAlt}
@@ -392,7 +467,7 @@ export default function CommunityCampaign({
         <Feedback />
         <button
           type="button"
-          disabled={busy || !dreyReady}
+          disabled={busy || !dreyReady || !joinEnrollmentLinked || !noAlt || !consent}
           onClick={() => void join(unitCount)}
           className="mt-4 h-10 w-full border border-bone bg-bone font-mono text-[10px] uppercase tracking-[0.1em] text-ink-0 disabled:opacity-40"
         >
@@ -641,10 +716,12 @@ export default function CommunityCampaign({
     if (maximum < required) {
       return setError(`Your maximum must cover at least ${required.toLocaleString()} sats.`);
     }
-    let enrollment: CommunityEnrollmentV1;
-    try {
-      enrollment = JSON.parse(enrollmentText) as CommunityEnrollmentV1;
-    } catch {
+    const enrollment: CommunityEnrollmentV1 | null = parseCommunityEnrollmentFor(
+      enrollmentText,
+      campaign.id,
+      ownerId
+    );
+    if (!enrollment) {
       return setError('Paste the enrollment package copied from Drey.');
     }
     setBusy(true);
@@ -677,6 +754,40 @@ export default function CommunityCampaign({
       nonce: newActionNonce(),
     };
     await sendAction(`/api/community/campaigns/${campaign.id}/reservations`, payload);
+  }
+
+  async function beginJoinDreySetup() {
+    setError(null);
+    if (!wallet || !isDreyCommunitySupported(wallet)) {
+      setError(DREY_COMMUNITY_UPGRADE_MESSAGE);
+      return;
+    }
+    try {
+      await openDreyCommunitySetup(wallet, {
+        campaignId: campaign.id,
+        ownerId,
+        label: `OMB #${campaign.inscriptionNumber}`,
+      });
+      setJoinSetupOpened(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not open Drey setup.');
+    }
+  }
+
+  async function pasteJoinEnrollment() {
+    setError(null);
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!parseCommunityEnrollmentFor(text, campaign.id, ownerId)) {
+        throw new Error('wrong enrollment');
+      }
+      setEnrollmentText(text);
+      setNotice('Drey setup added.');
+    } catch {
+      setError(
+        'That is not the matching Drey setup. Open “paste manually” below if clipboard access is blocked.'
+      );
+    }
   }
 
   async function ready() {
@@ -1024,17 +1135,6 @@ function Check({
       />
       <span>{label}</span>
     </label>
-  );
-}
-function CopyValue({ value }: { value: string }) {
-  return (
-    <button
-      type="button"
-      onClick={() => void navigator.clipboard.writeText(value)}
-      className="break-all text-left font-mono text-[9px] text-bone underline decoration-ink-2 underline-offset-2"
-    >
-      {value}
-    </button>
   );
 }
 function KeyValue({ label, value }: { label: string; value: string }) {

@@ -82,6 +82,7 @@ export default function CommunityHub({
       .slice(0, 60);
   }, [listingSearch, listings]);
   const dreyReady = wallet ? isDreyCommunitySupported(wallet) : false;
+  const setupLinked = parseCommunityEnrollmentFor(enrollmentText, campaignId, ownerId) !== null;
   const formReady = isGroupBuyFormReady({
     dreyReady,
     payoutAddress: wallet?.payAddr || '',
@@ -296,14 +297,46 @@ export default function CommunityHub({
               </div>
               <p className="mt-3 text-xs leading-relaxed text-bone-dim">
                 {setupOpened
-                  ? 'Finish the recovery check in Drey, then paste the public setup here.'
+                  ? 'Finish the recovery-word check, then copy Drey’s public setup. Never paste recovery words into the Gallery.'
                   : !wallet || wallet.providerId !== 'drey'
                     ? 'Connect Drey to create your owner key.'
                     : !dreyReady
                       ? 'Reload the latest next extension build, then check again.'
-                      : 'Continue in Drey and finish the recovery check.'}
+                      : 'Continue in Drey. It requires a recovery backup check before this key can sign.'}
               </p>
-              {setupOpened ? (
+              {setupLinked ? (
+                <>
+                  <div className="mt-4 border border-accent-green/50 p-3 text-accent-green">
+                    <div className="font-mono text-[9px] uppercase tracking-[0.08em]">
+                      Public Drey setup linked
+                    </div>
+                    <p className="mt-1 text-[10px] text-bone-dim">
+                      Drey requires recovery verification before signing.
+                    </p>
+                  </div>
+                  <details className="mt-3 text-[10px] text-bone-dim">
+                    <summary className="cursor-pointer font-mono uppercase tracking-[0.08em]">
+                      replace public setup
+                    </summary>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <button
+                        type="button"
+                        onClick={() => void pasteEnrollment()}
+                        className="h-9 border border-bone px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-bone"
+                      >
+                        Paste from Drey
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void beginDreySetup()}
+                        className="h-9 border border-bone px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-bone"
+                      >
+                        Open Drey
+                      </button>
+                    </div>
+                  </details>
+                </>
+              ) : setupOpened ? (
                 <>
                   <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                     <button
@@ -350,6 +383,10 @@ export default function CommunityHub({
                         : 'Continue in Drey'}
                 </button>
               )}
+              <p className="mt-3 text-[10px] leading-relaxed text-bone-dim">
+                For succession, keep the backup secure with separate estate instructions. Updating
+                the recognized owner is a separate group-approved step.
+              </p>
             </div>
 
             {mode === 'anchored' && (
@@ -451,11 +488,13 @@ export default function CommunityHub({
     setError(null);
     try {
       const text = await navigator.clipboard.readText();
-      JSON.parse(text);
+      if (!parseCommunityEnrollmentFor(text, campaignId, ownerId)) {
+        throw new Error('wrong enrollment');
+      }
       setEnrollmentText(text);
     } catch {
       setError(
-        'Could not read the clipboard. Open “paste manually” below and paste the public setup details.'
+        'That is not the matching Drey setup. Open “paste manually” below if clipboard access is blocked.'
       );
     }
   }
