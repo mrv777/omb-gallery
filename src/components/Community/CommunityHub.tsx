@@ -25,6 +25,7 @@ import {
   openDreyCommunitySetup,
 } from '@/lib/wallet/satsConnect';
 import CommunityCard from './CommunityCard';
+import CommunityFaq from './CommunityFaq';
 
 export default function CommunityHub({
   initialCampaigns,
@@ -113,6 +114,7 @@ export default function CommunityHub({
               Reserve a share without sending BTC. If all 100 units fill, every selected owner
               reviews and signs one exact purchase in Drey.
             </p>
+            <CommunityFaq />
           </div>
           <button
             type="button"
