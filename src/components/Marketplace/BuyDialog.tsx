@@ -24,9 +24,10 @@ type Props = {
 
 export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) {
   const { wallet, signMessage, signPsbt } = useWallet();
-  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<PurchasePhase>('idle');
   const [error, setError] = useState<string | null>(null);
   const [selectedOptionKey, setSelectedOptionKey] = useState<string | null>(null);
+  const busy = phase !== 'idle';
 
   const options = useMemo(() => listing?.options ?? [], [listing]);
   const selectedOption = useMemo(() => {
@@ -44,7 +45,7 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
 
   async function submit() {
     if (!listing || !selectedOption) return;
-    setBusy(true);
+    setPhase('preparing');
     setError(null);
     try {
       if (wallet?.providerId === 'drey') {
@@ -57,6 +58,7 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
         }
       }
       const intentJson = await createIntentWithOrdnetRetry(listing, selectedOption);
+      setPhase('signing');
       const broadcastJson = await completeSigningFlow(intentJson);
       onSuccess({
         listing: intentJson.listing,
@@ -67,7 +69,7 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
     } catch (err) {
       setError(`Purchase failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
-      setBusy(false);
+      setPhase('idle');
     }
   }
 
@@ -324,33 +326,53 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
 
             <div className="mt-3 space-y-2 sm:mt-4 sm:space-y-3">
               {!wallet ? <ConnectWalletButton /> : <TermsCheckbox />}
-              {error && (
-                <div className="break-words text-[11px] leading-relaxed text-accent-red">
-                  {error}
-                </div>
-              )}
             </div>
           </div>
 
-          <div className="mt-3 grid shrink-0 grid-cols-2 gap-2 border-t border-ink-2 pt-3 sm:flex sm:items-center sm:justify-end">
-            <button
-              type="button"
-              onClick={onClose}
-              className="h-10 border border-ink-2 px-3 text-[11px] text-bone-dim hover:border-bone-dim hover:text-bone sm:h-9"
-            >
-              cancel
-            </button>
-            <button
-              type="button"
-              disabled={!canBuy}
-              onClick={() => void submit()}
-              className="h-10 border border-bone px-3 text-[11px] text-bone disabled:cursor-not-allowed disabled:border-ink-2 disabled:text-bone-dim sm:h-9"
-            >
-              {busy ? 'signing' : 'confirm buy'}
-            </button>
+          <div className="mt-3 shrink-0 border-t border-ink-2 pt-3">
+            <PurchaseError error={error} />
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
+              <button
+                type="button"
+                onClick={onClose}
+                className="h-10 border border-ink-2 px-3 text-[11px] text-bone-dim hover:border-bone-dim hover:text-bone sm:h-9"
+              >
+                cancel
+              </button>
+              <button
+                type="button"
+                disabled={!canBuy}
+                onClick={() => void submit()}
+                className="h-10 border border-bone px-3 text-[11px] text-bone disabled:cursor-not-allowed disabled:border-ink-2 disabled:text-bone-dim sm:h-9"
+              >
+                {purchasePhaseLabel(phase)}
+              </button>
+            </div>
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+export type PurchasePhase = 'idle' | 'preparing' | 'signing';
+
+export function purchasePhaseLabel(phase: PurchasePhase): string {
+  if (phase === 'preparing') return 'preparing';
+  if (phase === 'signing') return 'signing';
+  return 'confirm buy';
+}
+
+export function PurchaseError({ error }: { error: string | null }) {
+  if (!error) return null;
+  return (
+    <div
+      role="alert"
+      aria-live="assertive"
+      data-testid="purchase-error"
+      className="mb-3 max-h-24 overflow-y-auto break-words border border-accent-red/50 bg-accent-red/10 p-2 text-[11px] leading-relaxed text-accent-red"
+    >
+      {error}
     </div>
   );
 }
