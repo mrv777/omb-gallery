@@ -7,6 +7,7 @@ import { formatRelTime } from '@/lib/format';
 import { useColorFilter } from '@/lib/useColorFilter';
 import TransferActivitySparkline from '@/components/Charts/TransferActivitySparkline';
 import type { TransferActivityDayRow } from '@/lib/db';
+import { describeOrdPollStatus } from '@/lib/pollStatus';
 
 const FILTERS: { key: FeedFilter; label: string }[] = [
   { key: 'all', label: 'all' },
@@ -32,6 +33,7 @@ export default function ActivityFeed({ initial, dailyTransfers, sparklineDays = 
     initial
   );
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const pollStatus = describeOrdPollStatus(poll?.last_status ?? null);
 
   // Infinite scroll
   useEffect(() => {
@@ -92,25 +94,16 @@ export default function ActivityFeed({ initial, dailyTransfers, sparklineDays = 
           {poll?.is_backfilling && (
             <span className="text-accent-orange">· backfilling history</span>
           )}
-          {poll &&
-            poll.last_status &&
-            poll.last_status !== 'ok' &&
-            (() => {
-              // 404 on a specific inscription means ord hasn't reached its
-              // reveal block yet — expected during IBD, not an error.
-              const isIbd404 = /^404 from ord :: inscription/.test(poll.last_status);
-              return (
-                <span
-                  className={`normal-case tracking-normal text-[10px] ${
-                    isIbd404 ? 'text-accent-orange' : 'text-accent-red'
-                  }`}
-                >
-                  {isIbd404
-                    ? 'ord catching up — recent events may be delayed'
-                    : `poll error: ${poll.last_status.slice(0, 80)}`}
-                </span>
-              );
-            })()}
+          {pollStatus && (
+            <span
+              className={`normal-case tracking-normal text-[10px] ${
+                pollStatus.tone === 'warning' ? 'text-accent-orange' : 'text-accent-red'
+              }`}
+              title={poll?.last_status ?? undefined}
+            >
+              {pollStatus.message}
+            </span>
+          )}
         </div>
 
         <div
