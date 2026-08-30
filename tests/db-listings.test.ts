@@ -445,6 +445,81 @@ describe('ord.net staged snapshots and seller intents', () => {
     ).toThrow();
   });
 
+  it('lets a fresh preflight replace an abandoned unsigned intent', async () => {
+    const db = dbModule.getDb();
+    const row = db.prepare(`SELECT inscription_number FROM inscriptions LIMIT 1`).get() as {
+      inscription_number: number;
+    };
+    const inscriptionId = '7'.repeat(64) + 'i0';
+    db.prepare(
+      `UPDATE inscriptions
+       SET inscription_id = ?, current_owner = 'bc1pseller', current_output = ?
+       WHERE inscription_number = ?`
+    ).run(inscriptionId, 'a'.repeat(64) + ':0', row.inscription_number);
+    const store = await import('../src/lib/marketplace/listingIntentsStore');
+    const preflight = {
+      v: 1 as const,
+      collectionSlug: 'omb',
+      request: {
+        walletBindingId: 'binding-1',
+        ordinalsPublicKey: '02'.padEnd(66, '1'),
+        items: [{ inscriptionId, priceSats: 1_000_000 }],
+      },
+      response: {
+        listings: [
+          {
+            inscriptionId,
+            anchorUtxoId: 'anchor-1',
+            psbts: [],
+          },
+        ],
+        recoveryPsbt: { signerAddress: 'bc1pseller', inputsToSign: [], psbtBase64: 'recovery' },
+      },
+      durationDays: 90 as const,
+      createdAt: 1_700_000_000,
+    };
+    const args = {
+      sellerOrdAddr: 'bc1pseller',
+      sellerPayAddr: 'bc1qpayment',
+      inscriptionId,
+      inscriptionNumber: row.inscription_number,
+      currentOutput: 'a'.repeat(64) + ':0',
+      priceSats: 1_000_000,
+      durationDays: 90 as const,
+      providerId: 'xverse' as const,
+      walletBindingId: 'binding-1',
+      preflight,
+      unsignedPsbtHashes: ['one', 'two', 'three'],
+    };
+    const first = store.createListingIntent(args);
+    expect(
+      store.listSellerOmbs({ sellerOrdAddr: 'bc1pseller', limit: 100 }).items[0]
+    ).toMatchObject({ listable: true, listing_intent_status: 'created' });
+    const second = store.createListingIntent({ ...args, priceSats: 2_000_000 });
+    expect(second).not.toBe(first);
+    expect(
+      db
+        .prepare(
+          `SELECT id, status, preflight_json, unsigned_psbt_hashes_json
+         FROM listing_intents WHERE inscription_id = ? ORDER BY id`
+        )
+        .all(inscriptionId)
+    ).toEqual([
+      {
+        id: first,
+        status: 'stale',
+        preflight_json: null,
+        unsigned_psbt_hashes_json: null,
+      },
+      {
+        id: second,
+        status: 'created',
+        preflight_json: JSON.stringify(preflight),
+        unsigned_psbt_hashes_json: JSON.stringify(['one', 'two', 'three']),
+      },
+    ]);
+  });
+
   it('terminalizes only absent, pre-scan intents after a complete snapshot', () => {
     const db = dbModule.getDb();
     const stmts = dbModule.getStmts();

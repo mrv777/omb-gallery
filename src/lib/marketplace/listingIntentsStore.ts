@@ -217,9 +217,23 @@ export function createListingIntent(args: {
 }): number {
   const listing = args.preflight.response.listings[0];
   if (!listing) throw new Error('listing preflight missing item');
-  const result = getDb()
-    .prepare(
+  const db = getDb();
+  const replaceCreated = db.transaction(() => {
+    // A wallet rejection or closed prompt never reaches /submit. A deliberate
+    // fresh preflight supersedes that unsigned attempt atomically, so the old
+    // intent cannot block the seller forever or race the new PSBT set.
+    db.prepare(
       `
+      UPDATE listing_intents
+      SET status = 'stale', preflight_json = NULL, unsigned_psbt_hashes_json = NULL,
+          claim_token = NULL, claimed_at = NULL,
+          error = 'superseded by a fresh preflight', updated_at = unixepoch()
+      WHERE inscription_id = @inscription_id AND status = 'created'
+    `
+    ).run({ inscription_id: args.inscriptionId });
+    return db
+      .prepare(
+        `
       INSERT INTO listing_intents (
         seller_ord_addr, seller_pay_addr, inscription_id, inscription_number,
         current_output, price_sats, duration_days, provider_id, wallet_binding_id,
@@ -232,21 +246,23 @@ export function createListingIntent(args: {
         unixepoch(), unixepoch()
       )
     `
-    )
-    .run({
-      seller_ord_addr: args.sellerOrdAddr,
-      seller_pay_addr: args.sellerPayAddr,
-      inscription_id: args.inscriptionId,
-      inscription_number: args.inscriptionNumber,
-      current_output: args.currentOutput,
-      price_sats: args.priceSats,
-      duration_days: args.durationDays,
-      provider_id: args.providerId,
-      wallet_binding_id: args.walletBindingId,
-      anchor_utxo_id: listing.anchorUtxoId,
-      preflight_json: JSON.stringify(args.preflight),
-      unsigned_psbt_hashes_json: JSON.stringify(args.unsignedPsbtHashes),
-    });
+      )
+      .run({
+        seller_ord_addr: args.sellerOrdAddr,
+        seller_pay_addr: args.sellerPayAddr,
+        inscription_id: args.inscriptionId,
+        inscription_number: args.inscriptionNumber,
+        current_output: args.currentOutput,
+        price_sats: args.priceSats,
+        duration_days: args.durationDays,
+        provider_id: args.providerId,
+        wallet_binding_id: args.walletBindingId,
+        anchor_utxo_id: listing.anchorUtxoId,
+        preflight_json: JSON.stringify(args.preflight),
+        unsigned_psbt_hashes_json: JSON.stringify(args.unsignedPsbtHashes),
+      });
+  });
+  const result = replaceCreated();
   return Number(result.lastInsertRowid);
 }
 
@@ -419,7 +435,7 @@ function sellerOmbFromRow(
       ? 'missing-output'
       : row.active_loan_count > 0
         ? 'active-loan'
-        : liveIntent
+        : liveIntent && liveIntent.status !== 'created'
           ? 'listing-pending'
           : hasOrdnetListing
             ? 'listed-ordnet'
