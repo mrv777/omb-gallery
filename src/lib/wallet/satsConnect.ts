@@ -11,6 +11,7 @@ import {
   type SupportedWallet,
 } from 'sats-connect';
 import type { MarketplaceProviderContext } from '@/lib/marketplace/types';
+import type { ListingSigningStep } from '@/lib/marketplace/sellerClient';
 import type { CommunityVaultAcquisitionProviderContextV1 } from '@drey/core/domain/community-vault/acquisition-provider';
 import type {
   CommunitySaleBuyerProviderContextV1,
@@ -312,6 +313,51 @@ export async function signPurchasePsbt(args: {
   );
   if (response.status === 'error') throw walletResponseError(response.error);
   return { signedPsbt: response.result.psbt, txid: response.result.txid };
+}
+
+export async function signOrdnetListingPsbtGroup(args: {
+  wallet: ConnectedWallet;
+  steps: ListingSigningStep[];
+}): Promise<string[]> {
+  if (args.wallet.providerId !== DREY_PROVIDER_ID || !isOrdnetListingSupported(args.wallet)) {
+    throw new Error('Reconnect with a compatible Drey build before signing this listing.');
+  }
+  if (args.steps.length !== 3) {
+    throw new Error('Listing requires exactly three linked transactions.');
+  }
+  if (process.env.NEXT_PUBLIC_MARKETPLACE_MOCK === 'true') {
+    return args.steps.map(step => `mock-signed:${step.psbt}`);
+  }
+  await assertWalletAddresses(args.wallet);
+  const psbts = args.steps.map((step, index) => {
+    if (!step.inputs_to_sign?.length || !step.marketplace_context) {
+      throw new Error(`Listing step ${index + 1} is missing Drey signing instructions.`);
+    }
+    return {
+      psbtBase64: step.psbt,
+      inputsToSign: step.inputs_to_sign,
+      marketplaceContext: step.marketplace_context,
+    };
+  });
+  const result = await dreyRequest<unknown>('signMultipleTransactions', {
+    network: { type: 'Mainnet', address: args.wallet.ordAddr },
+    message: 'Approve this linked ord.net listing. Drey will not broadcast it.',
+    psbts,
+  });
+  if (!Array.isArray(result) || result.length !== psbts.length) {
+    throw new Error('Drey returned an incomplete listing signature set.');
+  }
+  return result.map((raw, index) => {
+    if (
+      !raw ||
+      typeof raw !== 'object' ||
+      typeof (raw as { psbtBase64?: unknown }).psbtBase64 !== 'string' ||
+      !(raw as { psbtBase64: string }).psbtBase64
+    ) {
+      throw new Error(`Drey returned an invalid signature for listing step ${index + 1}.`);
+    }
+    return (raw as { psbtBase64: string }).psbtBase64;
+  });
 }
 
 export async function openDreyCommunitySetup(

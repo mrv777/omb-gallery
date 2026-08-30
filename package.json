@@ -27,7 +27,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@drey/core": "file:vendor/drey-core-0.15.1.tgz",
+    "@drey/core": "file:vendor/drey-core-0.19.4.tgz",
     "@radix-ui/react-hover-card": "^1.1.15",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@scure/btc-signer": "1.8.1",

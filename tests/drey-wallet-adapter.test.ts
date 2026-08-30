@@ -37,6 +37,7 @@ import {
   openDreyCommunitySetup,
   ordnetSellerProviderId,
   probeDreyConnection,
+  signOrdnetListingPsbtGroup,
   signPurchasePsbt,
   type ConnectedWallet,
 } from '@/lib/wallet/satsConnect';
@@ -264,6 +265,76 @@ describe('Drey wallet adapter', () => {
       { psbt: 'unsigned', signInputs: { bc1qpayment: [1] }, broadcast: false },
       'XverseProviders.BitcoinProvider'
     );
+  });
+
+  it('sends one no-broadcast Drey approval for the three linked listing PSBTs', async () => {
+    const request = installDrey(method => {
+      if (method === 'getAccounts') return addresses;
+      if (method === 'signMultipleTransactions') {
+        return [1, 2, 3].map(index => ({ psbtBase64: `signed-${index}` }));
+      }
+      throw new Error(`unexpected method ${method}`);
+    });
+    const contexts = [1, 2, 3].map(
+      step =>
+        ({
+          version: 1,
+          marketplaceId: 'ordnet',
+          templateVersion: 'omb-wiki-ordnet-list-v1',
+          action: 'list',
+          role: 'seller',
+          assetKind: 'inscription',
+          workflowId: 'listing-1',
+          step,
+          stepCount: 3,
+          stage: ['escrow', 'settlement', 'recovery'][step - 1],
+          identifiers: {
+            inscriptionId: `${'a'.repeat(64)}i0`,
+            inscriptionOutpoint: `${'b'.repeat(64)}:0`,
+            preflightHandle: 'anchor-1',
+          },
+          economics: {
+            priceSats: '100000',
+            sellerProceedsSats: '99000',
+            marketplaceFeeSats: '1000',
+            payoutAddress: addresses[1]!.address,
+            assetDestination: addresses[0]!.address,
+          },
+          selectedInputIndexes: [0],
+          expiresAt: Date.now() + 60_000,
+          broadcaster: 'site',
+        }) as never
+    );
+    const steps = [1, 2, 3].map((index, offset) => ({
+      psbt: `unsigned-${index}`,
+      label: `step-${index}`,
+      inputs_to_sign: [
+        {
+          address: addresses[0]!.address,
+          signingIndexes: [0],
+          publicKey: addresses[0]!.publicKey,
+          disableTweakSigner: offset === 1,
+          sigHash: [0, 0x83, 1][offset],
+        },
+      ],
+      marketplace_context: contexts[offset],
+    }));
+
+    await expect(
+      signOrdnetListingPsbtGroup({
+        wallet: dreyWallet({ providerCapabilities: [DREY_ORDNET_LIST_CAPABILITY] }),
+        steps,
+      })
+    ).resolves.toEqual(['signed-1', 'signed-2', 'signed-3']);
+    expect(request).toHaveBeenLastCalledWith('signMultipleTransactions', {
+      network: { type: 'Mainnet', address: addresses[0]!.address },
+      message: 'Approve this linked ord.net listing. Drey will not broadcast it.',
+      psbts: steps.map(step => ({
+        psbtBase64: step.psbt,
+        inputsToSign: step.inputs_to_sign,
+        marketplaceContext: step.marketplace_context,
+      })),
+    });
   });
 
   it('passes the exact buyer-funded Community Vault offer context without broadcast', async () => {

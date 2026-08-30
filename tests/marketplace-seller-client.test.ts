@@ -85,6 +85,40 @@ describe('marketplace seller client contracts', () => {
     ).toEqual(['escrow transfer', 'settlement authorization', 'recovery transaction']);
   });
 
+  it('preserves complete ord.net signing declarations for Drey', () => {
+    const base = {
+      intent_id: 'intent-1',
+      preview: {
+        inscription_number: 123,
+        inscription_id: 'id123',
+        current_output: 'tx:0',
+        postage_sats: 546,
+        payout_address: 'bc1qpay',
+        price_sats: 10_000_000,
+        seller_proceeds_sats: 9_900_000,
+        marketplace_fee_sats: 100_000,
+        duration_days: 90,
+        expires_at: 2_000_000_000,
+      },
+    };
+    const settlementInput = {
+      address: 'bc1pseller',
+      signingIndexes: [0],
+      publicKey: 'ab'.repeat(32),
+      disableTweakSigner: true,
+      sigHash: 0x83,
+    };
+    const result = normalizeListingPreflight({
+      ...base,
+      signing_steps: [
+        { psbt: 'one', inputs_to_sign: [{ ...settlementInput, sigHash: 0 }] },
+        { psbt: 'two', inputs_to_sign: [settlementInput] },
+        { psbt: 'three', inputs_to_sign: [{ ...settlementInput, sigHash: 1 }] },
+      ],
+    });
+    expect(result.signing_steps[1]?.inputs_to_sign).toEqual([settlementInput]);
+  });
+
   it('requests all three wallet signatures sequentially and stops on rejection', async () => {
     const steps = ['escrow', 'settlement', 'recovery'].map((label, index) => ({
       psbt: label,

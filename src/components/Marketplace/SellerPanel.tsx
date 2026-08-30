@@ -128,13 +128,17 @@ export default function SellerPanel({ open, onClose, onListingsChanged }: Props)
     setError(null);
     setNotice(null);
     try {
-      const { ordnetSellerProviderId } = await import('@/lib/wallet/satsConnect');
+      const { ordnetSellerProviderId, signOrdnetListingPsbtGroup } =
+        await import('@/lib/wallet/satsConnect');
       const providerId = ordnetSellerProviderId(wallet);
       if (!providerId) throw new Error('This wallet cannot safely create listings.');
       setPhase('signing');
-      const signedPsbts = await signListingSteps(preflight.signing_steps, step =>
-        signPsbt(step.psbt, step.sign_inputs, step.marketplace_context)
-      );
+      const signedPsbts =
+        providerId === 'drey'
+          ? await signOrdnetListingPsbtGroup({ wallet, steps: preflight.signing_steps })
+          : await signListingSteps(preflight.signing_steps, step =>
+              signPsbt(step.psbt, step.sign_inputs, step.marketplace_context)
+            );
       setPhase('submitting');
       const result = await postJson('/api/marketplace/listing/submit', {
         intent_id: preflight.intent_id,
@@ -244,6 +248,7 @@ export default function SellerPanel({ open, onClose, onListingsChanged }: Props)
               {preflight ? (
                 <ListingReview
                   preflight={preflight}
+                  singleApproval={wallet.providerId === 'drey'}
                   phase={phase}
                   onBack={() => setPreflight(null)}
                   onSubmit={() => void signAndSubmit()}
@@ -517,11 +522,13 @@ function ListingDraft({
 
 function ListingReview({
   preflight,
+  singleApproval,
   phase,
   onBack,
   onSubmit,
 }: {
   preflight: ListingPreflight;
+  singleApproval: boolean;
   phase: SellerPhase;
   onBack: () => void;
   onSubmit: () => void;
@@ -532,8 +539,9 @@ function ListingReview({
     <div>
       <h3 className="text-lg text-bone">review OMB #{preview.inscription_number}</h3>
       <p className="mt-2 text-[10px] leading-relaxed text-accent-orange">
-        your wallet will request 3 signatures: escrow transfer, settlement authorization, and
-        recovery.
+        {singleApproval
+          ? 'Drey will show one approval covering escrow, sale authorization, and recovery.'
+          : 'your wallet will request 3 signatures: escrow transfer, settlement authorization, and recovery.'}
       </p>
       <dl className="mt-5 divide-y divide-ink-2 border-y border-ink-2 text-[10px]">
         <ReviewRow label="inscription" value={preview.inscription_id} wrap />
@@ -547,8 +555,10 @@ function ListingReview({
         <ReviewRow label="expires" value={formatDate(preview.expires_at)} />
       </dl>
       <p className="mt-4 text-[9px] normal-case leading-relaxed tracking-normal text-bone-dim">
-        Check every wallet prompt. Bitcoin transactions are irreversible. A recovery transaction is
-        prepared so the inscription can return to your wallet if needed.
+        {singleApproval ? 'Review the linked listing once in Drey.' : 'Check every wallet prompt.'}{' '}
+        Bitcoin transactions are irreversible. Your wallet does not broadcast these listing
+        transactions; the signed listing is returned to ord.net. A recovery transaction is prepared
+        so the inscription can return to your wallet if needed.
       </p>
       <div className="mt-6 flex gap-2 border-t border-ink-2 pt-4">
         <button

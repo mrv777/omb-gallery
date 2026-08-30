@@ -1,7 +1,10 @@
 import 'server-only';
 
 import { createHash } from 'node:crypto';
-import { verifyOrdnetSaleScriptPath } from '@drey/core/domain/marketplaces/ordnet-script-path';
+import {
+  verifyOrdnetSaleKeyPath,
+  verifyOrdnetSaleScriptPath,
+} from '@drey/core/domain/marketplaces/ordnet-script-path';
 import { NETWORK, SigHash, Transaction } from '@scure/btc-signer';
 import { Psbt } from 'bitcoinjs-lib';
 import type { PurchasePsbtToSign } from './types';
@@ -116,9 +119,10 @@ export function validateOrdnetListingPreflight(args: {
   );
   try {
     verifyOrdnetSaleScriptPath(settlement, settlementIndex, publicKey);
+    verifyOrdnetSaleKeyPath(recovery, recoveryIndex, publicKey);
   } catch {
     throw new ListingPsbtValidationError(
-      'ORD.NET settlement does not use the pinned seller/marketplace Taproot script.'
+      'ORD.NET listing does not use the pinned settlement and seller recovery paths.'
     );
   }
 
