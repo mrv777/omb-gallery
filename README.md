@@ -70,10 +70,11 @@ pnpm start
   regression tests and this note together if an upstream contract changes.
 - OMB selling uses ord.net's authenticated
   [listing preflight/submit/delist flow](https://developers.ord.net/reference/listings/).
-  It is guarded by `MARKETPLACE_SELL_ENABLED` (off by default), validates all
-  three seller PSBTs locally, and requires Drey capability
-  `marketplace-ordnet-list-v1` for the Drey adapter. Keep the flag off until
-  the Drey release, wallet compatibility matrix, and one-item mainnet QA pass.
+  It is guarded by `MARKETPLACE_SELL_ENABLED` (off by default) and validates
+  all three seller PSBTs locally. The public beta currently enables the proven
+  Xverse, UniSat, and Leather adapters for every eligible OMB; Drey remains
+  disabled until it advertises `marketplace-ordnet-list-v1`, and Ledger remains
+  excluded from this first release because its passthrough policy flow differs.
 - `MARKETPLACE_MOCK_WALLET` and its public companion are development
   conveniences that bypass wallet-signature verification. Both are
   ignored when `NODE_ENV=production`.
