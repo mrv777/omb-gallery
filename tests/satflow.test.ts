@@ -178,12 +178,11 @@ describe('fetchSalesPage', () => {
     expect(res.items[0].transfer_txid).toBeNull();
   });
 
-  it('returns empty when API returns malformed envelope', async () => {
+  it('rejects a malformed envelope instead of treating it as empty', async () => {
     stubFetch(async () => jsonResponse({ unexpected: 'shape' }));
-    const res = await fetchSalesPage({ collectionSlug: 'omb' });
-    expect(res.items).toHaveLength(0);
-    expect(res.rawCount).toBe(0);
-    expect(res.total).toBe(0);
+    await expect(fetchSalesPage({ collectionSlug: 'omb' })).rejects.toThrow(
+      'Unexpected sales response shape'
+    );
   });
 
   it('throws SatflowError on 4xx (non-retryable)', async () => {

@@ -146,7 +146,7 @@ function validatePublishPayload(args: {
     !Number.isInteger(payload.createdAt) ||
     !Number.isInteger(payload.expiresAt) ||
     payload.createdAt > now + 60 ||
-    payload.expiresAt < now ||
+    payload.expiresAt <= now ||
     payload.expiresAt - payload.createdAt > 15 * 60 ||
     !/^[A-Za-z0-9._:-]{1,128}$/u.test(payload.nonce)
   ) {

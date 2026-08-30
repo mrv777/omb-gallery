@@ -62,6 +62,86 @@ export function markIntentSigned(id: number): void {
   setIntentStatus({ id, status: 'signed' });
 }
 
+export function claimIntentBroadcast(id: number, token: string, staleAfterSeconds = 120): boolean {
+  const result = getDb()
+    .prepare(
+      `
+      UPDATE buy_intents
+      SET status = 'signed',
+          fail_reason = NULL,
+          broadcast_claim_token = @token,
+          broadcast_claimed_at = unixepoch(),
+          updated_at = unixepoch()
+      WHERE id = @id
+        AND status IN ('created','signed','failed')
+        AND (
+          broadcast_claim_token IS NULL
+          OR broadcast_claimed_at IS NULL
+          OR broadcast_claimed_at < unixepoch() - @stale_after
+        )
+    `
+    )
+    .run({ id, token, stale_after: Math.max(30, Math.trunc(staleAfterSeconds)) });
+  return result.changes === 1;
+}
+
+export function advanceIntentBroadcast(id: number, token: string, preflightJson: string): boolean {
+  const result = getDb()
+    .prepare(
+      `
+      UPDATE buy_intents
+      SET preflight_json = @preflight_json,
+          broadcast_claim_token = NULL,
+          broadcast_claimed_at = NULL,
+          updated_at = unixepoch()
+      WHERE id = @id
+        AND status = 'signed'
+        AND broadcast_claim_token = @token
+    `
+    )
+    .run({ id, token, preflight_json: preflightJson });
+  return result.changes === 1;
+}
+
+export function completeIntentBroadcast(id: number, token: string, txid: string): boolean {
+  const result = getDb()
+    .prepare(
+      `
+      UPDATE buy_intents
+      SET status = 'broadcast',
+          txid = @txid,
+          fail_reason = NULL,
+          broadcast_claim_token = NULL,
+          broadcast_claimed_at = NULL,
+          updated_at = unixepoch()
+      WHERE id = @id
+        AND status = 'signed'
+        AND broadcast_claim_token = @token
+    `
+    )
+    .run({ id, token, txid });
+  return result.changes === 1;
+}
+
+export function failIntentBroadcast(id: number, token: string, reason: string): boolean {
+  const result = getDb()
+    .prepare(
+      `
+      UPDATE buy_intents
+      SET status = 'failed',
+          fail_reason = @reason,
+          broadcast_claim_token = NULL,
+          broadcast_claimed_at = NULL,
+          updated_at = unixepoch()
+      WHERE id = @id
+        AND status = 'signed'
+        AND broadcast_claim_token = @token
+    `
+    )
+    .run({ id, token, reason: reason.slice(0, 500) });
+  return result.changes === 1;
+}
+
 export function updateIntentPreflightJson(id: number, preflightJson: string): void {
   getDb()
     .prepare(

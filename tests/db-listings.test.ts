@@ -68,6 +68,22 @@ describe('poll_state v7 — backfill_unresolved_seen', () => {
   });
 });
 
+describe('poll_state writer lease', () => {
+  it('blocks overlap but clears immediately after a completed tick', () => {
+    const stmts = dbModule.getStmts();
+    expect(stmts.acquireLock.run({ stream: 'ord', collection: 'omb' }).changes).toBe(1);
+    expect(stmts.acquireLock.run({ stream: 'ord', collection: 'omb' }).changes).toBe(0);
+    stmts.setPollResult.run({
+      stream: 'ord',
+      collection: 'omb',
+      status: 'ok',
+      event_count: 0,
+      cursor: null,
+    });
+    expect(stmts.acquireLock.run({ stream: 'ord', collection: 'omb' }).changes).toBe(1);
+  });
+});
+
 describe('setInscriptionOwnerIfNewer — recency guard', () => {
   it('sets owner when last_movement_at is NULL (cold start)', () => {
     const db = dbModule.getDb();
@@ -546,6 +562,62 @@ describe('marketplace intent source validation', () => {
 });
 
 describe('buy_intents schema', () => {
+  it('upgrades v44 claims, leases, and the legacy active-sale lock', async () => {
+    const db = dbModule.getDb();
+    const inscription = db.prepare(`SELECT inscription_number FROM inscriptions LIMIT 1`).get() as {
+      inscription_number: number;
+    };
+    db.prepare(
+      `INSERT INTO community_campaigns (
+         id, inscription_number, inscription_id, current_outpoint, source, ownership_mode,
+         eligibility_mode, creator_owner_id, status, terms_version, landed_cost_sats,
+         max_landed_cost_sats, source_fingerprint, opened_at, expires_at, cap_table_version,
+         created_at, updated_at
+       ) VALUES (
+         'migration-campaign', ?, 'migration-inscription', 'migration:0', 'creator-fronted',
+         'open', 'anyone', 'creator', 'held', 'terms', 1000, 1000, 'fingerprint',
+         1, 9999999999, 1, 1, 1
+       )`
+    ).run(inscription.inscription_number);
+    db.prepare(
+      `INSERT INTO community_sales (
+         campaign_id, offer_digest, plan_json, preflight_json, signing_psbt_hex,
+         status, expires_at_ms, created_at, updated_at
+       ) VALUES ('migration-campaign', 'migration-offer', '{}', '{}', '00', 'signing',
+                 9999999999000, 1, 1)`
+    ).run();
+    db.exec(`
+      ALTER TABLE buy_intents DROP COLUMN broadcast_claim_token;
+      ALTER TABLE buy_intents DROP COLUMN broadcast_claimed_at;
+      ALTER TABLE poll_state DROP COLUMN lock_until;
+    `);
+    db.pragma('user_version = 44');
+    db.close();
+
+    vi.resetModules();
+    dbModule = await import('../src/lib/db');
+    const upgraded = dbModule.getDb();
+    expect(upgraded.pragma('user_version', { simple: true })).toBe(45);
+    expect(
+      (upgraded.prepare(`PRAGMA table_info(buy_intents)`).all() as Array<{ name: string }>).map(
+        column => column.name
+      )
+    ).toEqual(expect.arrayContaining(['broadcast_claim_token', 'broadcast_claimed_at']));
+    expect(
+      (upgraded.prepare(`PRAGMA table_info(poll_state)`).all() as Array<{ name: string }>).map(
+        column => column.name
+      )
+    ).toContain('lock_until');
+    expect(
+      upgraded
+        .prepare(
+          `SELECT active_operation_kind, active_operation_id
+           FROM community_campaigns WHERE id = 'migration-campaign'`
+        )
+        .get()
+    ).toEqual({ active_operation_kind: 'sale', active_operation_id: 'migration-campaign' });
+  });
+
   it('creates buy_intents with buyer and tx indexes', () => {
     const db = dbModule.getDb();
     const tbl = db
@@ -607,6 +679,59 @@ describe('buy_intents schema', () => {
     expect(intent?.status).toBe('broadcast');
     expect(intent?.txid).toBe('real-txid');
     expect(intent?.fail_reason).toBeNull();
+  });
+
+  it('allows only one broadcast claim and makes completion token-aware', async () => {
+    const row = dbModule.getDb().prepare(`SELECT * FROM inscriptions LIMIT 1`).get() as {
+      inscription_number: number;
+      inscription_id: string | null;
+    };
+    const store = await import('../src/lib/marketplace/buyIntentsStore');
+    const id = store.createBuyIntent({
+      inscription_id: row.inscription_id ?? `unknown-${row.inscription_number}`,
+      inscription_number: row.inscription_number,
+      buyer_ord_addr: 'bc1pbuyer',
+      buyer_pay_addr: 'bc1qbuyer',
+      marketplace: 'satflow',
+      price_sats: 1_000_000,
+      is_mock: false,
+    });
+
+    expect(store.claimIntentBroadcast(id, 'claim-a')).toBe(true);
+    expect(store.claimIntentBroadcast(id, 'claim-b')).toBe(false);
+    expect(store.completeIntentBroadcast(id, 'claim-b', 'wrong-tx')).toBe(false);
+    expect(store.completeIntentBroadcast(id, 'claim-a', 'real-tx')).toBe(true);
+    expect(store.getBuyIntent(id)).toMatchObject({
+      status: 'broadcast',
+      txid: 'real-tx',
+      broadcast_claim_token: null,
+    });
+  });
+
+  it('reclaims a stale broadcast claim without letting the old owner finish', async () => {
+    const row = dbModule.getDb().prepare(`SELECT * FROM inscriptions LIMIT 1`).get() as {
+      inscription_number: number;
+      inscription_id: string | null;
+    };
+    const store = await import('../src/lib/marketplace/buyIntentsStore');
+    const id = store.createBuyIntent({
+      inscription_id: row.inscription_id ?? `unknown-${row.inscription_number}`,
+      inscription_number: row.inscription_number,
+      buyer_ord_addr: 'bc1pbuyer',
+      buyer_pay_addr: null,
+      marketplace: 'satflow',
+      price_sats: 1_000_000,
+      is_mock: false,
+    });
+    expect(store.claimIntentBroadcast(id, 'old-claim')).toBe(true);
+    dbModule
+      .getDb()
+      .prepare(`UPDATE buy_intents SET broadcast_claimed_at = unixepoch() - 999 WHERE id = ?`)
+      .run(id);
+    expect(store.claimIntentBroadcast(id, 'new-claim')).toBe(true);
+    expect(store.completeIntentBroadcast(id, 'old-claim', 'old-tx')).toBe(false);
+    expect(store.completeIntentBroadcast(id, 'new-claim', 'new-tx')).toBe(true);
+    expect(store.getBuyIntent(id)?.txid).toBe('new-tx');
   });
 });
 

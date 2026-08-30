@@ -192,12 +192,18 @@ export async function fetchListingsPage(args: FetchListingsArgs): Promise<FetchL
 // ---------------- normalization ----------------
 
 function extractSales(json: unknown): Record<string, unknown>[] {
-  if (!json || typeof json !== 'object') return [];
+  if (!json || typeof json !== 'object') {
+    throw new SatflowError('Unexpected sales response shape', null, false);
+  }
   const obj = json as Record<string, unknown>;
   const data = obj.data;
-  if (!data || typeof data !== 'object') return [];
+  if (!data || typeof data !== 'object') {
+    throw new SatflowError('Unexpected sales response shape', null, false);
+  }
   const sales = (data as Record<string, unknown>).sales;
-  if (!Array.isArray(sales)) return [];
+  if (!Array.isArray(sales)) {
+    throw new SatflowError('Unexpected sales response shape', null, false);
+  }
   return sales.filter(x => x && typeof x === 'object') as Record<string, unknown>[];
 }
 
@@ -296,12 +302,18 @@ function normalizeSale(item: Record<string, unknown>): NormalizedSale | null {
 }
 
 function extractListings(json: unknown): Record<string, unknown>[] {
-  if (!json || typeof json !== 'object') return [];
+  if (!json || typeof json !== 'object') {
+    throw new SatflowError('Unexpected listings response shape', null, false);
+  }
   const obj = json as Record<string, unknown>;
   const data = obj.data;
-  if (!data || typeof data !== 'object') return [];
+  if (!data || typeof data !== 'object') {
+    throw new SatflowError('Unexpected listings response shape', null, false);
+  }
   const listings = (data as Record<string, unknown>).listings;
-  if (!Array.isArray(listings)) return [];
+  if (!Array.isArray(listings)) {
+    throw new SatflowError('Unexpected listings response shape', null, false);
+  }
   return listings.filter(x => x && typeof x === 'object') as Record<string, unknown>[];
 }
 
@@ -366,6 +378,7 @@ async function getWithRetry(url: string, apiKey?: string | null): Promise<unknow
     } catch (err) {
       if (!(err instanceof SatflowError) || !err.retryable) throw err;
       lastError = err;
+      if (attempt === MAX_RETRIES - 1) break;
       const baseMs =
         err.status === 429 ? (extractRetryAfterMs(err) ?? 60_000) : 1000 * 2 ** attempt;
       const jitter = baseMs * (0.75 + Math.random() * 0.5);

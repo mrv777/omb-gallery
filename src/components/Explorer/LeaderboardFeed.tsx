@@ -22,7 +22,7 @@ export default function LeaderboardFeed({ type, color, initial }: Props) {
   const isHolders = type === 'top-holders';
   const unitLabel = type === 'top-holders' ? 'holders' : 'inscriptions';
 
-  const { items, loading, error, reachedEnd, capped, loadMore } = useLeaderboardFeed(
+  const { items, loading, error, reachedEnd, capped, loadMore, retry } = useLeaderboardFeed(
     type,
     color,
     initial
@@ -79,9 +79,16 @@ export default function LeaderboardFeed({ type, color, initial }: Props) {
       {error && (
         <div
           role="alert"
-          className="px-4 py-3 font-mono text-[11px] uppercase tracking-[0.08em] text-accent-red border-t border-ink-2"
+          className="flex items-center justify-between gap-3 px-4 py-3 font-mono text-[11px] uppercase tracking-[0.08em] text-accent-red border-t border-ink-2"
         >
-          load failed: {error}
+          <span>load failed: {error}</span>
+          <button
+            type="button"
+            onClick={retry}
+            className="shrink-0 border border-accent-red px-2 py-1 hover:bg-accent-red hover:text-ink-0"
+          >
+            retry
+          </button>
         </div>
       )}
       {loading && items.length > 0 && (

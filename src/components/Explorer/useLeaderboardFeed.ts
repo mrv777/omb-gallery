@@ -59,6 +59,7 @@ export function useLeaderboardFeed<T extends LeaderboardItem>(
   // first reset-and-fetch so we don't immediately overwrite the server-rendered
   // list with an identical client fetch.
   const skipInitialReset = useRef<boolean>(true);
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   const buildUrl = useCallback(
     (cursor: string | null) => {
@@ -174,7 +175,15 @@ export function useLeaderboardFeed<T extends LeaderboardItem>(
         if (myGen === reqGenRef.current) loadingRef.current = false;
       }
     })();
-  }, [color, type]);
+  }, [color, type, reloadNonce]);
 
-  return { ...state, loadMore };
+  const retry = useCallback(() => {
+    if (seenKeysRef.current.size > 0 && cursorRef.current != null) {
+      void loadMore();
+      return;
+    }
+    setReloadNonce(value => value + 1);
+  }, [loadMore]);
+
+  return { ...state, loadMore, retry };
 }

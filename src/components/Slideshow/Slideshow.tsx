@@ -8,6 +8,7 @@ import type { SlideshowImage } from '@/lib/slideshowImages';
 import SlideshowControls from './SlideshowControls';
 import ShareDialog from './ShareDialog';
 import SaveToFavoritesButton from './SaveToFavoritesButton';
+import { nextSlideshowSeed, shuffledIndices } from '@/lib/slideshowShuffle';
 
 export type Order = 'seq' | 'random';
 export type Speed = number;
@@ -31,16 +32,8 @@ type Props = {
   initialSpeed: Speed;
   initialOrder: Order;
   initialLoop: boolean;
+  initialShuffleSeed: number;
 };
-
-function shuffleIndices(len: number): number[] {
-  const a = Array.from({ length: len }, (_, i) => i);
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
 
 export default function Slideshow({
   images,
@@ -50,6 +43,7 @@ export default function Slideshow({
   initialSpeed,
   initialOrder,
   initialLoop,
+  initialShuffleSeed,
 }: Props) {
   const router = useRouter();
 
@@ -62,18 +56,15 @@ export default function Slideshow({
   const [shareOpen, setShareOpen] = useState(false);
   const [isFs, setIsFs] = useState(false);
 
-  // The order in which to iterate images. Reshuffles each time `order` flips
-  // to 'random' (plan: "Reshuffle only on Play, no seed"). A change in images
-  // also re-derives this.
-  const [seqSalt, setSeqSalt] = useState(0);
+  // The server supplies the first seed so SSR and hydration agree. Each later
+  // switch into random mode advances the seed and produces a fresh order.
+  const [shuffleSeed, setShuffleSeed] = useState(initialShuffleSeed);
   const playOrder = useMemo<number[]>(() => {
     if (order === 'seq' || images.length <= 1) {
       return Array.from({ length: images.length }, (_, i) => i);
     }
-    return shuffleIndices(images.length);
-    // seqSalt is intentionally referenced to re-run on shuffle-refresh.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [images.length, order, seqSalt]);
+    return shuffledIndices(images.length, shuffleSeed);
+  }, [images.length, order, shuffleSeed]);
 
   const safePos = pos < playOrder.length ? pos : 0;
   const current = images[playOrder[safePos] ?? 0];
@@ -172,7 +163,7 @@ export default function Slideshow({
   const toggleOrder = useCallback(() => {
     setOrder(o => {
       const next = o === 'seq' ? 'random' : 'seq';
-      if (next === 'random') setSeqSalt(s => s + 1);
+      if (next === 'random') setShuffleSeed(nextSlideshowSeed);
       return next;
     });
     setPos(0);

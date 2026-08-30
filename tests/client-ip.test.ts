@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clientIpKey } from '../src/lib/clientIp';
+import { clientIpKey, turnstileRemoteIp } from '../src/lib/clientIp';
 
 describe('clientIpKey', () => {
   it('normalizes valid IPv4 and collapses IPv6 to /64', () => {
@@ -22,5 +22,13 @@ describe('clientIpKey', () => {
     expect(clientIpKey(new Headers())).toBe('unknown');
     expect(clientIpKey(new Headers({ 'cf-connecting-ip': '999.2.3.4' }))).toBe('unknown');
     expect(clientIpKey(new Headers({ 'cf-connecting-ip': 'attacker-bucket-123' }))).toBe('unknown');
+  });
+});
+
+describe('turnstileRemoteIp', () => {
+  it('passes concrete IPv4 addresses and omits rate-limit-only buckets', () => {
+    expect(turnstileRemoteIp('192.0.2.4')).toBe('192.0.2.4');
+    expect(turnstileRemoteIp('2001:0db8:abcd:0012::/64')).toBeUndefined();
+    expect(turnstileRemoteIp('unknown')).toBeUndefined();
   });
 });

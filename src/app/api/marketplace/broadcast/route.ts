@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import {
   BUYER_COOKIE_NAME,
   ORDNET_SESSION_COOKIE_NAME,
@@ -6,11 +7,11 @@ import {
   parseOrdnetBuyerSession,
 } from '@/lib/buyerSession';
 import {
+  advanceIntentBroadcast,
+  claimIntentBroadcast,
+  completeIntentBroadcast,
+  failIntentBroadcast,
   getBuyIntent,
-  markIntentBroadcast,
-  markIntentFailed,
-  markIntentSigned,
-  updateIntentPreflightJson,
 } from '@/lib/marketplace/buyIntentsStore';
 import { marketplaceMockEnabled } from '@/lib/marketplace/listings';
 import { marketplaceRateLimit, requireMarketplaceEnabled } from '@/lib/marketplace/apiGuards';
@@ -66,12 +67,26 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  markIntentSigned(intentId);
+  const claimToken = randomUUID();
+  if (!claimIntentBroadcast(intentId, claimToken)) {
+    const latest = getBuyIntent(intentId);
+    if (latest?.status === 'broadcast' && latest.txid) {
+      return NextResponse.json({
+        intent_id: latest.id,
+        txid: latest.txid,
+        mock: latest.is_mock === 1,
+      });
+    }
+    return NextResponse.json(
+      { error: 'This purchase is already being submitted. Try again in a moment.' },
+      { status: 409, headers: { 'Retry-After': '2' } }
+    );
+  }
   const firstSignedPsbt = signedPsbts[0]!;
 
   if (marketplaceMockEnabled() && intent.is_mock === 1) {
     const result = mockBroadcast(intentId);
-    markIntentBroadcast(intentId, result.txid!);
+    completeIntentBroadcast(intentId, claimToken, result.txid!);
     return NextResponse.json(result);
   }
 
@@ -79,13 +94,13 @@ export async function POST(req: NextRequest) {
     const marketplaceKey = intent.marketplace.toLowerCase();
     if (marketplaceKey === 'ord.net' || marketplaceKey === 'ordnet') {
       const result = await broadcastOrdnet(req, intent, firstSignedPsbt);
-      markIntentBroadcast(intentId, result.txid);
+      completeIntentBroadcast(intentId, claimToken, result.txid);
       return NextResponse.json({ intent_id: intentId, txid: result.txid, mock: false });
     }
 
     const result = await broadcastSatflowPurchase(intent, signedPsbts);
     if (result.type === 'next') {
-      updateIntentPreflightJson(intentId, result.preflightJson);
+      advanceIntentBroadcast(intentId, claimToken, result.preflightJson);
       const responsePsbts = wantsDreyContext
         ? withSatflowDreyContexts({
             psbts: result.psbts,
@@ -110,11 +125,11 @@ export async function POST(req: NextRequest) {
         mock: false,
       });
     }
-    markIntentBroadcast(intentId, result.txid);
+    completeIntentBroadcast(intentId, claimToken, result.txid);
     return NextResponse.json({ intent_id: intentId, txid: result.txid, mock: false });
   } catch (err) {
     if (err instanceof OrdnetAuthRequiredError) {
-      markIntentFailed(intentId, err.message);
+      failIntentBroadcast(intentId, claimToken, err.message);
       return NextResponse.json(
         { error: err.message, code: 'ordnet-auth-required' },
         { status: 428 }
@@ -125,7 +140,7 @@ export async function POST(req: NextRequest) {
       intent.marketplace.toLowerCase() === 'ordnet'
         ? ordnetErrorResponse(err)
         : satflowBuyErrorResponse(err);
-    markIntentFailed(intentId, mapped.message);
+    failIntentBroadcast(intentId, claimToken, mapped.message);
     return NextResponse.json({ error: mapped.message }, { status: mapped.status });
   }
 }

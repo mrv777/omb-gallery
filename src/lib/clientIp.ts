@@ -59,3 +59,9 @@ export function clientIpKey(headers: Headers): string {
   // in-memory buckets. Invalid inputs share the fail-closed unknown bucket.
   return 'unknown';
 }
+
+// Turnstile's optional remoteip field accepts one concrete visitor address,
+// not the privacy-preserving IPv6 /64 key used by our rate limiter.
+export function turnstileRemoteIp(ipKey: string): string | undefined {
+  return ipKey !== 'unknown' && !ipKey.includes('/') ? ipKey : undefined;
+}

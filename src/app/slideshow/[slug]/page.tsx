@@ -9,6 +9,7 @@ import Slideshow, {
   type Speed,
 } from '@/components/Slideshow/Slideshow';
 import { buildSocial } from '@/lib/metadata';
+import { slideshowSeed } from '@/lib/slideshowShuffle';
 
 function parseSpeed(raw: string | undefined): Speed {
   if (!raw) return DEFAULT_SPEED;
@@ -84,6 +85,7 @@ export default async function SharedSlideshowPage({
       initialSpeed={parseSpeed(firstValue(qp.speed))}
       initialOrder={parseOrder(firstValue(qp.order))}
       initialLoop={parseLoop(firstValue(qp.loop))}
+      initialShuffleSeed={slideshowSeed(images.map(image => image.id))}
     />
   );
 }

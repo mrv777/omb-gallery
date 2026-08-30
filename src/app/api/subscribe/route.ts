@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { clientIpKey } from '@/lib/clientIp';
+import { clientIpKey, turnstileRemoteIp } from '@/lib/clientIp';
 import { checkAndConsumePerIp } from '@/lib/rateLimit';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 import { randomBytes } from 'node:crypto';
@@ -214,7 +214,7 @@ export async function POST(req: NextRequest) {
 
   const token = typeof body.turnstileToken === 'string' ? body.turnstileToken : '';
   if (!token) return bad(403, 'turnstile-missing');
-  const verify = await verifyTurnstileToken(token, ip !== 'unknown' ? ip : undefined);
+  const verify = await verifyTurnstileToken(token, turnstileRemoteIp(ip));
   if (!verify.ok) {
     return NextResponse.json({ error: 'turnstile-failed', codes: verify.errors }, { status: 403 });
   }

@@ -665,7 +665,7 @@ function validateApprovalPayload(payload: ApproveSalePayloadV1, campaignId: stri
     !Number.isInteger(payload.approvedAt) ||
     !Number.isInteger(payload.expiresAt) ||
     payload.approvedAt > now + 60 ||
-    payload.expiresAt < now ||
+    payload.expiresAt <= now ||
     payload.expiresAt - payload.approvedAt > ACTION_WINDOW_SEC
   ) {
     throw new CommunityPurchaseError(

@@ -74,9 +74,9 @@ afterEach(() => {
 });
 
 describe('Community Purchases coordination', () => {
-  it('creates public-only schema at v44', () => {
+  it('creates public-only schema at v45', () => {
     const db = dbModule.getDb();
-    expect(db.pragma('user_version', { simple: true })).toBe(44);
+    expect(db.pragma('user_version', { simple: true })).toBe(45);
     const tables = db
       .prepare(
         `SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'community_%' ORDER BY name`
@@ -100,6 +100,35 @@ describe('Community Purchases coordination', () => {
     expect(columns.map(column => column.name)).not.toEqual(
       expect.arrayContaining(['private_key', 'mnemonic', 'seed', 'recovery_key'])
     );
+  });
+
+  it('rejects fractional creator and reservation units before allocation', async () => {
+    const fixture = seedListedTarget();
+    await expect(createOpenCampaign(fixture, 1.5)).rejects.toThrow(/1 to 20 units/i);
+
+    const campaign = await createOpenCampaign(fixture);
+    expect(() =>
+      store.reserveCommunityUnits({
+        payload: reservePayload(campaign, 1, 1.5),
+        signature: 'fractional-reservation',
+        walletAddress: roots[1]!.payoutAddress,
+        now: NOW + 1,
+      })
+    ).toThrow(/1 to 20 units/i);
+  });
+
+  it('hides expired sale attempts so a replacement offer can be prepared', async () => {
+    const campaign = await createOpenCampaign(seedListedTarget());
+    dbModule
+      .getDb()
+      .prepare(
+        `INSERT INTO community_sales (
+           campaign_id, offer_digest, plan_json, preflight_json, signing_psbt_hex,
+           status, expires_at_ms, created_at, updated_at
+         ) VALUES (?, 'expired-offer', '{}', '{}', '00', 'expired', ?, ?, ?)`
+      )
+      .run(campaign.id, NOW * 1000, NOW, NOW);
+    expect(store.getCommunityCampaign(campaign.id, NOW)?.sale).toBeNull();
   });
 
   it('aggregates Matrica siblings under one 20-unit identity cap', async () => {
@@ -747,11 +776,21 @@ describe('Community Purchases coordination', () => {
       });
     }
     const versionBeforeTimeout = campaign.capTableVersion;
+    dbModule
+      .getDb()
+      .prepare(
+        `UPDATE community_participants SET waitlisted_units = 7
+         WHERE campaign_id = ? AND owner_id = 'owner-1'`
+      )
+      .run(campaign.id);
     const after = store.getCommunityCampaign(campaign.id, campaign.readinessDeadline! + 1)!;
     expect(after.status).toBe('open');
     expect(after.allocatedUnitCount).toBe(90);
     expect(after.capTableVersion).toBe(versionBeforeTimeout + 1);
-    expect(after.participants.find(row => row.ownerId === 'owner-1')?.readiness).toBe('timed-out');
+    expect(after.participants.find(row => row.ownerId === 'owner-1')).toMatchObject({
+      readiness: 'timed-out',
+      waitlistedUnits: 0,
+    });
     expect(after.participants.find(row => row.ownerId === 'owner-5')).toMatchObject({
       allocatedUnits: expect.arrayContaining([20]),
       waitlistedUnits: 0,
@@ -984,7 +1023,7 @@ function seedListedTarget() {
   return { targetNumber };
 }
 
-async function createOpenCampaign(fixture: { targetNumber: number }) {
+async function createOpenCampaign(fixture: { targetNumber: number }, creatorUnits = 20) {
   const payload: CreateCampaignPayloadV1 = {
     protocol: COMMUNITY_PURCHASES_PROTOCOL,
     version: 1,
@@ -996,7 +1035,7 @@ async function createOpenCampaign(fixture: { targetNumber: number }) {
     source: 'listed',
     ownershipMode: 'open',
     eligibilityMode: 'anyone',
-    creatorUnits: 20,
+    creatorUnits,
     maxLandedCostSats: '2000000',
     listingId: 'listing-1',
     marketplace: 'satflow',

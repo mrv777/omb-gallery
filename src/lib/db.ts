@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_BRAVOCADO_DISTRIBUTION_LIST, SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 44;
+const SCHEMA_VERSION = 45;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -176,6 +176,7 @@ function migrate(db: DB): void {
         upgradeV41ToV42(db);
         upgradeV42ToV43(db);
         upgradeV43ToV44(db);
+        upgradeV44ToV45(db);
       } else {
         initSchemaLatest(db);
       }
@@ -223,6 +224,7 @@ function migrate(db: DB): void {
       if (current < 42) upgradeV41ToV42(db);
       if (current < 43) upgradeV42ToV43(db);
       if (current < 44) upgradeV43ToV44(db);
+      if (current < 45) upgradeV44ToV45(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -359,6 +361,7 @@ function initSchemaLatest(db: DB): void {
       collection_slug           TEXT NOT NULL REFERENCES collections (slug),
       last_cursor               TEXT,
       last_run_at               INTEGER,
+      lock_until                INTEGER,
       last_status               TEXT,
       last_event_count          INTEGER,
       is_backfilling            INTEGER NOT NULL DEFAULT 0,
@@ -451,6 +454,8 @@ function initSchemaLatest(db: DB): void {
       txid               TEXT,
       fail_reason        TEXT,
       preflight_json     TEXT,
+      broadcast_claim_token TEXT,
+      broadcast_claimed_at   INTEGER,
       is_mock            INTEGER NOT NULL DEFAULT 0,
       created_at         INTEGER NOT NULL,
       updated_at         INTEGER NOT NULL
@@ -2417,6 +2422,42 @@ function upgradeV43ToV44(db: DB): void {
   `);
 }
 
+function upgradeV44ToV45(db: DB): void {
+  const columns = new Set(
+    (db.prepare(`PRAGMA table_info(buy_intents)`).all() as Array<{ name: string }>).map(
+      column => column.name
+    )
+  );
+  if (!columns.has('broadcast_claim_token')) {
+    db.exec(`ALTER TABLE buy_intents ADD COLUMN broadcast_claim_token TEXT`);
+  }
+  if (!columns.has('broadcast_claimed_at')) {
+    db.exec(`ALTER TABLE buy_intents ADD COLUMN broadcast_claimed_at INTEGER`);
+  }
+  const pollColumns = new Set(
+    (db.prepare(`PRAGMA table_info(poll_state)`).all() as Array<{ name: string }>).map(
+      column => column.name
+    )
+  );
+  if (!pollColumns.has('lock_until')) {
+    db.exec(`ALTER TABLE poll_state ADD COLUMN lock_until INTEGER`);
+  }
+
+  // v44 introduced the campaign lock after sales already existed. Restore
+  // the invariant for any live sale created before that deploy.
+  db.exec(`
+    UPDATE community_campaigns
+       SET active_operation_kind = 'sale',
+           active_operation_id = id
+     WHERE active_operation_kind IS NULL
+       AND EXISTS (
+         SELECT 1 FROM community_sales
+          WHERE campaign_id = community_campaigns.id
+            AND status IN ('signing','ready')
+       )
+  `);
+}
+
 function upgradeV30ToV31(db: DB): void {
   // Materialize connected components at IDENTITY_FOLD_THRESHOLD so the
   // top-holders leaderboard, color leaderboards, holder distribution
@@ -2593,6 +2634,7 @@ type Stmts = {
   upsertInscriptionFromEvent: ReturnType<DB['prepare']>;
   bumpInscriptionAggregates: ReturnType<DB['prepare']>;
   unbumpTransferOnUpgrade: ReturnType<DB['prepare']>;
+  recomputeInscriptionRecency: ReturnType<DB['prepare']>;
   setInscriptionState: ReturnType<DB['prepare']>;
   setInscriptionId: ReturnType<DB['prepare']>;
   setInscriptionInscribeAt: ReturnType<DB['prepare']>;
@@ -2781,6 +2823,20 @@ export function getStmts(): Stmts {
       WHERE inscription_number = @inscription_number
     `),
 
+    recomputeInscriptionRecency: db.prepare(`
+      UPDATE inscriptions SET
+        last_event_at = (
+          SELECT MAX(block_timestamp) FROM events
+           WHERE inscription_number = @inscription_number
+        ),
+        last_movement_at = (
+          SELECT MAX(block_timestamp) FROM events
+           WHERE inscription_number = @inscription_number
+             AND event_type IN ('transferred','sold')
+        )
+      WHERE inscription_number = @inscription_number
+    `),
+
     setInscriptionState: db.prepare(`
       UPDATE inscriptions
       SET current_output  = @current_output,
@@ -2949,21 +3005,21 @@ export function getStmts(): Stmts {
       SELECT * FROM poll_state WHERE stream = @stream AND collection_slug = @collection
     `),
 
-    // Soft lock: succeeds only if no recent run for this (stream, collection).
-    // The window must exceed the worst-case tick duration
-    // (TICK_WALLCLOCK_BUDGET_MS plus enrichment + I/O slack) — otherwise a
-    // still-running tick can be raced by a fresh cron call.
+    // Lease: successful runs clear lock_until, so the normal five-minute cron
+    // is never delayed. A crashed run releases itself after ten minutes.
     acquireLock: db.prepare(`
       UPDATE poll_state
-      SET last_run_at = unixepoch()
+      SET last_run_at = unixepoch(),
+          lock_until = unixepoch() + 600
       WHERE stream = @stream
         AND collection_slug = @collection
-        AND (last_run_at IS NULL OR last_run_at < unixepoch() - 120)
+        AND (lock_until IS NULL OR lock_until <= unixepoch())
     `),
 
     setPollResult: db.prepare(`
       UPDATE poll_state
       SET last_run_at = unixepoch(),
+          lock_until = NULL,
           last_status = @status,
           last_event_count = @event_count,
           last_cursor = COALESCE(@cursor, last_cursor)

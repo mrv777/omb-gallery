@@ -33,6 +33,15 @@ export type InitialActivity = {
   matrica: ApiMatricaMap;
 };
 
+export function mergeRefreshedEvents(current: ApiEvent[], incoming: ApiEvent[]): ApiEvent[] {
+  const currentIds = new Set(current.map(event => event.id));
+  const incomingById = new Map(incoming.map(event => [event.id, event]));
+  const newEvents = incoming.filter(event => !currentIds.has(event.id));
+  return [...newEvents, ...current.map(event => incomingById.get(event.id) ?? event)].toSorted(
+    (left, right) => right.block_timestamp - left.block_timestamp || right.id - left.id
+  );
+}
+
 export function useActivityFeed(
   filter: FeedFilter = 'all',
   color: ColorFilter = 'all',
@@ -111,7 +120,8 @@ export function useActivityFeed(
   }, [buildUrl]);
 
   const refreshHead = useCallback(async () => {
-    // Pull the first page; prepend any events whose id is greater than what we have.
+    // Pull the first page, prepend new rows, and replace matching IDs whose
+    // enrichment changed (for example transferred -> sold).
     // Capture the request generation so a stale response from a previous filter
     // is discarded if the user changed filters mid-flight — otherwise old-filter
     // events would prepend into a freshly-reset feed and pollute seenIdsRef.
@@ -123,19 +133,10 @@ export function useActivityFeed(
       const data: ApiActivityResponse = await res.json();
       if (myGen !== reqGenRef.current) return;
       const newOnes = data.events.filter(e => !seenIdsRef.current.has(e.id));
-      if (newOnes.length === 0) {
-        setState(prev => ({
-          ...prev,
-          totals: data.totals,
-          poll: data.poll,
-          matrica: { ...prev.matrica, ...(data.matrica ?? {}) },
-        }));
-        return;
-      }
       for (const e of newOnes) seenIdsRef.current.add(e.id);
       setState(prev => ({
         ...prev,
-        events: [...newOnes, ...prev.events],
+        events: mergeRefreshedEvents(prev.events, data.events),
         totals: data.totals,
         poll: data.poll,
         matrica: { ...prev.matrica, ...(data.matrica ?? {}) },

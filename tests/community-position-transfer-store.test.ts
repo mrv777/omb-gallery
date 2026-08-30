@@ -109,6 +109,28 @@ describe('private whole-position transfer coordination', () => {
     ).toEqual({ active_operation_kind: 'position-transfer' });
   });
 
+  it('blocks a transfer when a legacy active sale exists without a campaign lock', () => {
+    dbModule
+      .getDb()
+      .prepare(
+        `INSERT INTO community_sales (
+           campaign_id, offer_digest, plan_json, preflight_json, signing_psbt_hex,
+           status, expires_at_ms, created_at, updated_at
+         ) VALUES (?, 'legacy-sale', '{}', '{}', '00', 'signing', ?, ?, ?)`
+      )
+      .run(policy.campaignId, (NOW + 600) * 1000, NOW, NOW);
+    const seller = policy.owners[1]!;
+    expect(() =>
+      transferStore.createPrivatePositionTransferInvite({
+        payload: invitePayload(seller.ownerId),
+        signature: 'receipt',
+        walletAddress: seller.payoutAddress,
+        now: NOW,
+        random32: deterministicRandom(),
+      })
+    ).toThrow(/already in progress/u);
+  });
+
   it('rejects the creator position and releases an expired invite lock', () => {
     const creator = policy.owners.find(owner => owner.ownerId === policy.creatorOwnerId)!;
     expect(() =>

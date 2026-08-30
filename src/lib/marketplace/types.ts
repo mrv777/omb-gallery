@@ -74,6 +74,8 @@ export type BuyIntentRow = {
   txid: string | null;
   fail_reason: string | null;
   preflight_json: string | null;
+  broadcast_claim_token: string | null;
+  broadcast_claimed_at: number | null;
   is_mock: 0 | 1;
   created_at: number;
   updated_at: number;

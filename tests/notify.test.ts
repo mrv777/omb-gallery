@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { NextRequest } from 'next/server';
 
 let dbModule: typeof import('../src/lib/db');
 
@@ -127,6 +128,50 @@ describe('subscription updates', () => {
     expect(second.ok).toBe(true);
     if (!second.ok) return;
     expect(second.row.event_mask).toBe(store.MASK_SOLD | store.MASK_LISTED);
+  });
+
+  it('requires a POST confirmation before muting every watch for a target', async () => {
+    const store = await import('../src/lib/subscriptionStore');
+    const first = store.createActive({
+      channel: 'discord',
+      channelTarget: WEBHOOK_A,
+      kind: 'collection',
+      targetKey: 'omb',
+      eventMask: store.MASK_SOLD,
+      creatorIp: '127.0.0.1',
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    store.createActive({
+      channel: 'discord',
+      channelTarget: WEBHOOK_A,
+      kind: 'color',
+      targetKey: 'red',
+      eventMask: store.MASK_LISTED,
+      creatorIp: '127.0.0.1',
+    });
+
+    const route = await import('../src/app/api/unsubscribe/route');
+    const getResponse = await route.GET(
+      new NextRequest(`http://localhost/api/unsubscribe?token=${first.row.unsub_token}&burn=1`)
+    );
+    expect(await getResponse.text()).toContain('Confirm unsubscribe');
+    expect(store.findByUnsubToken(first.row.unsub_token)?.status).toBe('active');
+
+    const body = new URLSearchParams({ token: first.row.unsub_token, burn: '1' });
+    const postResponse = await route.POST(
+      new NextRequest('http://localhost/api/unsubscribe', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body,
+      })
+    );
+    expect(await postResponse.text()).toContain('Removed 2 subscriptions');
+    const statuses = dbModule
+      .getDb()
+      .prepare(`SELECT status FROM subscriptions WHERE channel_target = ? ORDER BY id`)
+      .all(WEBHOOK_A) as Array<{ status: string }>;
+    expect(statuses).toEqual([{ status: 'failed' }, { status: 'failed' }]);
   });
 });
 

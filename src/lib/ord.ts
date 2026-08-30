@@ -174,7 +174,7 @@ function extractList(json: unknown): Record<string, unknown>[] {
       return candidate.filter(x => x && typeof x === 'object') as Record<string, unknown>[];
     }
   }
-  return [];
+  throw new OrdError('Unexpected /inscriptions response shape', null, false);
 }
 
 function normalizeInscriptionState(item: Record<string, unknown>): OrdInscriptionState | null {
@@ -369,6 +369,7 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
     } catch (err) {
       if (!(err instanceof OrdError) || !err.retryable) throw err;
       lastError = err;
+      if (attempt === MAX_RETRIES - 1) break;
       const baseMs = 500 * 2 ** attempt;
       const jitter = baseMs * (0.75 + Math.random() * 0.5);
       await sleep(Math.min(jitter, 10_000));

@@ -9,6 +9,7 @@ import type { ApiHolder, ApiInscription } from '@/components/Activity/types';
 import type { LeaderboardItem } from '@/components/Explorer/useLeaderboardFeed';
 import { colorParamForSql, parseColorParam } from '@/lib/colorFilter';
 import { SITE_NAME, buildSocial } from '@/lib/metadata';
+import { estimateLoanExpiration } from '@/lib/loanExpiration';
 
 const VALID: LeaderboardKey[] = [
   'most-transferred',
@@ -121,7 +122,16 @@ export default async function LeaderboardDetailPage({
       cursor_primary: null,
       cursor_secondary: null,
     }) as InscriptionRow[];
-    const inscriptions: ApiInscription[] = rows;
+    const inscriptions: ApiInscription[] =
+      type === 'currently-loaned'
+        ? rows.map(row => {
+            const estimate = estimateLoanExpiration({
+              originationTs: row.active_loan_started_at ?? null,
+              lenderVault: row.active_loan_lender_vault ?? null,
+            });
+            return estimate ? { ...row, ...estimate } : row;
+          })
+        : rows;
     items = inscriptions;
     nextCursor =
       inscriptions.length === PAGE_SIZE
@@ -160,8 +170,6 @@ function buildInscriptionCursor(
     case 'most-loaned':
       return `${row.loan_count ?? 0}:${num}`;
     case 'currently-loaned':
-      return row.active_loan_started_at != null
-        ? `${row.active_loan_started_at}:${num}`
-        : null;
+      return row.active_loan_started_at != null ? `${row.active_loan_started_at}:${num}` : null;
   }
 }

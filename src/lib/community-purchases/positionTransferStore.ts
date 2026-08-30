@@ -174,7 +174,12 @@ export function createPrivatePositionTransferInvite(args: {
       .prepare(
         `UPDATE community_campaigns
        SET active_operation_kind = 'position-transfer', active_operation_id = ?, updated_at = ?
-       WHERE id = ? AND status = 'held' AND active_operation_kind IS NULL`
+       WHERE id = ? AND status = 'held' AND active_operation_kind IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM community_sales
+            WHERE campaign_id = community_campaigns.id
+              AND status IN ('signing','ready')
+         )`
       )
       .run(transferId, now, campaign.id);
     if (locked.changes !== 1) {
@@ -1190,7 +1195,7 @@ function validateAcceptPayload(payload: AcceptPositionTransferPayloadV1, now: nu
     payload.identityDisclosureConsent !== true ||
     !IDENTIFIER.test(payload.nonce) ||
     !Number.isInteger(payload.expiresAt) ||
-    payload.expiresAt < now ||
+    payload.expiresAt <= now ||
     payload.expiresAt > now + ACTION_WINDOW_SEC
   ) {
     throw new CommunityPurchaseError(
@@ -1222,7 +1227,7 @@ function validateApprovalPayload(
     !Number.isInteger(payload.approvedAt) ||
     !Number.isInteger(payload.expiresAt) ||
     payload.approvedAt > now + 60 ||
-    payload.expiresAt < now ||
+    payload.expiresAt <= now ||
     payload.expiresAt - payload.approvedAt > ACTION_WINDOW_SEC
   ) {
     throw new CommunityPurchaseError(

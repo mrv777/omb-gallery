@@ -21,9 +21,10 @@ export async function GET(req: NextRequest) {
   // produce wrong results against the new (block_timestamp, id) ordering.
   const cursorStr = url.searchParams.get('cursor');
   const cursorMatch = cursorStr ? /^(\d+):(\d+)$/.exec(cursorStr) : null;
-  const cursor = cursorMatch
-    ? { ts: parseInt(cursorMatch[1], 10), id: parseInt(cursorMatch[2], 10) }
-    : null;
+  const cursor = cursorMatch ? { ts: Number(cursorMatch[1]), id: Number(cursorMatch[2]) } : null;
+  if (cursor != null && (!Number.isSafeInteger(cursor.ts) || !Number.isSafeInteger(cursor.id))) {
+    return NextResponse.json({ error: 'invalid cursor' }, { status: 400 });
+  }
   // `||` not `??` so an empty `?collection=` falls back to default rather than
   // querying with an empty string (which would match nothing).
   const collection = url.searchParams.get('collection') || 'omb';
@@ -47,25 +48,25 @@ export async function GET(req: NextRequest) {
           })
         : stmts.getRecentLoanEvents.all({ limit, collection, color })
       : eventType
-      ? cursor != null
-        ? stmts.getRecentEventsByTypeAfter.all({
-            cursor_ts: cursor.ts,
-            cursor_id: cursor.id,
-            limit,
-            event_type: eventType,
-            collection,
-            color,
-          })
-        : stmts.getRecentEventsByType.all({ limit, event_type: eventType, collection, color })
-      : cursor != null
-        ? stmts.getRecentEventsAfter.all({
-            cursor_ts: cursor.ts,
-            cursor_id: cursor.id,
-            limit,
-            collection,
-            color,
-          })
-        : stmts.getRecentEvents.all({ limit, collection, color })
+        ? cursor != null
+          ? stmts.getRecentEventsByTypeAfter.all({
+              cursor_ts: cursor.ts,
+              cursor_id: cursor.id,
+              limit,
+              event_type: eventType,
+              collection,
+              color,
+            })
+          : stmts.getRecentEventsByType.all({ limit, event_type: eventType, collection, color })
+        : cursor != null
+          ? stmts.getRecentEventsAfter.all({
+              cursor_ts: cursor.ts,
+              cursor_id: cursor.id,
+              limit,
+              collection,
+              color,
+            })
+          : stmts.getRecentEvents.all({ limit, collection, color })
   ) as EventRow[];
 
   const next_cursor =

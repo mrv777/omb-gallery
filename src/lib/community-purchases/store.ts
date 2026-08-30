@@ -229,7 +229,12 @@ export function getCommunityCampaign(id: string, now = unixNow()): CommunityCamp
           .all(id) as Array<{ owner_id: string }>
       ).map(row => row.owner_id)
     : [];
-  const sale = db.prepare(`SELECT * FROM community_sales WHERE campaign_id = ?`).get(id) as
+  const sale = db
+    .prepare(
+      `SELECT * FROM community_sales
+       WHERE campaign_id = ? AND status NOT IN ('expired','failed')`
+    )
+    .get(id) as
     | {
         offer_digest: string;
         plan_json: string;
@@ -969,7 +974,11 @@ function validateCreatePayload(payload: CreateCampaignPayloadV1, now: number): v
         'Anchored campaigns require exactly 33 creator units and the permanent-anchor warning.'
       );
     }
-  } else if (payload.creatorUnits < 1 || payload.creatorUnits > COMMUNITY_PURCHASES_IDENTITY_CAP) {
+  } else if (
+    !Number.isInteger(payload.creatorUnits) ||
+    payload.creatorUnits < 1 ||
+    payload.creatorUnits > COMMUNITY_PURCHASES_IDENTITY_CAP
+  ) {
     throw new CommunityPurchaseError(
       'creator-unit-limit',
       'Open campaign creators may take 1 to 20 units.'
@@ -1016,7 +1025,11 @@ function validateReservePayload(payload: ReserveUnitsPayloadV1, now: number): vo
     );
   }
   validateCommonEnrollment(payload.enrollment, payload.campaignId, payload.ownerId);
-  if (payload.requestedUnits < 1 || payload.requestedUnits > COMMUNITY_PURCHASES_IDENTITY_CAP) {
+  if (
+    !Number.isInteger(payload.requestedUnits) ||
+    payload.requestedUnits < 1 ||
+    payload.requestedUnits > COMMUNITY_PURCHASES_IDENTITY_CAP
+  ) {
     throw new CommunityPurchaseError(
       'identity-unit-limit',
       'One recognized identity may reserve 1 to 20 units.'
@@ -1290,7 +1303,9 @@ function reconcileCampaign(db: ReturnType<typeof getDb>, campaignId: string, now
     for (const row of waiting) {
       db.prepare(`DELETE FROM community_units WHERE participant_id = ?`).run(row.id);
       db.prepare(
-        `UPDATE community_participants SET readiness_status = 'timed-out' WHERE id = ?`
+        `UPDATE community_participants
+         SET readiness_status = 'timed-out', waitlisted_units = 0
+         WHERE id = ?`
       ).run(row.id);
       recordEvent(db, campaignId, 'readiness-timeout', row.owner_id, {}, now);
     }

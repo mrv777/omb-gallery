@@ -18,6 +18,7 @@ function htmlPage(title: string, body: string): NextResponse {
   h1 { font-size: 1.25rem; margin: 0 0 1rem; }
   p { margin: 0 0 0.75rem; }
   a { color: #c33; }
+  button { appearance: none; border: 1px solid #1a1a1a; background: #1a1a1a; color: #f5f0e8; padding: 0.65rem 0.9rem; font: inherit; cursor: pointer; }
   .ok { color: #2a7; }
   .err { color: #c33; }
 </style>
@@ -26,7 +27,24 @@ function htmlPage(title: string, body: string): NextResponse {
 </html>`;
   return new NextResponse(html, {
     status: 200,
-    headers: { 'content-type': 'text/html; charset=utf-8' },
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'private, no-store',
+      'referrer-policy': 'no-referrer',
+    },
+  });
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, character => {
+    const escaped: Record<string, string> = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    };
+    return escaped[character]!;
   });
 }
 
@@ -40,6 +58,40 @@ export async function GET(req: NextRequest) {
       '<h1 class="err">Missing token</h1><p>This link is malformed.</p>'
     );
 
+  const row = findByUnsubToken(token);
+  if (!row) {
+    return htmlPage(
+      'Not found',
+      '<h1 class="err">Not found</h1><p>This subscription token is no longer valid.</p>'
+    );
+  }
+
+  const scope = burn
+    ? `all notifications for this ${row.channel === 'telegram' ? 'Telegram chat' : 'Discord channel'}`
+    : 'this watch';
+  return htmlPage(
+    'Confirm unsubscribe',
+    `<h1>Stop ${escapeHtml(scope)}?</h1>
+     <p>This link has not changed anything yet.</p>
+     <form method="post" action="/api/unsubscribe">
+       <input type="hidden" name="token" value="${escapeHtml(token)}">
+       <input type="hidden" name="burn" value="${burn ? '1' : '0'}">
+       <button type="submit">Confirm unsubscribe</button>
+     </form>
+     <p style="margin-top:1rem"><a href="/notifications">Keep notifications</a></p>`
+  );
+}
+
+export async function POST(req: NextRequest) {
+  const form = await req.formData().catch(() => null);
+  const token = form?.get('token');
+  const burn = form?.get('burn') === '1';
+  if (typeof token !== 'string' || !token) {
+    return htmlPage(
+      'Missing token',
+      '<h1 class="err">Missing token</h1><p>Try the link again.</p>'
+    );
+  }
   const row = findByUnsubToken(token);
   if (!row) {
     return htmlPage(

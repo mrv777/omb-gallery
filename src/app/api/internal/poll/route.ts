@@ -106,8 +106,8 @@ const SATFLOW_BUDGET_WARN_PCT = 0.8;
 const SATFLOW_BUDGET_WINDOW_SEC = 30 * 24 * 60 * 60;
 
 // Wallclock cap per tick. Bumped from 25s to 60s to absorb enrichment
-// (2 extra ord calls per detected transfer). The acquireLock window in
-// db.ts MUST stay ≥ this + safety margin or two ticks can run concurrently.
+// (2 extra ord calls per detected transfer). The poll_state lease in db.ts
+// must stay above this plus outbound retry slack.
 const TICK_WALLCLOCK_BUDGET_MS = 60_000;
 
 // If ord reports a tip more than this many blocks below the highest we've
@@ -702,6 +702,8 @@ async function bootstrapInscriptionIds(): Promise<number> {
   if (missing.length === 0) return 0;
 
   let bootstrapped = 0;
+  let failed = 0;
+  let firstFailure: string | null = null;
   const startedAt = Date.now();
   // Bootstrap in waves of N concurrent fetches: ord can serve them in
   // parallel, so this gives ~Nx the throughput of the previous sequential
@@ -714,20 +716,17 @@ async function bootstrapInscriptionIds(): Promise<number> {
     const results = await Promise.allSettled(
       wave.map(row => fetchInscriptionDetail(row.inscription_number))
     );
-    // Hold onto the first hard error so we still process every fulfilled
-    // result in this wave before bailing — otherwise a single 5xx in the
-    // middle would silently discard the inscriptions before it.
-    let hardError: unknown = null;
     for (let j = 0; j < results.length; j++) {
       const r = results[j];
       const row = wave[j];
       if (r.status === 'rejected') {
         // 404 is expected for inscriptions ord doesn't know about yet
         // (very-recent mints, or mints past ord's current sync height).
-        // Anything else is a real error — surface it once the wave's
-        // successes have all been committed.
+        // A broken detail lookup must not prevent the batch endpoint from
+        // polling every inscription whose ID is already known.
         if (r.reason instanceof OrdError && r.reason.status === 404) continue;
-        if (hardError == null) hardError = r.reason;
+        failed++;
+        firstFailure ??= errorMessage(r.reason);
         continue;
       }
       const detail = r.value;
@@ -752,8 +751,14 @@ async function bootstrapInscriptionIds(): Promise<number> {
       }
       bootstrapped++;
     }
-    if (hardError) throw hardError;
     await sleep(ORD_BOOTSTRAP_WAVE_DELAY_MS);
+  }
+  if (failed > 0) {
+    log.warn('poll/ord', 'bootstrap completed with detail failures', {
+      bootstrapped,
+      failed,
+      error: firstFailure ?? undefined,
+    });
   }
   return bootstrapped;
 }
@@ -892,6 +897,9 @@ function applyOrdStates(
             block_height: ev.block_height,
             block_timestamp: ev.block_timestamp,
             new_satpoint: ev.new_satpoint,
+          });
+          stmts.recomputeInscriptionRecency.run({
+            inscription_number: existingMovement.inscription_number,
           });
         }
         // 'transferred' branch: nothing to do — row already exists.
@@ -1513,7 +1521,7 @@ function applySalesTransaction(
     }) as
       | { id: number; event_type: string; inscription_number: number; new_owner: string | null }
       | undefined;
-    if (sold && sold.new_owner !== dupe.new_owner) return;
+    if (!sold || sold.event_type !== 'sold' || sold.new_owner !== dupe.new_owner) return;
     // Read sale_price_sats off the row before delete so we know how much to
     // unbump. Cheap — we already have the id.
     const row = stmts.getEventById.get({ id: dupe.id }) as
@@ -1574,6 +1582,9 @@ function applySalesTransaction(
           stmts.unbumpTransferOnUpgrade.run({
             inscription_number: existing.inscription_number,
             sale_price_sats: sale.sale_price_sats,
+          });
+          stmts.recomputeInscriptionRecency.run({
+            inscription_number: existing.inscription_number,
           });
           // Re-enqueue ONLY for live ticks. Sales-only subscribers couldn't
           // match the original 'transferred' row (mask mismatch); we want
@@ -2095,7 +2106,6 @@ async function runMatricaTick(opts: { limit: number }): Promise<TickResult> {
   }
 
   const startedAt = Date.now();
-  let lastHeartbeat = startedAt;
   const nowSec = Math.floor(startedAt / 1000);
   const staleBefore = nowSec - MATRICA_STALENESS_SEC;
 
@@ -2116,17 +2126,6 @@ async function runMatricaTick(opts: { limit: number }): Promise<TickResult> {
     if (now - startedAt > MATRICA_TICK_WALLCLOCK_BUDGET_MS) {
       log.info('poll/matrica', 'wallclock budget reached', { checked });
       break;
-    }
-    // Refresh the lock periodically. The matrica tick can run for ~5min
-    // (limit=200 × 1 req/s pacing) which is longer than the 120s acquireLock
-    // window — without a heartbeat, a concurrent cron firing mid-tick could
-    // observe a stale last_run_at and acquire the lock, double-running the
-    // probe set. acquireLock's WHERE predicate makes this a no-op until 120s
-    // have actually elapsed since the last refresh, so the cost is one
-    // cheap UPDATE roughly every 60s.
-    if (now - lastHeartbeat >= 60_000) {
-      stmts.acquireLock.run({ stream: 'matrica', collection: 'omb' });
-      lastHeartbeat = now;
     }
     try {
       const profile = await fetchWalletProfile(wallet_addr, apiKey);

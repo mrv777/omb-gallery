@@ -8,6 +8,7 @@ import Slideshow, {
   type Speed,
 } from '@/components/Slideshow/Slideshow';
 import { SITE_NAME, buildSocial } from '@/lib/metadata';
+import { slideshowSeed } from '@/lib/slideshowShuffle';
 
 const SLIDESHOW_DESCRIPTION = 'Play through OMB inscriptions in sequence.';
 
@@ -66,6 +67,7 @@ export default async function SlideshowPage({
       initialSpeed={parseSpeed(firstValue(params.speed))}
       initialOrder={parseOrder(firstValue(params.order))}
       initialLoop={parseLoop(firstValue(params.loop))}
+      initialShuffleSeed={slideshowSeed(images.map(image => image.id))}
     />
   );
 }

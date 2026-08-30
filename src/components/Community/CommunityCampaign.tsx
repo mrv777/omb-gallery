@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import SafeImg from '@/components/SafeImg';
 import { useWallet } from '@/components/wallet/WalletProvider';
@@ -70,6 +70,8 @@ export default function CommunityCampaign({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
+  const busyRef = useRef(false);
+  const refreshingRef = useRef(false);
   const image = lookupInscription(campaign.inscriptionNumber);
   const me = wallet
     ? campaign.participants.find(item => item.walletAddress === wallet.ordAddr)
@@ -104,6 +106,49 @@ export default function CommunityCampaign({
       !me.isCreator &&
       !campaign.sale &&
       !campaign.ownershipChange);
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
+
+  const refreshCampaign = useCallback(async () => {
+    if (busyRef.current || refreshingRef.current) return;
+    refreshingRef.current = true;
+    try {
+      const response = await fetch(`/api/community/campaigns/${initial.id}`, {
+        cache: 'no-store',
+      });
+      const json = (await response.json().catch(() => null)) as {
+        campaign?: CommunityCampaignView;
+      } | null;
+      if (response.ok && json?.campaign) setCampaign(json.campaign);
+    } finally {
+      refreshingRef.current = false;
+    }
+  }, [initial.id]);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const stop = () => {
+      if (timer != null) clearInterval(timer);
+      timer = null;
+    };
+    const start = () => {
+      if (timer != null) return;
+      void refreshCampaign();
+      timer = setInterval(() => void refreshCampaign(), 20_000);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') start();
+      else stop();
+    };
+    onVisibility();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [refreshCampaign]);
+
   const loadOwnerTransfer = useCallback(async () => {
     if (!wallet || !campaign.ownershipChange) return;
     const response = await fetch(`/api/community/campaigns/${campaign.id}/position-transfers`, {
