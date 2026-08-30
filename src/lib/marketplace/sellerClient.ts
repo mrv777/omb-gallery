@@ -1,4 +1,4 @@
-import type { MarketplaceProviderContext } from './types';
+import type { ListingInputToSign, MarketplaceProviderContext } from './types';
 
 export const LISTING_DURATIONS = [1, 7, 30, 90, 180] as const;
 export type ListingDuration = (typeof LISTING_DURATIONS)[number];
@@ -31,6 +31,7 @@ export type SellerOmbsPage = {
 export type ListingSigningStep = {
   psbt: string;
   sign_inputs?: Record<string, number[]>;
+  inputs_to_sign?: ListingInputToSign[];
   label: string;
   marketplace_context?: MarketplaceProviderContext;
 };
@@ -103,6 +104,7 @@ export function normalizeListingPreflight(value: unknown): ListingPreflight {
     return {
       psbt: step.psbt,
       sign_inputs: recordOfNumberArrays(step.sign_inputs),
+      inputs_to_sign: listingInputsToSign(step.inputs_to_sign),
       label:
         typeof step.label === 'string'
           ? step.label
@@ -226,6 +228,35 @@ function recordOfNumberArrays(value: unknown): Record<string, number[]> | undefi
     result[key] = indexes as number[];
   }
   return result;
+}
+
+function listingInputsToSign(value: unknown): ListingInputToSign[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  return value.map(raw => {
+    const input = object(raw);
+    const signingIndexes = Array.isArray(input.signingIndexes)
+      ? input.signingIndexes.filter((index): index is number => Number.isSafeInteger(index))
+      : [];
+    if (
+      typeof input.address !== 'string' ||
+      input.address.length === 0 ||
+      signingIndexes.length === 0 ||
+      signingIndexes.length !== (input.signingIndexes as unknown[]).length
+    ) {
+      throw new Error('Listing preflight returned invalid wallet signing instructions.');
+    }
+    return {
+      address: input.address,
+      signingIndexes,
+      ...(typeof input.publicKey === 'string' ? { publicKey: input.publicKey } : {}),
+      ...(typeof input.disableTweakSigner === 'boolean'
+        ? { disableTweakSigner: input.disableTweakSigner }
+        : {}),
+      ...(typeof input.sigHash === 'number' && Number.isSafeInteger(input.sigHash)
+        ? { sigHash: input.sigHash }
+        : {}),
+    };
+  });
 }
 
 function normalizeMarketplace(value: string): string {

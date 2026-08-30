@@ -135,7 +135,7 @@ describe('Drey OMB marketplace context', () => {
         sellerProceedsSats: '99000',
         marketplaceFeeSats: '1000',
         payoutAddress: pay.address,
-        inscriptionDestination: ord.address,
+        assetDestination: ord.address,
       },
       broadcaster: 'site',
     });

@@ -84,8 +84,17 @@ export type BuyIntentRow = {
 export type PurchasePsbtToSign = {
   psbt: string;
   sign_inputs?: Record<string, number[]>;
+  inputs_to_sign?: ListingInputToSign[];
   label?: string;
   marketplace_context?: MarketplaceProviderContext;
+};
+
+export type ListingInputToSign = {
+  address: string;
+  signingIndexes: number[];
+  publicKey?: string;
+  disableTweakSigner?: boolean;
+  sigHash?: number;
 };
 
 export type MarketplaceContext = {
@@ -140,7 +149,7 @@ export type MarketplaceListingContext = {
     sellerProceedsSats: string;
     marketplaceFeeSats: string;
     payoutAddress: string;
-    inscriptionDestination: string;
+    assetDestination: string;
   };
   selectedInputIndexes: number[];
   expiresAt: number;

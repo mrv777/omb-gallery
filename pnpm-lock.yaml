@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@drey/core':
-        specifier: file:vendor/drey-core-0.15.1.tgz
-        version: file:vendor/drey-core-0.15.1.tgz
+        specifier: file:vendor/drey-core-0.19.4.tgz
+        version: file:vendor/drey-core-0.19.4.tgz
       '@radix-ui/react-hover-card':
         specifier: ^1.1.15
         version: 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -188,9 +188,9 @@ packages:
   '@bitcoinerlab/secp256k1@1.2.0':
     resolution: {integrity: sha512-jeujZSzb3JOZfmJYI0ph1PVpCRV5oaexCgy+RvCXV8XlY+XFB/2n3WOcvBsKLsOw78KYgnQrQWb2HrKE4be88Q==}
 
-  '@drey/core@file:vendor/drey-core-0.15.1.tgz':
-    resolution: {integrity: sha512-BxBAwFf+TmCFdGrBWL8+6UDdCDb14mdA4x5hkvC+un6hjJqntFrNfEQLM9p95hW3RBYJEYCWEz7q++37ijBkqg==, tarball: file:vendor/drey-core-0.15.1.tgz}
-    version: 0.15.1
+  '@drey/core@file:vendor/drey-core-0.19.4.tgz':
+    resolution: {integrity: sha512-NBZbvwgXS48BaA03G87Elr+LG5ins4UaFbjexG0KqEAimYhAiSUmiWCF5fi+bqHe00+haiNrPwzIMZvDogyNZA==, tarball: file:vendor/drey-core-0.19.4.tgz}
+    version: 0.19.4
 
   '@emnapi/core@1.10.0':
     resolution: {integrity: sha512-yq6OkJ4p82CAfPl0u9mQebQHKPJkY7WrIuk205cTYnYe+k2Z8YBh11FrbRG/H6ihirqcacOgl2BIO8oyMQLeXw==}
@@ -3172,7 +3172,7 @@ snapshots:
     dependencies:
       '@noble/curves': 1.9.7
 
-  '@drey/core@file:vendor/drey-core-0.15.1.tgz':
+  '@drey/core@file:vendor/drey-core-0.19.4.tgz':
     dependencies:
       '@noble/curves': 1.9.7
       '@scure/base': 1.2.6

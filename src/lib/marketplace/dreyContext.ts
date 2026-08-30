@@ -150,7 +150,7 @@ export function withOrdnetListingDreyContexts(args: {
           sellerProceedsSats: safeSats(args.sellerProceedsSats, 'seller proceeds'),
           marketplaceFeeSats: safeSats(args.marketplaceFeeSats, 'marketplace fee', true),
           payoutAddress: requireIdentifier(args.payoutAddress, 'payout address'),
-          inscriptionDestination: requireIdentifier(
+          assetDestination: requireIdentifier(
             args.inscriptionDestination,
             'inscription destination'
           ),
