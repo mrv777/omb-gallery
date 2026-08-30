@@ -17,6 +17,9 @@ importers:
       '@radix-ui/react-tooltip':
         specifier: ^1.2.8
         version: 1.2.8(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      '@scure/btc-signer':
+        specifier: 1.8.1
+        version: 1.8.1
       '@tanstack/react-virtual':
         specifier: ^3.13.24
         version: 3.13.24(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -60,9 +63,6 @@ importers:
       '@scure/bip32':
         specifier: ^1.7.0
         version: 1.7.0
-      '@scure/btc-signer':
-        specifier: 1.8.1
-        version: 1.8.1
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13

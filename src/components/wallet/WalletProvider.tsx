@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { ConnectedWallet } from '@/lib/wallet/satsConnect';
-import type { MarketplaceContext } from '@/lib/marketplace/types';
+import type { MarketplaceProviderContext } from '@/lib/marketplace/types';
 import type { CommunityVaultAcquisitionProviderContextV1 } from '@drey/core/domain/community-vault/acquisition-provider';
 import type {
   CommunitySaleBuyerProviderContextV1,
@@ -37,7 +37,7 @@ type WalletContextValue = {
   signPsbt: (
     psbt: string,
     signInputs?: Record<string, number[]>,
-    marketplaceContext?: MarketplaceContext,
+    marketplaceContext?: MarketplaceProviderContext,
     communityVaultAcquisitionContext?: CommunityVaultAcquisitionProviderContextV1,
     communityVaultSaleContext?: CommunitySaleProviderContextV1 & { ownerId: string },
     communityVaultSaleBuyerContext?: CommunitySaleBuyerProviderContextV1,
@@ -129,7 +129,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     async (
       psbt: string,
       signInputs?: Record<string, number[]>,
-      marketplaceContext?: MarketplaceContext,
+      marketplaceContext?: MarketplaceProviderContext,
       communityVaultAcquisitionContext?: CommunityVaultAcquisitionProviderContextV1,
       communityVaultSaleContext?: CommunitySaleProviderContextV1 & { ownerId: string },
       communityVaultSaleBuyerContext?: CommunitySaleBuyerProviderContextV1,

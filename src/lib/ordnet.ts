@@ -42,9 +42,11 @@ export type OrdnetVerifiedSession = {
 export type OrdnetListing = {
   listing_id: string;
   inscription_id: string;
+  inscription_number: number | null;
   price_sats: number;
   seller: string | null;
   listed_at: number;
+  expires_at: number | null;
   marketplace: 'ord.net';
   raw_json: string;
 };
@@ -76,7 +78,7 @@ type CachedServiceToken = {
   walletKey: string;
 };
 
-type PsbtStep = {
+export type OrdnetPsbtStep = {
   stepIndex: number;
   signerAddress: string;
   inputsToSign: Array<{
@@ -110,7 +112,7 @@ type PurchasePreflightRequest = {
 type PurchasePreflightResponse = {
   purchaseAnchorUtxoId: string;
   selectedPaymentUtxos: SpendableUtxo[];
-  steps: PsbtStep[];
+  steps: OrdnetPsbtStep[];
   expectedSettlementTxid: string;
   expectedListingTransferTxids: string[];
 };
@@ -132,6 +134,53 @@ export type OrdnetPurchaseIntent = {
 
 export type OrdnetBroadcastResult = {
   txid: string;
+  raw: unknown;
+};
+
+export type OrdnetListingPsbtStep = OrdnetPsbtStep & {
+  stepIndex: 0 | 1;
+  inscriptionId: string;
+};
+
+export type OrdnetRecoveryPsbt = {
+  signerAddress: string;
+  inputsToSign: OrdnetPsbtStep['inputsToSign'];
+  psbtBase64: string;
+};
+
+export type OrdnetListingPreflightRequest = {
+  walletBindingId: string;
+  ordinalsPublicKey: string;
+  items: Array<{ inscriptionId: string; priceSats: number }>;
+};
+
+export type OrdnetListingPreflightResponse = {
+  listings: Array<{
+    inscriptionId: string;
+    anchorUtxoId: string;
+    psbts: OrdnetListingPsbtStep[];
+  }>;
+  recoveryPsbt: OrdnetRecoveryPsbt;
+};
+
+export type StoredOrdnetListingPreflight = {
+  v: 1;
+  collectionSlug: string;
+  request: OrdnetListingPreflightRequest;
+  response: OrdnetListingPreflightResponse;
+  durationDays: 1 | 7 | 30 | 90 | 180;
+  createdAt: number;
+};
+
+export type OrdnetListingSubmitResult = {
+  inscriptionId: string;
+  listingId: string;
+  raw: unknown;
+};
+
+export type OrdnetDelistResult = {
+  inscriptionId: string;
+  listingId: string;
   raw: unknown;
 };
 
@@ -203,6 +252,158 @@ export async function fetchOrdnetListingsPage(
 
   const json = await getJson(url.toString(), token);
   return parseListingsResponse(json);
+}
+
+/** Authenticated, filterable read used to reconcile seller writes. */
+export async function fetchOrdnetSellerListings(args: {
+  sessionToken: string;
+  inscriptionId?: string;
+  sellerAddress?: string;
+  limit?: number;
+}): Promise<FetchOrdnetListingsResult> {
+  const url = new URL(`${ORDNET_API_BASE}/listings`);
+  url.searchParams.set('collectionSlug', ordnetCollectionSlugFor('omb') ?? 'omb');
+  url.searchParams.set('sort', 'recent');
+  url.searchParams.set('limit', String(Math.max(1, Math.min(args.limit ?? 100, 100))));
+  if (args.inscriptionId) url.searchParams.set('inscriptionId', args.inscriptionId);
+  if (args.sellerAddress) url.searchParams.set('sellerAddress', args.sellerAddress);
+  const json = await getJson(url.toString(), args.sessionToken);
+  return parseListingsResponse(json);
+}
+
+export async function createOrdnetListingPreflight(args: {
+  inscriptionId: string;
+  priceSats: number;
+  durationDays: 1 | 7 | 30 | 90 | 180;
+  ordinalsPublicKey: string;
+  walletBindingId: string;
+  sessionToken: string;
+}): Promise<StoredOrdnetListingPreflight> {
+  const collectionSlug = ordnetCollectionSlugFor('omb') ?? 'omb';
+  const request: OrdnetListingPreflightRequest = {
+    walletBindingId: args.walletBindingId,
+    ordinalsPublicKey: args.ordinalsPublicKey,
+    items: [{ inscriptionId: args.inscriptionId, priceSats: args.priceSats }],
+  };
+  const raw = await postJson(
+    `/collection/${encodeURIComponent(collectionSlug)}/listings/preflight`,
+    request,
+    args.sessionToken,
+    { retry: false }
+  );
+  return {
+    v: 1,
+    collectionSlug,
+    request,
+    response: parseListingPreflightResponse(raw, args.inscriptionId),
+    durationDays: args.durationDays,
+    createdAt: Math.floor(Date.now() / 1000),
+  };
+}
+
+/** Seller submit is intentionally single-attempt. Callers must reconcile failures with GET. */
+export async function submitOrdnetListing(args: {
+  stored: StoredOrdnetListingPreflight;
+  signedPsbts: [string, string, string];
+  sessionToken: string;
+}): Promise<OrdnetListingSubmitResult> {
+  const listing = args.stored.response.listings[0];
+  if (!listing || listing.psbts.length !== 2) {
+    throw new OrdnetConfigError('ORD.NET listing intent is missing preflight state.');
+  }
+  const signedSteps = listing.psbts.map((step, index) => ({
+    ...step,
+    psbtBase64: args.signedPsbts[index]!,
+  }));
+  const raw = await postJson(
+    `/collection/${encodeURIComponent(args.stored.collectionSlug)}/listings/submit`,
+    {
+      ...args.stored.request,
+      durationDays: args.stored.durationDays,
+      anchors: [{ inscriptionId: listing.inscriptionId, anchorUtxoId: listing.anchorUtxoId }],
+      signed: [{ inscriptionId: listing.inscriptionId, psbts: signedSteps }],
+      signedRecoveryPsbt: {
+        ...args.stored.response.recoveryPsbt,
+        psbtBase64: args.signedPsbts[2],
+      },
+    },
+    args.sessionToken,
+    { retry: false }
+  );
+  const result = parseListingMutationResponse(raw, listing.inscriptionId, 'submit');
+  return { ...result, raw };
+}
+
+export function parseStoredOrdnetListingPreflight(
+  raw: string | null | undefined
+): StoredOrdnetListingPreflight | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<StoredOrdnetListingPreflight>;
+    if (
+      parsed.v !== 1 ||
+      typeof parsed.collectionSlug !== 'string' ||
+      !parsed.request ||
+      !parsed.response ||
+      typeof parsed.createdAt !== 'number' ||
+      (parsed.durationDays !== 1 &&
+        parsed.durationDays !== 7 &&
+        parsed.durationDays !== 30 &&
+        parsed.durationDays !== 90 &&
+        parsed.durationDays !== 180)
+    ) {
+      return null;
+    }
+    const request = parsed.request;
+    if (
+      typeof request.walletBindingId !== 'string' ||
+      typeof request.ordinalsPublicKey !== 'string' ||
+      !Array.isArray(request.items) ||
+      request.items.length !== 1 ||
+      typeof request.items[0]?.inscriptionId !== 'string' ||
+      !Number.isSafeInteger(request.items[0]?.priceSats)
+    ) {
+      return null;
+    }
+    return {
+      v: 1,
+      collectionSlug: parsed.collectionSlug,
+      request,
+      response: parseListingPreflightResponse(parsed.response, request.items[0].inscriptionId),
+      durationDays: parsed.durationDays,
+      createdAt: parsed.createdAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Delisting is also single-attempt because ord.net may have accepted a timed-out request. */
+export async function delistOrdnetListing(args: {
+  inscriptionId: string;
+  listingId: string;
+  walletBindingId: string;
+  sessionToken: string;
+}): Promise<OrdnetDelistResult> {
+  const collectionSlug = ordnetCollectionSlugFor('omb') ?? 'omb';
+  const raw = await postJson(
+    `/collection/${encodeURIComponent(collectionSlug)}/listings/delist`,
+    {
+      walletBindingId: args.walletBindingId,
+      listings: [{ inscriptionId: args.inscriptionId, listingId: args.listingId }],
+    },
+    args.sessionToken,
+    { retry: false }
+  );
+  const result = parseListingMutationResponse(raw, args.inscriptionId, 'delist');
+  if (result.listingId !== args.listingId) {
+    throw new OrdnetError(
+      'ORD.NET delist response did not match the requested listing.',
+      null,
+      false
+    );
+  }
+  return { ...result, raw };
 }
 
 export async function createOrdnetPurchaseIntent(args: {
@@ -495,9 +696,11 @@ function normalizeListing(raw: unknown): OrdnetListing | null {
   return {
     listing_id,
     inscription_id,
+    inscription_number: parseIntegerStringOrNumber(obj.inscriptionNumber),
     price_sats,
     seller: cleanString(obj.sellerAddress),
     listed_at,
+    expires_at: parseIsoToUnix(cleanString(obj.listingExpiresAt)),
     marketplace: 'ord.net',
     raw_json: JSON.stringify(raw),
   };
@@ -538,7 +741,7 @@ function parseStoredOrdnetPreflight(raw: string | null | undefined): StoredOrdne
   }
 }
 
-function parsePsbtStep(raw: unknown): PsbtStep {
+function parsePsbtStep(raw: unknown): OrdnetPsbtStep {
   const obj = objectOrThrow(raw, 'ORD.NET PSBT step was not an object.');
   const inputsToSign = arrayField(obj, 'inputsToSign').map(item => {
     const input = objectOrThrow(item, 'ORD.NET input-to-sign item was not an object.');
@@ -566,6 +769,149 @@ function parsePsbtStep(raw: unknown): PsbtStep {
   };
 }
 
+function parseListingPreflightResponse(
+  raw: unknown,
+  expectedInscriptionId: string
+): OrdnetListingPreflightResponse {
+  const obj = objectOrThrow(raw, 'ORD.NET listing preflight response was not an object.');
+  const rawListings = arrayField(obj, 'listings');
+  if (rawListings.length !== 1) {
+    throw new OrdnetError(
+      'ORD.NET listing preflight returned an unexpected listing count.',
+      null,
+      false
+    );
+  }
+  const listingObj = objectOrThrow(
+    rawListings[0],
+    'ORD.NET listing preflight item was not an object.'
+  );
+  const inscriptionId = stringField(listingObj, 'inscriptionId');
+  if (inscriptionId !== expectedInscriptionId) {
+    throw new OrdnetError(
+      'ORD.NET listing preflight returned a different inscription.',
+      null,
+      false
+    );
+  }
+  const psbts = arrayField(listingObj, 'psbts').map(parseListingPsbtStep);
+  if (psbts.length !== 2 || psbts[0]?.stepIndex !== 0 || psbts[1]?.stepIndex !== 1) {
+    throw new OrdnetError('ORD.NET listing preflight returned unexpected PSBT steps.', null, false);
+  }
+  if (psbts.some(step => step.inscriptionId !== expectedInscriptionId)) {
+    throw new OrdnetError(
+      'ORD.NET listing preflight PSBT did not match the inscription.',
+      null,
+      false
+    );
+  }
+  const recoveryObj = objectOrThrow(obj.recoveryPsbt, 'ORD.NET recovery PSBT was not an object.');
+  const recoveryPsbt: OrdnetRecoveryPsbt = {
+    signerAddress: stringField(recoveryObj, 'signerAddress'),
+    inputsToSign: parseInputsToSign(recoveryObj),
+    psbtBase64: stringField(recoveryObj, 'psbtBase64'),
+  };
+  validateExpectedSighashes(psbts, recoveryPsbt);
+  return {
+    listings: [
+      {
+        inscriptionId,
+        anchorUtxoId: stringField(listingObj, 'anchorUtxoId'),
+        psbts,
+      },
+    ],
+    recoveryPsbt,
+  };
+}
+
+function parseListingPsbtStep(raw: unknown): OrdnetListingPsbtStep {
+  const obj = objectOrThrow(raw, 'ORD.NET listing PSBT step was not an object.');
+  const parsed = parsePsbtStep(raw);
+  if (parsed.stepIndex !== 0 && parsed.stepIndex !== 1) {
+    throw new OrdnetError('ORD.NET listing PSBT step index was invalid.', null, false);
+  }
+  return {
+    ...parsed,
+    stepIndex: parsed.stepIndex,
+    inscriptionId: stringField(obj, 'inscriptionId'),
+  };
+}
+
+function parseInputsToSign(obj: Record<string, unknown>): OrdnetPsbtStep['inputsToSign'] {
+  return arrayField(obj, 'inputsToSign').map(item => {
+    const input = objectOrThrow(item, 'ORD.NET input-to-sign item was not an object.');
+    const signingIndexes = arrayField(input, 'signingIndexes').map(value => {
+      const n = typeof value === 'number' ? Math.trunc(value) : Number.NaN;
+      if (!Number.isFinite(n) || n < 0) {
+        throw new OrdnetError('ORD.NET signing index was invalid.', null, false);
+      }
+      return n;
+    });
+    if (signingIndexes.length === 0) {
+      throw new OrdnetError('ORD.NET signing indexes were empty.', null, false);
+    }
+    return {
+      address: stringField(input, 'address'),
+      signingIndexes,
+      publicKey: cleanString(input.publicKey) ?? undefined,
+      disableTweakSigner:
+        typeof input.disableTweakSigner === 'boolean' ? input.disableTweakSigner : undefined,
+      sigHash: typeof input.sigHash === 'number' ? Math.trunc(input.sigHash) : undefined,
+    };
+  });
+}
+
+function validateExpectedSighashes(
+  psbts: OrdnetListingPsbtStep[],
+  recovery: OrdnetRecoveryPsbt
+): void {
+  const allSigHashes = (inputs: OrdnetPsbtStep['inputsToSign']) =>
+    inputs.flatMap(input => input.signingIndexes.map(() => input.sigHash ?? 0));
+  const step0 = allSigHashes(psbts[0]!.inputsToSign);
+  const step1 = allSigHashes(psbts[1]!.inputsToSign);
+  const recoveryHashes = allSigHashes(recovery.inputsToSign);
+  if (
+    step0.length === 0 ||
+    step0.some(hash => hash !== 0) ||
+    step1.length === 0 ||
+    step1.some(hash => hash !== 0x83) ||
+    recoveryHashes.length === 0 ||
+    recoveryHashes.some(hash => hash !== 0x01)
+  ) {
+    throw new OrdnetError(
+      'ORD.NET listing preflight returned unsafe sighash instructions.',
+      null,
+      false
+    );
+  }
+}
+
+function parseListingMutationResponse(
+  raw: unknown,
+  expectedInscriptionId: string,
+  operation: 'submit' | 'delist'
+): { inscriptionId: string; listingId: string } {
+  const obj = objectOrThrow(raw, `ORD.NET listing ${operation} response was not an object.`);
+  const rows = arrayField(obj, 'listings');
+  if (rows.length !== 1) {
+    throw new OrdnetError(
+      `ORD.NET listing ${operation} returned an unexpected listing count.`,
+      null,
+      false
+    );
+  }
+  const row = objectOrThrow(rows[0], `ORD.NET listing ${operation} item was not an object.`);
+  const inscriptionId = stringField(row, 'inscriptionId');
+  if (inscriptionId !== expectedInscriptionId) {
+    throw new OrdnetError(
+      `ORD.NET listing ${operation} returned a different inscription.`,
+      null,
+      false
+    );
+  }
+  return { inscriptionId, listingId: stringField(row, 'listingId') };
+}
+
 function parseSpendableUtxo(raw: unknown): SpendableUtxo {
   const obj = objectOrThrow(raw, 'ORD.NET spendable UTXO was not an object.');
   return {
@@ -575,7 +921,7 @@ function parseSpendableUtxo(raw: unknown): SpendableUtxo {
   };
 }
 
-function psbtStepToSignInputs(step: PsbtStep): Record<string, number[]> {
+function psbtStepToSignInputs(step: OrdnetPsbtStep): Record<string, number[]> {
   const out: Record<string, number[]> = {};
   for (const input of step.inputsToSign) {
     out[input.address] = [...(out[input.address] ?? []), ...input.signingIndexes];
@@ -592,14 +938,25 @@ async function getJson(url: string, bearerToken: string): Promise<unknown> {
   return requestJson(url, { method: 'GET', bearerToken });
 }
 
-async function postJson(path: string, body: unknown, bearerToken?: string): Promise<unknown> {
-  return requestJson(`${ORDNET_API_BASE}${path}`, { method: 'POST', body, bearerToken });
+async function postJson(
+  path: string,
+  body: unknown,
+  bearerToken?: string,
+  options?: { retry?: boolean }
+): Promise<unknown> {
+  return requestJson(`${ORDNET_API_BASE}${path}`, {
+    method: 'POST',
+    body,
+    bearerToken,
+    retry: options?.retry,
+  });
 }
 
 async function requestJson(
   url: string,
-  args: { method: 'GET' | 'POST'; body?: unknown; bearerToken?: string }
+  args: { method: 'GET' | 'POST'; body?: unknown; bearerToken?: string; retry?: boolean }
 ): Promise<unknown> {
+  if (args.retry === false) return requestJsonOnce(url, args);
   let lastError: OrdnetError | null = null;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
@@ -703,6 +1060,16 @@ function parseIsoToUnix(iso: string | null): number | null {
 function cleanPositiveInt(value: unknown): number | null {
   const n = typeof value === 'number' ? Math.trunc(value) : Number.NaN;
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function parseIntegerStringOrNumber(value: unknown): number | null {
+  const n =
+    typeof value === 'number'
+      ? Math.trunc(value)
+      : typeof value === 'string' && /^-?(?:0|[1-9][0-9]*)$/u.test(value)
+        ? Number(value)
+        : Number.NaN;
+  return Number.isSafeInteger(n) ? n : null;
 }
 
 function parseMempoolUtxo(raw: unknown): SpendableUtxo | null {

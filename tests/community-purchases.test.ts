@@ -76,7 +76,7 @@ afterEach(() => {
 describe('Community Purchases coordination', () => {
   it('creates public-only schema at v45', () => {
     const db = dbModule.getDb();
-    expect(db.pragma('user_version', { simple: true })).toBe(45);
+    expect(db.pragma('user_version', { simple: true })).toBe(46);
     const tables = db
       .prepare(
         `SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'community_%' ORDER BY name`

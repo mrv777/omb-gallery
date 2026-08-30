@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'Marketplace',
-  description: 'Buy listed Ordinal Maxi Biz inscriptions.',
+  description: 'Buy and list Ordinal Maxi Biz inscriptions.',
 };
 
 const DEFAULT_DISCORD_INVITE_URL = 'https://discord.gg/ordinalmaxibiz';
@@ -46,6 +46,7 @@ export default function MarketplacePage() {
           DEFAULT_DISCORD_INVITE_URL
         }
         matricaSignupUrl={process.env.MATRICA_SIGNUP_URL ?? 'https://matrica.io/settings'}
+        sellerEnabled={process.env.MARKETPLACE_SELL_ENABLED === 'true'}
       />
     </SubpageShell>
   );

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import {
   getDb,
   getStmts,
@@ -91,6 +92,10 @@ const LISTINGS_MIN_INTERVAL_SEC = 3 * 60;
 // at pageSize=100, 5 pages is ample headroom for growth and a defensive
 // brake if the API ever returns runaway data.
 const LISTINGS_MAX_PAGES = 5;
+// ord.net is cursor-paginated and can exceed one cron's comfortable scan
+// size. Pages are staged durably across ticks; this is the per-tick quota,
+// not a whole-scan cap.
+const ORDNET_LISTINGS_MAX_PAGES_PER_TICK = 20;
 // Cold-start window for listed-event fanout. If the listings stream hasn't
 // run within this many seconds (first deploy after this code lands, or a
 // long outage), we treat the entire snapshot as "already known" and skip
@@ -190,7 +195,13 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         result = await iterateSatflowCollections(onlyCollection, { force: 'backfill' });
         break;
       case 'listings':
-        result = await iterateListingsCollections(onlyCollection, { force: true });
+        result = [
+          ...(await iterateListingsCollections(onlyCollection, { force: true })),
+          ...(await iterateOrdnetListingsCollections(onlyCollection, { force: true })),
+        ];
+        break;
+      case 'ordnet-listings':
+        result = await iterateOrdnetListingsCollections(onlyCollection, { force: true });
         break;
       case 'matrica': {
         // Optional ?limit=N for operational testing (default = full per-tick).
@@ -257,6 +268,9 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         const ordNetFp = await safeOrdNetFp();
         const satflow = await iterateSatflowCollections(onlyCollection, {});
         const listings = await iterateListingsCollections(onlyCollection, { force: false });
+        const ordnetListings = await iterateOrdnetListingsCollections(onlyCollection, {
+          force: false,
+        });
         const loans = await safeLoans();
         const roles = safeRoles();
         // Clustering walks events past its cursor and bumps wallet_cluster_edges.
@@ -273,6 +287,7 @@ async function handle(req: NextRequest): Promise<NextResponse> {
           ordNetFp,
           ...satflow,
           ...listings,
+          ...ordnetListings,
           loans,
           roles,
           cluster,
@@ -370,6 +385,37 @@ async function iterateListingsCollections(
   for (const c of cols) {
     out.push(await runListingsTick(c, opts));
   }
+  return out;
+}
+
+function resolveOrdnetCollections(
+  only: string | null
+): Array<{ slug: string; ordnet_slug: string }> {
+  const all = getStmts().listEnabledCollections.all([]) as CollectionRow[];
+  const filtered = only ? all.filter(c => c.slug === only) : all;
+  const out: Array<{ slug: string; ordnet_slug: string }> = [];
+  for (const c of filtered) {
+    const apiSlug = ordnetCollectionSlugFor(c.slug);
+    if (apiSlug) out.push({ slug: c.slug, ordnet_slug: apiSlug });
+  }
+  return out;
+}
+
+async function iterateOrdnetListingsCollections(
+  only: string | null,
+  opts: { force: boolean }
+): Promise<TickResult[]> {
+  let configured = false;
+  try {
+    configured = ordnetServiceWalletConfigured();
+  } catch (err) {
+    return [{ mode: 'ordnet-listings', error: errorMessage(err) }];
+  }
+  if (!configured) return [{ mode: 'ordnet-listings', skipped: 'not-configured' }];
+  const cols = resolveOrdnetCollections(only);
+  if (cols.length === 0) return [{ mode: 'ordnet-listings', skipped: 'not-configured' }];
+  const out: TickResult[] = [];
+  for (const c of cols) out.push(await runOrdnetListingsTick(c, opts));
   return out;
 }
 
@@ -1728,26 +1774,17 @@ async function runListingsTick(
   const idToNumber = buildIdToNumberMap();
   const startedAt = Date.now();
   let satflowPages = 0;
-  let ordnetPages = 0;
   let satflowTotalReported = 0;
-  let ordnetRawCount = 0;
   let errMsg: string | null = null;
-  const ordnetSlug = ordnetCollectionSlugFor(collection.slug);
-  let ordnetEnabled = false;
-  try {
-    ordnetEnabled = ordnetSlug != null && ordnetServiceWalletConfigured();
-  } catch (err) {
-    errMsg = errorMessage(err);
-  }
 
   // Phase 1: collect every active listing across all pages BEFORE touching
   // the DB. If any page fails, abort with the existing snapshot intact —
   // never replace good data with a partial fetch.
   const collected: ListingCandidate[] = [];
-  if (!errMsg) {
+  {
     for (let page = 1; page <= LISTINGS_MAX_PAGES; page++) {
       if (Date.now() - startedAt > TICK_WALLCLOCK_BUDGET_MS) {
-        errMsg = `wallclock budget exceeded after ${satflowPages + ordnetPages} pages`;
+        errMsg = `wallclock budget exceeded after ${satflowPages} pages`;
         break;
       }
 
@@ -1780,43 +1817,6 @@ async function runListingsTick(
     }
   }
 
-  if (!errMsg && ordnetEnabled && ordnetSlug) {
-    let cursor: string | null = null;
-    for (let page = 1; page <= LISTINGS_MAX_PAGES; page++) {
-      if (Date.now() - startedAt > TICK_WALLCLOCK_BUDGET_MS) {
-        errMsg = `wallclock budget exceeded after ${satflowPages + ordnetPages} pages`;
-        break;
-      }
-
-      let pageRes;
-      try {
-        pageRes = await fetchOrdnetListingsPage({
-          collectionSlug: ordnetSlug,
-          cursor,
-          limit: SATFLOW_PAGE_SIZE,
-          sort: 'price',
-        });
-        ordnetPages++;
-        ordnetRawCount += pageRes.rawCount;
-      } catch (err) {
-        errMsg = errorMessage(err);
-        break;
-      }
-
-      collected.push(...pageRes.items.map(ordnetListingToCandidate));
-      cursor = pageRes.nextCursor;
-      if (page === LISTINGS_MAX_PAGES && pageRes.hasMore) {
-        errMsg = `listings page cap reached for ord.net after ${page} pages`;
-        break;
-      }
-      if (pageRes.hasMore && !cursor) {
-        errMsg = 'ord.net listings pagination returned hasMore without a next cursor';
-        break;
-      }
-      if (!pageRes.hasMore) break;
-    }
-  }
-
   if (errMsg) {
     stmts.setPollResult.run({
       stream: 'satflow_listings',
@@ -1828,16 +1828,14 @@ async function runListingsTick(
     log.warn('poll/listings', 'tick failed', {
       collection: collection.slug,
       satflow_pages: satflowPages,
-      ordnet_pages: ordnetPages,
       dur_ms: Date.now() - startedAt,
       error: errMsg,
     });
     return {
       mode: 'listings',
       collection: collection.slug,
-      pages: satflowPages + ordnetPages,
+      pages: satflowPages,
       satflow_pages: satflowPages,
-      ordnet_pages: ordnetPages,
       error: errMsg,
     };
   }
@@ -1875,10 +1873,9 @@ async function runListingsTick(
     return {
       mode: 'listings',
       collection: collection.slug,
-      pages: satflowPages + ordnetPages,
+      pages: satflowPages,
       satflow_pages: satflowPages,
-      ordnet_pages: ordnetPages,
-      total: satflowTotalReported + ordnetRawCount,
+      total: satflowTotalReported,
       collected: collected.length,
       unresolved,
       written: 0,
@@ -1922,7 +1919,10 @@ async function runListingsTick(
     // timestamp wobble from making an unchanged active listing look fresh.
     const priorRows = isColdStart
       ? []
-      : (stmts.selectActiveListingsForCollection.all(collection.slug) as Array<{
+      : (stmts.selectActiveListingsForSource.all({
+          collection: collection.slug,
+          marketplace: 'satflow',
+        }) as Array<{
           inscription_number: number;
           marketplace: string;
           satflow_id: string;
@@ -1954,7 +1954,11 @@ async function runListingsTick(
     // Anything not refreshed this tick (in this collection) is no longer
     // active on any configured listing source. Scoped to the current collection so other
     // collections' rows aren't affected.
-    stmts.deleteStaleListings.run({ cutoff: refreshedAt, collection: collection.slug });
+    stmts.deleteStaleListingsForMarketplace.run({
+      cutoff: refreshedAt,
+      collection: collection.slug,
+      marketplace: 'satflow',
+    });
 
     if (!isColdStart) {
       for (const item of ready) {
@@ -2015,14 +2019,11 @@ async function runListingsTick(
 
   log.info('poll/listings', 'tick complete', {
     collection: collection.slug,
-    pages: satflowPages + ordnetPages,
+    pages: satflowPages,
     satflow_pages: satflowPages,
-    ordnet_pages: ordnetPages,
-    ordnet_enabled: ordnetEnabled,
     written: ready.length,
     unresolved,
     satflow_total_reported: satflowTotalReported,
-    ordnet_raw_count: ordnetRawCount,
     listed_events: listedEventsEmitted,
     cold_start: isColdStart,
     dur_ms: Date.now() - startedAt,
@@ -2031,11 +2032,9 @@ async function runListingsTick(
   return {
     mode: 'listings',
     collection: collection.slug,
-    pages: satflowPages + ordnetPages,
+    pages: satflowPages,
     satflow_pages: satflowPages,
-    ordnet_pages: ordnetPages,
-    ordnet_enabled: ordnetEnabled,
-    total: satflowTotalReported + ordnetRawCount,
+    total: satflowTotalReported,
     collected: collected.length,
     written: ready.length,
     deduped: collected.length - bySourceListing.size,
@@ -2068,6 +2067,369 @@ function ordnetListingToCandidate(item: OrdnetListing): ListingCandidate {
     listed_at: item.listed_at,
     marketplace: 'ord.net',
     raw_json: item.raw_json,
+  };
+}
+
+type OrdnetListingScanCursor = {
+  v: 1;
+  scan_id: string;
+  next_cursor: string;
+  pages: number;
+  raw_count: number;
+  started_at: number;
+  previous_snapshot_at: number | null;
+  suppress_notifications: boolean;
+};
+
+function parseOrdnetListingScanCursor(raw: string | null): OrdnetListingScanCursor | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<OrdnetListingScanCursor>;
+    if (
+      value.v !== 1 ||
+      typeof value.scan_id !== 'string' ||
+      typeof value.next_cursor !== 'string' ||
+      !Number.isInteger(value.pages) ||
+      !Number.isInteger(value.raw_count) ||
+      !Number.isInteger(value.started_at) ||
+      !(value.previous_snapshot_at == null || Number.isInteger(value.previous_snapshot_at)) ||
+      typeof value.suppress_notifications !== 'boolean'
+    ) {
+      return null;
+    }
+    return value as OrdnetListingScanCursor;
+  } catch {
+    return null;
+  }
+}
+
+async function runOrdnetListingsTick(
+  collection: { slug: string; ordnet_slug: string },
+  opts: { force: boolean }
+): Promise<TickResult> {
+  const stmts = getStmts();
+  const priorState = stmts.getPollState.get({
+    stream: 'ordnet_listings',
+    collection: collection.slug,
+  }) as PollStateRow | undefined;
+
+  if (!opts.force && priorState?.last_run_at && priorState.last_status === 'ok') {
+    const sinceLast = Math.floor(Date.now() / 1000) - priorState.last_run_at;
+    if (sinceLast < LISTINGS_MIN_INTERVAL_SEC) {
+      return {
+        mode: 'ordnet-listings',
+        collection: collection.slug,
+        skipped: 'interval-not-elapsed',
+        wait_s: LISTINGS_MIN_INTERVAL_SEC - sinceLast,
+      };
+    }
+  }
+
+  const lock = stmts.acquireLock.run({
+    stream: 'ordnet_listings',
+    collection: collection.slug,
+  });
+  if (lock.changes === 0) {
+    return { mode: 'ordnet-listings', collection: collection.slug, skipped: 'concurrent' };
+  }
+
+  const startedAtMs = Date.now();
+  const nowSec = Math.floor(startedAtMs / 1000);
+  let scan = parseOrdnetListingScanCursor(priorState?.last_cursor ?? null);
+  if (!scan) {
+    scan = {
+      v: 1,
+      scan_id: randomUUID(),
+      next_cursor: '',
+      pages: 0,
+      raw_count: 0,
+      started_at: nowSec,
+      previous_snapshot_at: priorState?.last_run_at ?? null,
+      suppress_notifications:
+        !priorState?.last_run_at ||
+        priorState.last_status !== 'ok' ||
+        nowSec - priorState.last_run_at > LISTED_COLD_START_SEC,
+    };
+    // A malformed/obsolete cursor starts a clean generation. Old staged
+    // generations are never mixed into the replacement snapshot.
+    stmts.clearListingSnapshotStage.run({
+      stream: 'ordnet_listings',
+      collection: collection.slug,
+    });
+  }
+
+  let pagesThisTick = 0;
+  let complete = false;
+  let errMsg: string | null = null;
+  while (pagesThisTick < ORDNET_LISTINGS_MAX_PAGES_PER_TICK) {
+    if (Date.now() - startedAtMs > TICK_WALLCLOCK_BUDGET_MS) break;
+    let page;
+    try {
+      page = await fetchOrdnetListingsPage({
+        collectionSlug: collection.ordnet_slug,
+        cursor: scan.next_cursor || null,
+        limit: SATFLOW_PAGE_SIZE,
+        sort: 'price',
+      });
+    } catch (err) {
+      errMsg = errorMessage(err);
+      break;
+    }
+
+    const candidates = page.items.map(ordnetListingToCandidate);
+    const stagePage = getDb().transaction(() => {
+      for (const item of candidates) {
+        stmts.upsertListingSnapshotStage.run({
+          stream: 'ordnet_listings',
+          collection: collection.slug,
+          scan_id: scan!.scan_id,
+          marketplace: item.marketplace,
+          source_id: item.source_id,
+          inscription_id: item.inscription_id,
+          price_sats: item.price_sats,
+          seller: item.seller,
+          listed_at: item.listed_at,
+          raw_json: item.raw_json,
+        });
+      }
+    });
+    stagePage();
+    pagesThisTick++;
+    scan.pages++;
+    scan.raw_count += page.rawCount;
+
+    if (!page.hasMore) {
+      complete = true;
+      scan.next_cursor = '';
+      break;
+    }
+    if (!page.nextCursor) {
+      errMsg = 'ord.net listings pagination returned hasMore without a next cursor';
+      break;
+    }
+    scan.next_cursor = page.nextCursor;
+  }
+
+  const stagedCount = (
+    stmts.countListingSnapshotStage.get({
+      stream: 'ordnet_listings',
+      collection: collection.slug,
+      scan_id: scan.scan_id,
+    }) as { n: number }
+  ).n;
+
+  if (errMsg) {
+    stmts.setPollResultExactCursor.run({
+      stream: 'ordnet_listings',
+      collection: collection.slug,
+      status: `failed: ${errMsg}`.slice(0, 500),
+      event_count: 0,
+      cursor: JSON.stringify(scan),
+    });
+    log.warn('poll/ordnet-listings', 'scan page failed; active snapshot preserved', {
+      collection: collection.slug,
+      scan_id: scan.scan_id,
+      pages_this_tick: pagesThisTick,
+      pages_staged: scan.pages,
+      staged_count: stagedCount,
+      dur_ms: Date.now() - startedAtMs,
+      error: errMsg,
+    });
+    return {
+      mode: 'ordnet-listings',
+      collection: collection.slug,
+      error: errMsg,
+      pages: pagesThisTick,
+      staged_pages: scan.pages,
+      staged_count: stagedCount,
+      snapshot_preserved: true,
+    };
+  }
+
+  if (!complete) {
+    stmts.setPollResultExactCursor.run({
+      stream: 'ordnet_listings',
+      collection: collection.slug,
+      status: 'staging',
+      event_count: stagedCount,
+      cursor: JSON.stringify(scan),
+    });
+    log.info('poll/ordnet-listings', 'scan staged for next tick', {
+      collection: collection.slug,
+      scan_id: scan.scan_id,
+      pages_this_tick: pagesThisTick,
+      pages_staged: scan.pages,
+      staged_count: stagedCount,
+      quota_used: pagesThisTick,
+      quota_limit: ORDNET_LISTINGS_MAX_PAGES_PER_TICK,
+      dur_ms: Date.now() - startedAtMs,
+    });
+    return {
+      mode: 'ordnet-listings',
+      collection: collection.slug,
+      done: false,
+      pages: pagesThisTick,
+      staged_pages: scan.pages,
+      staged_count: stagedCount,
+      quota_used: pagesThisTick,
+      quota_limit: ORDNET_LISTINGS_MAX_PAGES_PER_TICK,
+      snapshot_preserved: true,
+    };
+  }
+
+  const staged = stmts.getListingSnapshotStage.all({
+    stream: 'ordnet_listings',
+    collection: collection.slug,
+    scan_id: scan.scan_id,
+  }) as ListingCandidate[];
+  const idToNumber = buildIdToNumberMap();
+  const ready: ReadyListing[] = [];
+  let unresolved = 0;
+  for (const item of staged) {
+    const num = idToNumber.get(item.inscription_id);
+    if (num == null) unresolved++;
+    else ready.push({ ...item, inscription_number: num });
+  }
+
+  if (ready.length === 0 && unresolved > 0) {
+    const finishWithoutSwap = getDb().transaction(() => {
+      stmts.clearListingSnapshotStage.run({
+        stream: 'ordnet_listings',
+        collection: collection.slug,
+      });
+      stmts.setPollResultExactCursor.run({
+        stream: 'ordnet_listings',
+        collection: collection.slug,
+        status: 'ok-skipped-empty-resolution',
+        event_count: 0,
+        cursor: null,
+      });
+    });
+    finishWithoutSwap();
+    return {
+      mode: 'ordnet-listings',
+      collection: collection.slug,
+      done: true,
+      skipped: 'empty-resolution',
+      pages: pagesThisTick,
+      staged_pages: scan.pages,
+      unresolved,
+      snapshot_preserved: true,
+    };
+  }
+
+  const refreshedAt = Math.floor(Date.now() / 1000);
+  let listedEventsEmitted = 0;
+  let intentsReconciled = 0;
+  const swap = getDb().transaction(() => {
+    const priorRows = scan.suppress_notifications
+      ? []
+      : (stmts.selectActiveListingsForSource.all({
+          collection: collection.slug,
+          marketplace: 'ord.net',
+        }) as Array<{
+          inscription_number: number;
+          marketplace: string;
+          satflow_id: string;
+          listed_at: number;
+        }>);
+    const priorKeys = new Set(
+      priorRows.map(row =>
+        listingSnapshotKey({
+          marketplace: row.marketplace as ReadyListing['marketplace'],
+          source_id: row.satflow_id,
+          listed_at: row.listed_at,
+        })
+      )
+    );
+
+    for (const item of ready) {
+      stmts.upsertActiveListing.run({
+        inscription_number: item.inscription_number,
+        inscription_id: item.inscription_id,
+        satflow_id: item.source_id,
+        price_sats: item.price_sats,
+        seller: item.seller,
+        marketplace: item.marketplace,
+        listed_at: item.listed_at,
+        refreshed_at: refreshedAt,
+      });
+    }
+    stmts.deleteStaleListingsForMarketplace.run({
+      cutoff: refreshedAt,
+      collection: collection.slug,
+      marketplace: 'ord.net',
+    });
+
+    if (!scan.suppress_notifications) {
+      for (const item of ready) {
+        if (priorKeys.has(listingSnapshotKey(item))) continue;
+        if (scan.previous_snapshot_at != null && item.listed_at <= scan.previous_snapshot_at)
+          continue;
+        const inserted = stmts.insertListedEvent.run({
+          inscription_id: item.inscription_id,
+          inscription_number: item.inscription_number,
+          block_timestamp: item.listed_at,
+          seller: item.seller,
+          marketplace: item.marketplace,
+          price_sats: item.price_sats,
+          txid: listedEventTxid(item),
+        });
+        if (inserted.changes > 0) {
+          stmts.enqueueNotify.run(Number(inserted.lastInsertRowid));
+          listedEventsEmitted++;
+        }
+      }
+    }
+
+    intentsReconciled = stmts.reconcileListingIntentsAfterSnapshot.run({
+      collection: collection.slug,
+      scan_id: scan.scan_id,
+      scan_started_at: scan.started_at,
+    }).changes;
+
+    stmts.clearListingSnapshotStage.run({
+      stream: 'ordnet_listings',
+      collection: collection.slug,
+    });
+    stmts.setPollResultExactCursor.run({
+      stream: 'ordnet_listings',
+      collection: collection.slug,
+      status: 'ok',
+      event_count: ready.length,
+      cursor: null,
+    });
+  });
+  swap();
+
+  log.info('poll/ordnet-listings', 'snapshot swapped', {
+    collection: collection.slug,
+    scan_id: scan.scan_id,
+    pages_this_tick: pagesThisTick,
+    pages_staged: scan.pages,
+    source_count: staged.length,
+    written: ready.length,
+    unresolved,
+    listed_events: listedEventsEmitted,
+    intents_reconciled: intentsReconciled,
+    quota_used: pagesThisTick,
+    quota_limit: ORDNET_LISTINGS_MAX_PAGES_PER_TICK,
+    dur_ms: Date.now() - startedAtMs,
+  });
+  return {
+    mode: 'ordnet-listings',
+    collection: collection.slug,
+    done: true,
+    pages: pagesThisTick,
+    staged_pages: scan.pages,
+    source_count: staged.length,
+    written: ready.length,
+    unresolved,
+    listed_events: listedEventsEmitted,
+    intents_reconciled: intentsReconciled,
+    quota_used: pagesThisTick,
+    quota_limit: ORDNET_LISTINGS_MAX_PAGES_PER_TICK,
+    snapshot_preserved: false,
   };
 }
 

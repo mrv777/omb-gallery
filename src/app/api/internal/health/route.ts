@@ -13,6 +13,7 @@ const STALE_THRESHOLD_SEC: Record<string, number> = {
   ord: 600,
   satflow: 600,
   satflow_listings: 900,
+  ordnet_listings: 900,
   matrica: 2 * 24 * 60 * 60,
   notify: 900,
   loans: 900,
@@ -38,8 +39,10 @@ const ORD_LAG_DEGRADED_BLOCKS = 1000;
 //   bootstrapped — first run after deploy; cursor initialised, no work yet.
 //   running      — notify's in-flight lock marker. A genuinely stuck 'running'
 //                  still surfaces, just via the staleness check instead.
+//   staging      — ord.net has more cursor pages queued for the next tick;
+//                  the previous active snapshot remains complete and usable.
 // Everything else — partial, deferred, failed, rpc-fail-hold — stays a warn.
-const HEALTHY_STATUSES = new Set(['idle', 'bootstrapped', 'running']);
+const HEALTHY_STATUSES = new Set(['idle', 'bootstrapped', 'running', 'staging']);
 
 function isHealthyStatus(s: string | null): boolean {
   if (s == null) return true;
@@ -62,6 +65,11 @@ type StreamStatus = {
   ord_lag_blocks?: number | null;
   heal_cursor?: number | null;
   heal_completed_at?: number | null;
+  staged_pages?: number | null;
+  staged_count?: number | null;
+  scan_id?: string | null;
+  quota_limit?: number | null;
+  source_count?: number | null;
 };
 
 export async function GET() {
@@ -69,7 +77,7 @@ export async function GET() {
   const db = getDb();
   const rows = db
     .prepare(
-      `SELECT stream, collection_slug, last_run_at, last_status, last_event_count,
+      `SELECT stream, collection_slug, last_cursor, last_run_at, last_status, last_event_count,
               is_backfilling, last_known_height
        FROM poll_state
        ORDER BY stream, collection_slug`
@@ -100,6 +108,30 @@ export async function GET() {
       base.ord_lag_blocks = ordTip != null && btcTip != null ? Math.max(0, btcTip - ordTip) : null;
       base.heal_cursor = ordState.healCursor;
       base.heal_completed_at = ordState.healCompletedAt;
+    }
+    if (r.stream === 'ordnet_listings') {
+      let cursor: { scan_id?: string; pages?: number } | null = null;
+      try {
+        cursor = r.last_cursor
+          ? (JSON.parse(r.last_cursor) as { scan_id?: string; pages?: number })
+          : null;
+      } catch {
+        cursor = null;
+      }
+      base.scan_id = typeof cursor?.scan_id === 'string' ? cursor.scan_id : null;
+      base.staged_pages = Number.isInteger(cursor?.pages) ? (cursor?.pages ?? null) : null;
+      base.staged_count = base.scan_id
+        ? (
+            db
+              .prepare(
+                `SELECT COUNT(*) AS n FROM listing_snapshot_stage
+               WHERE stream = 'ordnet_listings' AND collection_slug = ? AND scan_id = ?`
+              )
+              .get(r.collection_slug, base.scan_id) as { n: number }
+          ).n
+        : null;
+      base.quota_limit = 20;
+      base.source_count = r.last_event_count;
     }
     return base;
   });

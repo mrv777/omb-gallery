@@ -4,6 +4,7 @@ import {
   DreyMarketplaceContractError,
   inspectBuyerPsbt,
   withOrdnetDreyContext,
+  withOrdnetListingDreyContexts,
   withSatflowDreyContexts,
 } from '@/lib/marketplace/dreyContext';
 
@@ -92,6 +93,52 @@ describe('Drey OMB marketplace context', () => {
         pay.address!
       )
     ).toThrow(DreyMarketplaceContractError);
+  });
+
+  it('binds all three ord.net seller prompts to one listing workflow', () => {
+    const psbts = [0, 1, 2].map(index => ({
+      psbt: purchasePsbt(),
+      sign_inputs: { [ord.address!]: [index === 1 ? 1 : 0] },
+    }));
+    const result = withOrdnetListingDreyContexts({
+      psbts,
+      intentId: 84,
+      inscriptionId: listing.inscription_id,
+      inscriptionOutpoint: `${'8'.repeat(64)}:0`,
+      anchorUtxoId: 'anchor-84',
+      priceSats: listing.price_sats,
+      sellerProceedsSats: 99_000,
+      marketplaceFeeSats: 1_000,
+      payoutAddress: pay.address!,
+      inscriptionDestination: ord.address!,
+      createdAt: 1_000,
+    });
+    expect(result.map(item => item.marketplace_context?.stage)).toEqual([
+      'escrow',
+      'settlement',
+      'recovery',
+    ]);
+    expect(result[1]?.marketplace_context).toMatchObject({
+      templateVersion: 'omb-wiki-ordnet-list-v1',
+      action: 'list',
+      role: 'seller',
+      workflowId: 'omb-wiki-list-84',
+      step: 2,
+      stepCount: 3,
+      selectedInputIndexes: [1],
+      identifiers: {
+        inscriptionId: listing.inscription_id,
+        preflightHandle: 'anchor-84',
+      },
+      economics: {
+        priceSats: '100000',
+        sellerProceedsSats: '99000',
+        marketplaceFeeSats: '1000',
+        payoutAddress: pay.address,
+        inscriptionDestination: ord.address,
+      },
+      broadcaster: 'site',
+    });
   });
 
   it('uses one reviewed Satflow template across preparation and purchase steps', () => {

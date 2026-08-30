@@ -246,6 +246,34 @@ describe('active_listings schema + statements', () => {
     expect((stmts.countActiveListings.get([]) as { n: number }).n).toBe(1);
   });
 
+  it('source-scoped replacement preserves another marketplace snapshot', () => {
+    const db = dbModule.getDb();
+    const stmts = dbModule.getStmts();
+    const row = db.prepare(`SELECT inscription_number FROM inscriptions LIMIT 1`).get() as {
+      inscription_number: number;
+    };
+    const base = {
+      inscription_number: row.inscription_number,
+      inscription_id: 'e'.repeat(64) + 'i0',
+      price_sats: 1_000_000,
+      seller: 'bc1pseller',
+      listed_at: 1700000000,
+      refreshed_at: 100,
+    };
+    stmts.upsertActiveListing.run({ ...base, satflow_id: 'sat-1', marketplace: 'satflow' });
+    stmts.upsertActiveListing.run({ ...base, satflow_id: 'ord-1', marketplace: 'ord.net' });
+
+    stmts.deleteStaleListingsForMarketplace.run({
+      cutoff: 101,
+      collection: 'omb',
+      marketplace: 'satflow',
+    });
+    const remaining = stmts.getActiveListings.all(row.inscription_number) as Array<{
+      marketplace: string;
+    }>;
+    expect(remaining.map(r => r.marketplace)).toEqual(['ord.net']);
+  });
+
   it('cascades delete when the parent inscription is removed', () => {
     const db = dbModule.getDb();
     const stmts = dbModule.getStmts();
@@ -267,6 +295,201 @@ describe('active_listings schema + statements', () => {
 
     db.prepare(`DELETE FROM inscriptions WHERE inscription_number = ?`).run(row.inscription_number);
     expect((stmts.countActiveListings.get([]) as { n: number }).n).toBe(0);
+  });
+});
+
+describe('ord.net staged snapshots and seller intents', () => {
+  it('seeds an independent poll stream and stages a scan generation', () => {
+    const db = dbModule.getDb();
+    const stmts = dbModule.getStmts();
+    expect(stmts.getPollState.get({ stream: 'ordnet_listings', collection: 'omb' })).toBeDefined();
+
+    stmts.upsertListingSnapshotStage.run({
+      stream: 'ordnet_listings',
+      collection: 'omb',
+      scan_id: 'scan-1',
+      marketplace: 'ord.net',
+      source_id: 'listing-1',
+      inscription_id: 'f'.repeat(64) + 'i0',
+      price_sats: 123_456,
+      seller: 'bc1pseller',
+      listed_at: 1700000000,
+      raw_json: '{}',
+    });
+    expect(
+      stmts.countListingSnapshotStage.get({
+        stream: 'ordnet_listings',
+        collection: 'omb',
+        scan_id: 'scan-1',
+      })
+    ).toEqual({ n: 1 });
+    stmts.setPollResultExactCursor.run({
+      stream: 'ordnet_listings',
+      collection: 'omb',
+      status: 'staging',
+      event_count: 1,
+      cursor: JSON.stringify({ scan_id: 'scan-1', next_cursor: 'page-2' }),
+    });
+    expect(stmts.getPollState.get({ stream: 'ordnet_listings', collection: 'omb' })).toMatchObject({
+      last_status: 'staging',
+      last_event_count: 1,
+    });
+    stmts.setPollResultExactCursor.run({
+      stream: 'ordnet_listings',
+      collection: 'omb',
+      status: 'ok',
+      event_count: 1,
+      cursor: null,
+    });
+    expect(stmts.getPollState.get({ stream: 'ordnet_listings', collection: 'omb' })).toMatchObject({
+      last_status: 'ok',
+      last_cursor: null,
+    });
+    stmts.clearListingSnapshotStage.run({ stream: 'ordnet_listings', collection: 'omb' });
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM listing_snapshot_stage`).get()).toEqual({ n: 0 });
+  });
+
+  it('creates the durable listing_intents contract without signed PSBT storage', () => {
+    const db = dbModule.getDb();
+    const columns = db.pragma('table_info(listing_intents)') as Array<{ name: string }>;
+    const names = columns.map(column => column.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'id',
+        'seller_ord_addr',
+        'seller_pay_addr',
+        'inscription_id',
+        'inscription_number',
+        'current_output',
+        'price_sats',
+        'duration_days',
+        'provider_id',
+        'wallet_binding_id',
+        'anchor_utxo_id',
+        'preflight_json',
+        'unsigned_psbt_hashes_json',
+        'status',
+        'listing_id',
+        'claim_token',
+        'claimed_at',
+        'error',
+        'created_at',
+        'updated_at',
+      ])
+    );
+    expect(names).not.toContain('signed_psbts_json');
+  });
+
+  it('blocks another preflight while an active or ambiguous intent exists', () => {
+    const db = dbModule.getDb();
+    const row = db.prepare(`SELECT inscription_number FROM inscriptions LIMIT 1`).get() as {
+      inscription_number: number;
+    };
+    const insert = db.prepare(`
+      INSERT INTO listing_intents (
+        seller_ord_addr, seller_pay_addr, inscription_id, inscription_number,
+        current_output, price_sats, duration_days, provider_id, wallet_binding_id,
+        status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 90, 'drey', ?, ?, unixepoch(), unixepoch())
+    `);
+    const inscriptionId = '9'.repeat(64) + 'i0';
+    insert.run(
+      'bc1pseller',
+      'bc1qpayment',
+      inscriptionId,
+      row.inscription_number,
+      'a'.repeat(64) + ':0',
+      1_000_000,
+      'binding-1',
+      'active'
+    );
+    expect(() =>
+      insert.run(
+        'bc1pseller',
+        'bc1qpayment',
+        inscriptionId,
+        row.inscription_number,
+        'a'.repeat(64) + ':0',
+        2_000_000,
+        'binding-1',
+        'created'
+      )
+    ).toThrow();
+
+    db.prepare(`UPDATE listing_intents SET status = 'failed' WHERE inscription_id = ?`).run(
+      inscriptionId
+    );
+    expect(() =>
+      insert.run(
+        'bc1pseller',
+        'bc1qpayment',
+        inscriptionId,
+        row.inscription_number,
+        'a'.repeat(64) + ':0',
+        2_000_000,
+        'binding-1',
+        'ambiguous'
+      )
+    ).not.toThrow();
+    expect(() =>
+      insert.run(
+        'bc1pseller',
+        'bc1qpayment',
+        inscriptionId,
+        row.inscription_number,
+        'a'.repeat(64) + ':0',
+        3_000_000,
+        'binding-1',
+        'created'
+      )
+    ).toThrow();
+  });
+
+  it('terminalizes only absent, pre-scan intents after a complete snapshot', () => {
+    const db = dbModule.getDb();
+    const stmts = dbModule.getStmts();
+    const row = db.prepare(`SELECT inscription_number FROM inscriptions LIMIT 1`).get() as {
+      inscription_number: number;
+    };
+    const insert = db.prepare(`
+      INSERT INTO listing_intents (
+        seller_ord_addr, seller_pay_addr, inscription_id, inscription_number,
+        current_output, price_sats, duration_days, provider_id, wallet_binding_id,
+        status, listing_id, created_at, updated_at
+      ) VALUES ('seller', 'payment', ?, ?, 'tx:0', 1000000, 90, 'drey',
+                'binding', ?, ?, 1, ?)
+    `);
+    insert.run('present', row.inscription_number, 'active', 'listing-present', 1000);
+    insert.run('gone', row.inscription_number, 'active', 'listing-gone', 1000);
+    insert.run('ambiguous-old', row.inscription_number, 'ambiguous', null, 1000);
+    insert.run('pending-fresh', row.inscription_number, 'pending_indexing', null, 1900);
+    stmts.upsertListingSnapshotStage.run({
+      stream: 'ordnet_listings',
+      collection: 'omb',
+      scan_id: 'reconcile-scan',
+      marketplace: 'ord.net',
+      source_id: 'listing-present',
+      inscription_id: 'present',
+      price_sats: 1_000_000,
+      seller: 'seller',
+      listed_at: 1,
+      raw_json: '{}',
+    });
+
+    const result = stmts.reconcileListingIntentsAfterSnapshot.run({
+      collection: 'omb',
+      scan_id: 'reconcile-scan',
+      scan_started_at: 2000,
+    });
+    expect(result.changes).toBe(2);
+    expect(
+      db.prepare(`SELECT inscription_id, status FROM listing_intents ORDER BY id`).all()
+    ).toEqual([
+      { inscription_id: 'present', status: 'active' },
+      { inscription_id: 'gone', status: 'delisted' },
+      { inscription_id: 'ambiguous-old', status: 'stale' },
+      { inscription_id: 'pending-fresh', status: 'pending_indexing' },
+    ]);
   });
 });
 
@@ -597,7 +820,7 @@ describe('buy_intents schema', () => {
     vi.resetModules();
     dbModule = await import('../src/lib/db');
     const upgraded = dbModule.getDb();
-    expect(upgraded.pragma('user_version', { simple: true })).toBe(45);
+    expect(upgraded.pragma('user_version', { simple: true })).toBe(46);
     expect(
       (upgraded.prepare(`PRAGMA table_info(buy_intents)`).all() as Array<{ name: string }>).map(
         column => column.name

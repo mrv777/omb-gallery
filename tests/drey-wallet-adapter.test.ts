@@ -18,6 +18,7 @@ vi.mock('sats-connect', () => ({
 
 import {
   DREY_MIN_BUY_VERSION,
+  DREY_ORDNET_LIST_CAPABILITY,
   DREY_COMMUNITY_CAPABILITY,
   DREY_COMMUNITY_OFFERS_CAPABILITY,
   DREY_COMMUNITY_POSITION_TRANSFER_CAPABILITY,
@@ -28,11 +29,13 @@ import {
   getDreySpendableBalance,
   getSatsWalletOptions,
   isDreyBuySupported,
+  isOrdnetListingSupported,
   isDreyCommunitySupported,
   isDreyCommunityOffersSupported,
   isDreyCommunityPositionTransferSupported,
   listenForDreyInitialization,
   openDreyCommunitySetup,
+  ordnetSellerProviderId,
   probeDreyConnection,
   signPurchasePsbt,
   type ConnectedWallet,
@@ -81,6 +84,23 @@ describe('Drey wallet adapter', () => {
         isInstalled: true,
       },
     ]);
+  });
+
+  it('gates seller signing to the approved wallet matrix and Drey capability', () => {
+    expect(isOrdnetListingSupported(dreyWallet())).toBe(false);
+    expect(
+      isOrdnetListingSupported(dreyWallet({ providerCapabilities: [DREY_ORDNET_LIST_CAPABILITY] }))
+    ).toBe(true);
+    expect(
+      isOrdnetListingSupported(dreyWallet({ providerId: 'XverseProviders.BitcoinProvider' }))
+    ).toBe(true);
+    expect(isOrdnetListingSupported(dreyWallet({ providerId: LEATHER_PROVIDER_ID }))).toBe(true);
+    expect(isOrdnetListingSupported(dreyWallet({ providerId: 'Ledger' }))).toBe(false);
+    expect(
+      ordnetSellerProviderId(dreyWallet({ providerId: 'XverseProviders.BitcoinProvider' }))
+    ).toBe('xverse');
+    expect(ordnetSellerProviderId(dreyWallet({ providerId: LEATHER_PROVIDER_ID }))).toBe('leather');
+    expect(ordnetSellerProviderId(dreyWallet({ providerId: 'unisat' }))).toBe('unisat');
   });
 
   it('ships the exact production extension icon', () => {

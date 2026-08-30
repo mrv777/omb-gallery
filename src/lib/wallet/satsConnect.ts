@@ -10,7 +10,7 @@ import {
   setDefaultProvider,
   type SupportedWallet,
 } from 'sats-connect';
-import type { MarketplaceContext } from '@/lib/marketplace/types';
+import type { MarketplaceProviderContext } from '@/lib/marketplace/types';
 import type { CommunityVaultAcquisitionProviderContextV1 } from '@drey/core/domain/community-vault/acquisition-provider';
 import type {
   CommunitySaleBuyerProviderContextV1,
@@ -27,6 +27,7 @@ import {
 } from '@/lib/wallet/dreyProvider';
 
 export const DREY_MIN_BUY_VERSION = '0.11.0';
+export const DREY_ORDNET_LIST_CAPABILITY = 'marketplace-ordnet-list-v1';
 export const DREY_COMMUNITY_CAPABILITY = 'community-vault-v1';
 export const DREY_COMMUNITY_OFFERS_CAPABILITY = 'community-vault-offers-v1';
 export const DREY_COMMUNITY_POSITION_TRANSFER_CAPABILITY = 'community-vault-position-transfer-v1';
@@ -263,7 +264,7 @@ export async function signPurchasePsbt(args: {
   wallet: ConnectedWallet;
   psbt: string;
   signInputs?: Record<string, number[]>;
-  marketplaceContext?: MarketplaceContext;
+  marketplaceContext?: MarketplaceProviderContext;
   communityVaultAcquisitionContext?: CommunityVaultAcquisitionProviderContextV1;
   communityVaultSaleContext?: CommunitySaleProviderContextV1 & { ownerId: string };
   communityVaultSaleBuyerContext?: CommunitySaleBuyerProviderContextV1;
@@ -360,6 +361,22 @@ export function isDreyBuySupported(wallet: ConnectedWallet): boolean {
     wallet.providerId !== DREY_PROVIDER_ID ||
     compareSemver(wallet.providerVersion, DREY_MIN_BUY_VERSION) >= 0
   );
+}
+
+export function isOrdnetListingSupported(wallet: ConnectedWallet): boolean {
+  return ordnetSellerProviderId(wallet) !== null;
+}
+
+export function ordnetSellerProviderId(
+  wallet: ConnectedWallet
+): 'xverse' | 'unisat' | 'leather' | 'drey' | null {
+  if (wallet.providerId === DREY_PROVIDER_ID) {
+    return wallet.providerCapabilities.includes(DREY_ORDNET_LIST_CAPABILITY) ? 'drey' : null;
+  }
+  if (wallet.providerId === 'XverseProviders.BitcoinProvider') return 'xverse';
+  if (wallet.providerId === 'unisat') return 'unisat';
+  if (wallet.providerId === LEATHER_PROVIDER_ID) return 'leather';
+  return null;
 }
 
 export function isDreyCommunitySupported(wallet: ConnectedWallet): boolean {

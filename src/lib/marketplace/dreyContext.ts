@@ -2,7 +2,12 @@ import 'server-only';
 
 import { createHash } from 'node:crypto';
 import { Psbt, Transaction, address, networks } from 'bitcoinjs-lib';
-import type { MarketplaceContext, MarketplaceListing, PurchasePsbtToSign } from './types';
+import type {
+  MarketplaceContext,
+  MarketplaceListing,
+  MarketplaceListingContext,
+  PurchasePsbtToSign,
+} from './types';
 
 const CONTEXT_TTL_MS = 5 * 60 * 1000;
 type ContextListing = Pick<MarketplaceListing, 'listing_id' | 'inscription_id' | 'price_sats'>;
@@ -98,6 +103,64 @@ export function withSatflowDreyContexts(args: {
       }),
     },
   ];
+}
+
+export function withOrdnetListingDreyContexts(args: {
+  psbts: PurchasePsbtToSign[];
+  intentId: number;
+  inscriptionId: string;
+  inscriptionOutpoint: string;
+  anchorUtxoId: string;
+  priceSats: number;
+  sellerProceedsSats: number;
+  marketplaceFeeSats: number;
+  payoutAddress: string;
+  inscriptionDestination: string;
+  createdAt?: number;
+}): PurchasePsbtToSign[] {
+  if (args.psbts.length !== 3) {
+    throw new DreyMarketplaceContractError(
+      'ORD.NET listing requires escrow, settlement, and recovery signing steps.'
+    );
+  }
+  const now = args.createdAt ?? Date.now();
+  const stages: MarketplaceListingContext['stage'][] = ['escrow', 'settlement', 'recovery'];
+  return args.psbts.map((item, index) => {
+    const selectedInputIndexes = explicitSigningIndexes(item);
+    return {
+      ...item,
+      marketplace_context: {
+        version: 1,
+        marketplaceId: 'ordnet',
+        templateVersion: 'omb-wiki-ordnet-list-v1',
+        action: 'list',
+        role: 'seller',
+        assetKind: 'inscription',
+        workflowId: `omb-wiki-list-${args.intentId}`,
+        step: index + 1,
+        stepCount: 3,
+        stage: stages[index]!,
+        identifiers: {
+          inscriptionId: requireIdentifier(args.inscriptionId, 'inscription id'),
+          preflightHandle: requireIdentifier(args.anchorUtxoId, 'listing anchor'),
+          inscriptionOutpoint: requireIdentifier(args.inscriptionOutpoint, 'inscription outpoint'),
+        },
+        economics: {
+          priceSats: safeSats(args.priceSats, 'price'),
+          sellerProceedsSats: safeSats(args.sellerProceedsSats, 'seller proceeds'),
+          marketplaceFeeSats: safeSats(args.marketplaceFeeSats, 'marketplace fee', true),
+          payoutAddress: requireIdentifier(args.payoutAddress, 'payout address'),
+          inscriptionDestination: requireIdentifier(
+            args.inscriptionDestination,
+            'inscription destination'
+          ),
+        },
+        selectedInputIndexes,
+        expiresAt: now + CONTEXT_TTL_MS,
+        broadcaster: 'site',
+      },
+    };
+  });
 }
 
 export function inspectBuyerPsbt(
@@ -276,6 +339,33 @@ function requireIdentifier(value: string, label: string): string {
   const cleaned = value.trim();
   if (!cleaned || cleaned.length > 256) throw new DreyMarketplaceContractError(`Invalid ${label}.`);
   return cleaned;
+}
+
+function explicitSigningIndexes(item: PurchasePsbtToSign): number[] {
+  if (!item.sign_inputs || Object.keys(item.sign_inputs).length !== 1) {
+    throw new DreyMarketplaceContractError(
+      'ORD.NET listing step requires one explicit seller signing address.'
+    );
+  }
+  const indexes = Object.values(item.sign_inputs)[0] ?? [];
+  const unique = [...new Set(indexes)].toSorted((a, b) => a - b);
+  if (
+    unique.length === 0 ||
+    unique.length !== indexes.length ||
+    unique.some(index => !Number.isInteger(index) || index < 0)
+  ) {
+    throw new DreyMarketplaceContractError(
+      'ORD.NET listing step has invalid or duplicate signing indexes.'
+    );
+  }
+  return unique;
+}
+
+function safeSats(value: number, label: string, allowZero = false): string {
+  if (!Number.isSafeInteger(value) || (allowZero ? value < 0 : value <= 0)) {
+    throw new DreyMarketplaceContractError(`Invalid ${label}.`);
+  }
+  return String(value);
 }
 
 function assertTxid(value: string): string {

@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_BRAVOCADO_DISTRIBUTION_LIST, SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 45;
+const SCHEMA_VERSION = 46;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -177,6 +177,7 @@ function migrate(db: DB): void {
         upgradeV42ToV43(db);
         upgradeV43ToV44(db);
         upgradeV44ToV45(db);
+        upgradeV45ToV46(db);
       } else {
         initSchemaLatest(db);
       }
@@ -225,6 +226,7 @@ function migrate(db: DB): void {
       if (current < 43) upgradeV42ToV43(db);
       if (current < 44) upgradeV43ToV44(db);
       if (current < 45) upgradeV44ToV45(db);
+      if (current < 46) upgradeV45ToV46(db);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
@@ -357,7 +359,7 @@ function initSchemaLatest(db: DB): void {
     -- one batch poll covers every inscription regardless of collection. The
     -- 'matrica' stream is also collection-agnostic — one row keyed to 'omb'.
     CREATE TABLE IF NOT EXISTS poll_state (
-      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','matrica','notify','loans','magisat_fp','magic_eden_fp','ord_net_fp','cluster','listing_staging')),
+      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','ordnet_listings','matrica','notify','loans','magisat_fp','magic_eden_fp','ord_net_fp','cluster','listing_staging')),
       collection_slug           TEXT NOT NULL REFERENCES collections (slug),
       last_cursor               TEXT,
       last_run_at               INTEGER,
@@ -373,6 +375,7 @@ function initSchemaLatest(db: DB): void {
       ('ord', 'omb'),
       ('satflow', 'omb'),
       ('satflow_listings', 'omb'),
+      ('ordnet_listings', 'omb'),
       ('matrica', 'omb'),
       ('notify', 'omb'),
       ('loans', 'omb'),
@@ -420,6 +423,64 @@ function initSchemaLatest(db: DB): void {
     );
     CREATE INDEX IF NOT EXISTS idx_listings_price ON active_listings (price_sats);
     CREATE INDEX IF NOT EXISTS idx_listings_inscription ON active_listings (inscription_number);
+
+    -- Durable source-snapshot staging. Long cursor scans write here across
+    -- multiple cron ticks; active_listings is replaced source-by-source only
+    -- after the final page succeeds, so readers never observe a partial scan.
+    CREATE TABLE IF NOT EXISTS listing_snapshot_stage (
+      stream             TEXT    NOT NULL,
+      collection_slug    TEXT    NOT NULL REFERENCES collections (slug),
+      scan_id            TEXT    NOT NULL,
+      marketplace        TEXT    NOT NULL,
+      source_id          TEXT    NOT NULL,
+      inscription_id     TEXT    NOT NULL,
+      price_sats         INTEGER NOT NULL,
+      seller             TEXT,
+      listed_at          INTEGER NOT NULL,
+      raw_json           TEXT    NOT NULL,
+      staged_at          INTEGER NOT NULL DEFAULT (unixepoch()),
+      PRIMARY KEY (stream, collection_slug, scan_id, marketplace, source_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_listing_snapshot_stage_scan
+      ON listing_snapshot_stage (stream, collection_slug, scan_id);
+
+    -- Seller listing attempts are durable because wallet signing spans three
+    -- prompts and submit/reconciliation can outlive one HTTP request. Signed
+    -- PSBT bytes are deliberately not persisted in this table.
+    CREATE TABLE IF NOT EXISTS listing_intents (
+      id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+      seller_ord_addr             TEXT    NOT NULL,
+      seller_pay_addr             TEXT    NOT NULL,
+      inscription_number          INTEGER NOT NULL REFERENCES inscriptions (inscription_number),
+      inscription_id              TEXT    NOT NULL,
+      current_output              TEXT    NOT NULL,
+      price_sats                  INTEGER NOT NULL CHECK (price_sats > 0),
+      duration_days               INTEGER NOT NULL CHECK (duration_days IN (1,7,30,90,180)),
+      provider_id                 TEXT    NOT NULL,
+      wallet_binding_id           TEXT    NOT NULL,
+      anchor_utxo_id              TEXT,
+      anchor_handle               TEXT,
+      preflight_json              TEXT,
+      unsigned_psbt_hashes_json   TEXT,
+      status                      TEXT    NOT NULL,
+      listing_id                  TEXT,
+      claim_token                 TEXT,
+      claimed_at                  INTEGER,
+      claim_until                 INTEGER,
+      error                       TEXT,
+      error_code                  TEXT,
+      error_message               TEXT,
+      expires_at                  INTEGER,
+      created_at                  INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at                  INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_listing_intents_seller
+      ON listing_intents (seller_ord_addr, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_listing_intents_inscription
+      ON listing_intents (inscription_id, created_at DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_listing_intents_one_live
+      ON listing_intents (inscription_id)
+      WHERE status IN ('created','submitting','active','pending_indexing','ambiguous');
 
     -- Rolling counter for Satflow API call quota visibility. Single row.
     CREATE TABLE IF NOT EXISTS satflow_call_budget (
@@ -2458,6 +2519,91 @@ function upgradeV44ToV45(db: DB): void {
   `);
 }
 
+function upgradeV45ToV46(db: DB): void {
+  // Give ord.net listing ingestion an independent cursor/lease and durable
+  // page staging. Rebuilding is required to extend SQLite's stream CHECK.
+  db.exec(`
+    CREATE TABLE poll_state_v46 (
+      stream                    TEXT NOT NULL CHECK (stream IN ('ord','satflow','satflow_listings','ordnet_listings','matrica','notify','loans','magisat_fp','magic_eden_fp','ord_net_fp','cluster','listing_staging')),
+      collection_slug           TEXT NOT NULL REFERENCES collections (slug),
+      last_cursor               TEXT,
+      last_run_at               INTEGER,
+      lock_until                INTEGER,
+      last_status               TEXT,
+      last_event_count          INTEGER,
+      is_backfilling            INTEGER NOT NULL DEFAULT 0,
+      last_known_height         INTEGER,
+      backfill_unresolved_seen  INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (stream, collection_slug)
+    );
+    INSERT INTO poll_state_v46 (
+      stream, collection_slug, last_cursor, last_run_at, lock_until,
+      last_status, last_event_count, is_backfilling, last_known_height,
+      backfill_unresolved_seen
+    )
+    SELECT stream, collection_slug, last_cursor, last_run_at, lock_until,
+           last_status, last_event_count, is_backfilling, last_known_height,
+           backfill_unresolved_seen
+      FROM poll_state;
+    DROP TABLE poll_state;
+    ALTER TABLE poll_state_v46 RENAME TO poll_state;
+    INSERT OR IGNORE INTO poll_state (stream, collection_slug)
+      VALUES ('ordnet_listings', 'omb');
+
+    CREATE TABLE IF NOT EXISTS listing_snapshot_stage (
+      stream             TEXT    NOT NULL,
+      collection_slug    TEXT    NOT NULL REFERENCES collections (slug),
+      scan_id            TEXT    NOT NULL,
+      marketplace        TEXT    NOT NULL,
+      source_id          TEXT    NOT NULL,
+      inscription_id     TEXT    NOT NULL,
+      price_sats         INTEGER NOT NULL,
+      seller             TEXT,
+      listed_at          INTEGER NOT NULL,
+      raw_json           TEXT    NOT NULL,
+      staged_at          INTEGER NOT NULL DEFAULT (unixepoch()),
+      PRIMARY KEY (stream, collection_slug, scan_id, marketplace, source_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_listing_snapshot_stage_scan
+      ON listing_snapshot_stage (stream, collection_slug, scan_id);
+
+    CREATE TABLE IF NOT EXISTS listing_intents (
+      id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+      seller_ord_addr             TEXT    NOT NULL,
+      seller_pay_addr             TEXT    NOT NULL,
+      inscription_number          INTEGER NOT NULL REFERENCES inscriptions (inscription_number),
+      inscription_id              TEXT    NOT NULL,
+      current_output              TEXT    NOT NULL,
+      price_sats                  INTEGER NOT NULL CHECK (price_sats > 0),
+      duration_days               INTEGER NOT NULL CHECK (duration_days IN (1,7,30,90,180)),
+      provider_id                 TEXT    NOT NULL,
+      wallet_binding_id           TEXT    NOT NULL,
+      anchor_utxo_id              TEXT,
+      anchor_handle               TEXT,
+      preflight_json              TEXT,
+      unsigned_psbt_hashes_json   TEXT,
+      status                      TEXT    NOT NULL,
+      listing_id                  TEXT,
+      claim_token                 TEXT,
+      claimed_at                  INTEGER,
+      claim_until                 INTEGER,
+      error                       TEXT,
+      error_code                  TEXT,
+      error_message               TEXT,
+      expires_at                  INTEGER,
+      created_at                  INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at                  INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_listing_intents_seller
+      ON listing_intents (seller_ord_addr, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_listing_intents_inscription
+      ON listing_intents (inscription_id, created_at DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_listing_intents_one_live
+      ON listing_intents (inscription_id)
+      WHERE status IN ('created','submitting','active','pending_indexing','ambiguous');
+  `);
+}
+
 function upgradeV30ToV31(db: DB): void {
   // Materialize connected components at IDENTITY_FOLD_THRESHOLD so the
   // top-holders leaderboard, color leaderboards, holder distribution
@@ -2550,6 +2696,10 @@ function seedCollectionsAndPollStates(db: DB): void {
     INSERT OR IGNORE INTO poll_state (stream, collection_slug)
     VALUES ('satflow', @slug), ('satflow_listings', @slug)
   `);
+  const upsertOrdnetStream = db.prepare(`
+    INSERT OR IGNORE INTO poll_state (stream, collection_slug)
+    VALUES ('ordnet_listings', 'omb')
+  `);
   const tx = db.transaction(() => {
     for (const { manifest } of COLLECTIONS) {
       upsertCollection.run({
@@ -2561,6 +2711,7 @@ function seedCollectionsAndPollStates(db: DB): void {
         upsertSatflowStreams.run({ slug: manifest.slug });
       }
     }
+    upsertOrdnetStream.run();
   });
   tx();
 }
@@ -2658,6 +2809,7 @@ type Stmts = {
   getPollState: ReturnType<DB['prepare']>;
   acquireLock: ReturnType<DB['prepare']>;
   setPollResult: ReturnType<DB['prepare']>;
+  setPollResultExactCursor: ReturnType<DB['prepare']>;
   setBackfilling: ReturnType<DB['prepare']>;
   setBackfillUnresolvedSeen: ReturnType<DB['prepare']>;
   setKnownHeight: ReturnType<DB['prepare']>;
@@ -2703,6 +2855,12 @@ type Stmts = {
   // listings
   upsertActiveListing: ReturnType<DB['prepare']>;
   deleteStaleListings: ReturnType<DB['prepare']>;
+  deleteStaleListingsForMarketplace: ReturnType<DB['prepare']>;
+  clearListingSnapshotStage: ReturnType<DB['prepare']>;
+  upsertListingSnapshotStage: ReturnType<DB['prepare']>;
+  getListingSnapshotStage: ReturnType<DB['prepare']>;
+  countListingSnapshotStage: ReturnType<DB['prepare']>;
+  reconcileListingIntentsAfterSnapshot: ReturnType<DB['prepare']>;
   truncateActiveListings: ReturnType<DB['prepare']>;
   getActiveListing: ReturnType<DB['prepare']>;
   getActiveListings: ReturnType<DB['prepare']>;
@@ -2715,6 +2873,7 @@ type Stmts = {
   enqueueNotify: ReturnType<DB['prepare']>;
   selectNotifyQueueBatch: ReturnType<DB['prepare']>;
   selectActiveListingsForCollection: ReturnType<DB['prepare']>;
+  selectActiveListingsForSource: ReturnType<DB['prepare']>;
   insertListedEvent: ReturnType<DB['prepare']>;
   // matrica wallet-linking
   pickWalletsToProbe: ReturnType<DB['prepare']>;
@@ -3023,6 +3182,19 @@ export function getStmts(): Stmts {
           last_status = @status,
           last_event_count = @event_count,
           last_cursor = COALESCE(@cursor, last_cursor)
+      WHERE stream = @stream AND collection_slug = @collection
+    `),
+
+    // Snapshot scans need to distinguish "keep the previous cursor" from
+    // "completed: clear it". The legacy writer intentionally COALESCEs NULL,
+    // so this exact variant is reserved for resumable scan state.
+    setPollResultExactCursor: db.prepare(`
+      UPDATE poll_state
+      SET last_run_at = unixepoch(),
+          lock_until = NULL,
+          last_status = @status,
+          last_event_count = @event_count,
+          last_cursor = @cursor
       WHERE stream = @stream AND collection_slug = @collection
     `),
 
@@ -3573,6 +3745,89 @@ export function getStmts(): Stmts {
         )
     `),
 
+    // Source-scoped snapshot replacement: a successful Satflow refresh must
+    // not remove ord.net rows (and vice versa).
+    deleteStaleListingsForMarketplace: db.prepare(`
+      DELETE FROM active_listings
+      WHERE marketplace = @marketplace
+        AND refreshed_at < @cutoff
+        AND inscription_number IN (
+          SELECT inscription_number FROM inscriptions WHERE collection_slug = @collection
+        )
+    `),
+
+    clearListingSnapshotStage: db.prepare(`
+      DELETE FROM listing_snapshot_stage
+      WHERE stream = @stream AND collection_slug = @collection
+    `),
+
+    upsertListingSnapshotStage: db.prepare(`
+      INSERT INTO listing_snapshot_stage (
+        stream, collection_slug, scan_id, marketplace, source_id,
+        inscription_id, price_sats, seller, listed_at, raw_json, staged_at
+      ) VALUES (
+        @stream, @collection, @scan_id, @marketplace, @source_id,
+        @inscription_id, @price_sats, @seller, @listed_at, @raw_json, unixepoch()
+      )
+      ON CONFLICT(stream, collection_slug, scan_id, marketplace, source_id) DO UPDATE SET
+        inscription_id = excluded.inscription_id,
+        price_sats     = excluded.price_sats,
+        seller         = excluded.seller,
+        listed_at      = excluded.listed_at,
+        raw_json       = excluded.raw_json,
+        staged_at      = excluded.staged_at
+    `),
+
+    getListingSnapshotStage: db.prepare(`
+      SELECT source_id, inscription_id, price_sats, seller, marketplace, listed_at, raw_json
+      FROM listing_snapshot_stage
+      WHERE stream = @stream AND collection_slug = @collection AND scan_id = @scan_id
+      ORDER BY marketplace, source_id
+    `),
+
+    countListingSnapshotStage: db.prepare(`
+      SELECT COUNT(*) AS n
+      FROM listing_snapshot_stage
+      WHERE stream = @stream AND collection_slug = @collection AND scan_id = @scan_id
+    `),
+
+    // A complete ord.net scan is authoritative for intents that pre-date the
+    // scan. This prevents active/ambiguous rows from permanently blocking a
+    // re-list after an external sale, expiry, or delist. Fresh pending rows
+    // get a 15-minute indexing grace period; intents updated during the scan
+    // are never touched by that scan.
+    reconcileListingIntentsAfterSnapshot: db.prepare(`
+      UPDATE listing_intents
+      SET status = CASE WHEN status = 'active' THEN 'delisted' ELSE 'stale' END,
+          preflight_json = NULL,
+          unsigned_psbt_hashes_json = NULL,
+          claim_token = NULL,
+          claimed_at = NULL,
+          error = CASE
+            WHEN status = 'active' THEN 'listing no longer present in ord.net snapshot'
+            ELSE 'listing was not confirmed by ord.net after indexing grace period'
+          END,
+          updated_at = unixepoch()
+      WHERE status IN ('active','pending_indexing','ambiguous')
+        AND (
+          (status = 'active' AND updated_at < @scan_started_at)
+          OR
+          (status IN ('pending_indexing','ambiguous')
+            AND updated_at < @scan_started_at - 900)
+        )
+        AND (
+          listing_id IS NULL
+          OR NOT EXISTS (
+            SELECT 1 FROM listing_snapshot_stage stage
+            WHERE stage.stream = 'ordnet_listings'
+              AND stage.collection_slug = @collection
+              AND stage.scan_id = @scan_id
+              AND stage.marketplace = 'ord.net'
+              AND stage.source_id = listing_intents.listing_id
+          )
+        )
+    `),
+
     truncateActiveListings: db.prepare(`DELETE FROM active_listings`),
 
     getActiveListing: db.prepare(`
@@ -3656,6 +3911,13 @@ export function getStmts(): Stmts {
       SELECT al.inscription_number, al.marketplace, al.satflow_id, al.listed_at FROM active_listings al
       JOIN inscriptions i ON i.inscription_number = al.inscription_number
       WHERE i.collection_slug = ?
+    `),
+
+    selectActiveListingsForSource: db.prepare(`
+      SELECT al.inscription_number, al.marketplace, al.satflow_id, al.listed_at
+      FROM active_listings al
+      JOIN inscriptions i ON i.inscription_number = al.inscription_number
+      WHERE i.collection_slug = @collection AND al.marketplace = @marketplace
     `),
 
     // Insert a 'listed' event with a synthetic txid so the existing
@@ -4400,6 +4662,7 @@ export type PollStateRow = {
     | 'ord'
     | 'satflow'
     | 'satflow_listings'
+    | 'ordnet_listings'
     | 'matrica'
     | 'notify'
     | 'loans'
@@ -4411,6 +4674,7 @@ export type PollStateRow = {
   collection_slug: string;
   last_cursor: string | null;
   last_run_at: number | null;
+  lock_until: number | null;
   last_status: string | null;
   last_event_count: number | null;
   is_backfilling: number;

@@ -85,7 +85,7 @@ export type PurchasePsbtToSign = {
   psbt: string;
   sign_inputs?: Record<string, number[]>;
   label?: string;
-  marketplace_context?: MarketplaceContext;
+  marketplace_context?: MarketplaceProviderContext;
 };
 
 export type MarketplaceContext = {
@@ -117,6 +117,37 @@ export type MarketplaceContext = {
   expiresAt: number;
   broadcaster: 'site';
 };
+
+export type MarketplaceListingContext = {
+  version: 1;
+  marketplaceId: 'ordnet';
+  templateVersion: 'omb-wiki-ordnet-list-v1';
+  action: 'list';
+  role: 'seller';
+  assetKind: 'inscription';
+  workflowId: string;
+  step: number;
+  stepCount: 3;
+  stage: 'escrow' | 'settlement' | 'recovery';
+  identifiers: {
+    listingId?: string;
+    inscriptionId: string;
+    preflightHandle: string;
+    inscriptionOutpoint: string;
+  };
+  economics: {
+    priceSats: string;
+    sellerProceedsSats: string;
+    marketplaceFeeSats: string;
+    payoutAddress: string;
+    inscriptionDestination: string;
+  };
+  selectedInputIndexes: number[];
+  expiresAt: number;
+  broadcaster: 'site';
+};
+
+export type MarketplaceProviderContext = MarketplaceContext | MarketplaceListingContext;
 
 export type CreateIntentResponse = {
   intent_id: number;

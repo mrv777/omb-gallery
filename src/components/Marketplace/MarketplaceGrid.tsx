@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { formatBtcCompact, formatRelTime } from '@/lib/format';
 import type {
   MarketplaceListing,
@@ -15,11 +16,14 @@ import MarketplaceFilters from './MarketplaceFilters';
 import BuyDialog from './BuyDialog';
 import PostPurchaseModal from './PostPurchaseModal';
 
+const SellerPanel = dynamic(() => import('./SellerPanel'));
+
 type Props = {
   initialListings: MarketplaceListing[];
   initialStats: MarketplaceStats;
   discordInviteUrl: string;
   matricaSignupUrl: string;
+  sellerEnabled: boolean;
 };
 
 const SORT_KEY = 'omb_market_sort';
@@ -30,12 +34,15 @@ export default function MarketplaceGrid({
   initialStats,
   discordInviteUrl,
   matricaSignupUrl,
+  sellerEnabled,
 }: Props) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [sort, setSort] = useState<MarketplaceSort>('price-asc');
   const [color, setColor] = useState<ColorFilter>('all');
   const [selected, setSelected] = useState<MarketplaceListing | null>(null);
   const [buyOpen, setBuyOpen] = useState(false);
+  const [sellerOpen, setSellerOpen] = useState(false);
   const [relativeNowMs, setRelativeNowMs] = useState<number | null>(null);
   const [receipt, setReceipt] = useState<{ listing: MarketplaceListing; txid: string } | null>(
     null
@@ -116,8 +123,17 @@ export default function MarketplaceGrid({
       <section className="px-3 sm:px-6">
         <div className="mx-auto max-w-7xl">
           <div className="flex flex-wrap items-end justify-between gap-4 pb-5 font-mono uppercase tracking-[0.08em]">
-            <div>
+            <div className="flex flex-wrap items-center gap-3">
               <h1 className="text-2xl text-bone sm:text-3xl">marketplace</h1>
+              {sellerEnabled ? (
+                <button
+                  type="button"
+                  onClick={() => setSellerOpen(true)}
+                  className="h-9 border border-bone px-3 text-[10px] text-bone transition-colors hover:bg-bone hover:text-ink-0"
+                >
+                  list OMB / my listings
+                </button>
+              ) : null}
             </div>
             <div className="grid grid-cols-3 border border-ink-2 text-center text-[10px]">
               <Stat label="floor" value={formatBtcCompact(initialStats.floor_sats) || '--'} />
@@ -179,6 +195,13 @@ export default function MarketplaceGrid({
           onClose={() => setReceipt(null)}
         />
       )}
+      {sellerEnabled ? (
+        <SellerPanel
+          open={sellerOpen}
+          onClose={() => setSellerOpen(false)}
+          onListingsChanged={() => router.refresh()}
+        />
+      ) : null}
     </>
   );
 }

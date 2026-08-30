@@ -11,7 +11,7 @@ import type {
 } from '@/lib/marketplace/types';
 import { useWallet } from '@/components/wallet/WalletProvider';
 import ConnectWalletButton from '@/components/wallet/ConnectWalletButton';
-import { bip322SignatureToHex } from '@/lib/wallet/bip322Signature';
+import { retryAfterOrdnetAuthorization } from '@/lib/marketplace/ordnetAuthorization';
 import MarketplacePip from './MarketplacePip';
 import TermsCheckbox from './TermsCheckbox';
 
@@ -124,11 +124,11 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
     listing: MarketplaceListing,
     option: MarketplaceListing['options'][number]
   ): Promise<CreateIntentResponse> {
-    let intent = await requestIntent(listing.inscription_number, option);
-    if (!intent.ok && intent.code === 'ordnet-auth-required') {
-      await authorizeOrdnet();
-      intent = await requestIntent(listing.inscription_number, option);
-    }
+    const intent = await retryAfterOrdnetAuthorization(
+      () => requestIntent(listing.inscription_number, option),
+      result => !result.ok && result.code === 'ordnet-auth-required',
+      signMessage
+    );
     if (!intent.ok || !intent.body?.psbt) {
       throw new Error(intentErrorMessage(intent.body));
     }
@@ -157,35 +157,6 @@ export default function BuyDialog({ listing, open, onClose, onSuccess }: Props) 
       | (CreateIntentResponse & { error?: string; code?: string })
       | null;
     return { ok: res.ok, code: body?.code, body };
-  }
-
-  async function authorizeOrdnet(): Promise<void> {
-    const challengeRes = await fetch('/api/marketplace/ordnet/session');
-    const challengeJson = (await challengeRes.json().catch(() => null)) as OrdnetChallenge | null;
-    if (!challengeRes.ok || !challengeJson?.auth_request_id || !challengeJson.challenges) {
-      throw new Error(challengeJson?.error ?? 'ORD.NET wallet authorization failed');
-    }
-    const verifications = [];
-    for (const challenge of challengeJson.challenges) {
-      const signature = await signMessage(challenge.address, challenge.message);
-      verifications.push({
-        challenge_id: challenge.challenge_id,
-        address: challenge.address,
-        signature: bip322SignatureToHex(signature),
-      });
-    }
-    const verifyRes = await fetch('/api/marketplace/ordnet/session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        auth_request_id: challengeJson.auth_request_id,
-        verifications,
-      }),
-    });
-    const verifyJson = (await verifyRes.json().catch(() => null)) as { error?: string } | null;
-    if (!verifyRes.ok) {
-      throw new Error(verifyJson?.error ?? 'ORD.NET wallet authorization failed');
-    }
   }
 
   return (
@@ -376,17 +347,6 @@ export function PurchaseError({ error }: { error: string | null }) {
     </div>
   );
 }
-
-type OrdnetChallenge = {
-  auth_request_id?: string;
-  challenges?: Array<{
-    challenge_id: string;
-    message: string;
-    address: string;
-    role: 'ordinals' | 'payment';
-  }>;
-  error?: string;
-};
 
 type SigningStep = {
   intent_id: number;
