@@ -1063,6 +1063,110 @@
       "sale_price_sats": 1980900,
       "description": "ord.net sale of #83313913 (user-verified externally). 6-in/7-out cooperative SIGHASH_ALL/DEFAULT shape. Same ord.net fee P2TR at vout[0] (dust marker) + vout[3] (real fee). Seller payment at vout[2]. ONCHAIN_TAGGING.md §2.11.",
       "tags": ["sale", "ord-net", "fingerprint-tp", "cooperative"]
+    },
+    {
+      "txid": "20e1241db498747eade02fe21709dd6b234335b6fa7cad00e0a2c26b9f33c476",
+      "inscription_number": 60570592,
+      "expected_type": "sold",
+      "marketplace": "ord-net",
+      "sale_price_sats": 1810000,
+      "description": "Executed ordnet-offer/v2 acceptance; script price matches funded input and published gross price. Verified against bitcoind and public ord.net sales on 2026-09-13. ONCHAIN_TAGGING.md \u00a72.11.1.",
+      "tags": [
+        "sale",
+        "ord-net",
+        "offer-v2"
+      ]
+    },
+    {
+      "txid": "3f59abf62133863daf86ef517f27b3a4069f2f275c0babb060f1c395200ea3a5",
+      "inscription_number": 60580804,
+      "expected_type": "sold",
+      "marketplace": "ord-net",
+      "sale_price_sats": 1805000,
+      "description": "Executed ordnet-offer/v2 acceptance; script price matches funded input and published gross price. Verified against bitcoind and public ord.net sales on 2026-09-13. ONCHAIN_TAGGING.md \u00a72.11.1.",
+      "tags": [
+        "sale",
+        "ord-net",
+        "offer-v2"
+      ]
+    },
+    {
+      "txid": "749b495dc3b98eb7c5777c714468af631e5e92d79295793b2e853f63a2404f2d",
+      "inscription_number": 83311107,
+      "expected_type": "sold",
+      "marketplace": "ord-net",
+      "sale_price_sats": 1515000,
+      "description": "Executed ordnet-offer/v2 acceptance; script price matches funded input and published gross price. Verified against bitcoind and public ord.net sales on 2026-09-13. ONCHAIN_TAGGING.md \u00a72.11.1.",
+      "tags": [
+        "sale",
+        "ord-net",
+        "offer-v2"
+      ]
+    },
+    {
+      "txid": "c502b854aca983320d02c6dc782935ee4f9f92add1b62e90e3a985a4ba01aa3f",
+      "inscription_number": 83308279,
+      "expected_type": "sold",
+      "marketplace": "ord-net",
+      "sale_price_sats": null,
+      "description": "Executed ord.net 2-of-2 bulk listing settlement. FIFO-matched inscription; gross price intentionally unknown. Verified against bitcoind and public ord.net sales on 2026-09-13. ONCHAIN_TAGGING.md \u00a72.11.1.",
+      "tags": [
+        "sale",
+        "ord-net",
+        "bulk-listing-acp"
+      ]
+    },
+    {
+      "txid": "c502b854aca983320d02c6dc782935ee4f9f92add1b62e90e3a985a4ba01aa3f",
+      "inscription_number": 60579038,
+      "expected_type": "sold",
+      "marketplace": "ord-net",
+      "sale_price_sats": null,
+      "description": "Executed ord.net 2-of-2 bulk listing settlement. FIFO-matched inscription; gross price intentionally unknown. Verified against bitcoind and public ord.net sales on 2026-09-13. ONCHAIN_TAGGING.md \u00a72.11.1.",
+      "tags": [
+        "sale",
+        "ord-net",
+        "bulk-listing-acp"
+      ]
+    },
+    {
+      "txid": "b7d8a3e82e35b662cadeadc644fa70369179dc14d591a767263495558f2cdbc6",
+      "inscription_number": 83307313,
+      "expected_type": "sold",
+      "marketplace": "ord-net",
+      "sale_price_sats": null,
+      "description": "Executed ord.net 2-of-2 bulk listing settlement. FIFO-matched inscription; gross price intentionally unknown. Verified against bitcoind and public ord.net sales on 2026-09-13. ONCHAIN_TAGGING.md \u00a72.11.1.",
+      "tags": [
+        "sale",
+        "ord-net",
+        "bulk-listing-acp"
+      ]
+    },
+    {
+      "txid": "b7d8a3e82e35b662cadeadc644fa70369179dc14d591a767263495558f2cdbc6",
+      "inscription_number": 83308651,
+      "expected_type": "sold",
+      "marketplace": "ord-net",
+      "sale_price_sats": null,
+      "description": "Executed ord.net 2-of-2 bulk listing settlement. FIFO-matched inscription; gross price intentionally unknown. Verified against bitcoind and public ord.net sales on 2026-09-13. ONCHAIN_TAGGING.md \u00a72.11.1.",
+      "tags": [
+        "sale",
+        "ord-net",
+        "bulk-listing-acp"
+      ]
+    },
+    {
+      "txid": "b7d8a3e82e35b662cadeadc644fa70369179dc14d591a767263495558f2cdbc6",
+      "inscription_number": 83313908,
+      "expected_type": "sold",
+      "marketplace": "ord-net",
+      "sale_price_sats": null,
+      "description": "Executed ord.net 2-of-2 bulk listing settlement. FIFO-matched inscription; gross price intentionally unknown. Verified against bitcoind and public ord.net sales on 2026-09-13. ONCHAIN_TAGGING.md \u00a72.11.1.",
+      "tags": [
+        "sale",
+        "ord-net",
+        "bulk-listing-acp"
+      ]
     }
   ],
   "notes": {

@@ -1,6 +1,7 @@
 // Marketplace identification from raw bitcoin tx data.
 //
-// This is the SOLE source of marketplace tagging for non-legacy `sold` rows.
+// Fee-address rules for marketplace tagging. Modern ord.net executed-script
+// rules live in scripts/lib/ord-net-settlement.js (shared with its backfill).
 // Each rule below must satisfy ONCHAIN_TAGGING.md §1: chain-fingerprint tier
 // requires ≥3 confirmed true positives and ≥1 confirmed true negative,
 // documented in §6 of that file.
@@ -16,7 +17,7 @@
 export type FingerprintTx = {
   vin: Array<{
     prevout?: {
-      scriptPubKey?: { address?: string; type?: string };
+      scriptPubKey?: { address?: string; type?: string; hex?: string };
       // bitcoind verbose=2 also includes value (BTC) on prevout
       value?: number;
     };
@@ -25,7 +26,7 @@ export type FingerprintTx = {
     witness?: string[];
   }>;
   vout: Array<{
-    scriptPubKey?: { address?: string; type?: string };
+    scriptPubKey?: { address?: string; type?: string; hex?: string };
     value?: number;
   }>;
 };

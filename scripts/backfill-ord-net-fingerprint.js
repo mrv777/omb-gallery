@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 /* eslint-disable */
 // On-chain ord.net marketplace tagger.
+// Modern executed offer / bulk-listing rules are shared with the live tick
+// in lib/ord-net-settlement.js (ONCHAIN_TAGGING.md §2.11.1). The original
+// fee-address extraction documented below remains the legacy fallback.
 //
 // Walks every `transferred` and `marketplace IS NULL` `sold` event in the DB,
 // fetches the underlying tx via bitcoind RPC, and applies the §2.11 fingerprint
@@ -37,9 +40,11 @@
 //   --since=UNIX_TS           Only events with block_timestamp >= UNIX_TS.
 //   --max-events=N            Stop after scanning N events.
 //   --verbose                 Per-event log lines.
+//   --settlements-only        Only the v2 offer / signed bulk-listing repair.
 
 const path = require('node:path');
 const Database = require('better-sqlite3');
+const { detectOrdNetSettlement } = require('./lib/ord-net-settlement');
 
 // ---- env + args ----
 const { url: RPC_URL, authHeader: RPC_AUTH } = (() => {
@@ -71,10 +76,12 @@ function parseArgs(argv) {
     since: null,
     maxEvents: null,
     verbose: false,
+    settlementsOnly: false,
   };
   for (const a of argv) {
     if (a === '--dry-run') out.dryRun = true;
     else if (a === '--verbose') out.verbose = true;
+    else if (a === '--settlements-only') out.settlementsOnly = true;
     else if (a.startsWith('--inscription-number=')) {
       out.inscriptionNumber = parseInt(a.slice('--inscription-number='.length), 10);
     } else if (a.startsWith('--since=')) {
@@ -179,7 +186,7 @@ function extractPriceSats(tx, match) {
 // ---- main ----
 async function main() {
   const db = new Database(DB_PATH, { readonly: ARGS.dryRun });
-  db.pragma('journal_mode = WAL');
+  if (!ARGS.dryRun) db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000');
 
   try {
@@ -190,7 +197,7 @@ async function main() {
     process.exit(1);
   }
 
-  const conds = [`(event_type = 'transferred' OR (event_type = 'sold' AND marketplace IS NULL))`];
+  const conds = [`(event_type IN ('transferred', 'sold') AND marketplace IS NULL)`];
   const params = {};
   if (ARGS.inscriptionNumber != null) {
     conds.push('inscription_number = @insc');
@@ -203,7 +210,7 @@ async function main() {
   const limit = ARGS.maxEvents != null ? `LIMIT ${ARGS.maxEvents}` : '';
   const sql = `
     SELECT id, inscription_id, inscription_number, event_type, marketplace,
-           sale_price_sats, old_owner, new_owner, txid, block_timestamp, raw_json
+           sale_price_sats, old_owner, new_owner, new_satpoint, txid, block_timestamp, raw_json
       FROM events
      WHERE ${conds.join(' AND ')}
      ORDER BY block_timestamp DESC
@@ -270,18 +277,21 @@ async function main() {
         if (ARGS.verbose) console.warn(`[ord-net-fp] rpc fail tx=${ev.txid}: ${e.message}`);
         continue;
       }
-      const match = detectOrdNet(tx);
+      const settlement = detectOrdNetSettlement(tx, ev);
+      if (ARGS.settlementsOnly && !settlement) continue;
+      const match = settlement ?? detectOrdNet(tx);
       if (!match) continue;
       matched++;
-      let priceSats = extractPriceSats(tx, match);
+      let priceSats = settlement ? settlement.priceSats : extractPriceSats(tx, match);
       const isBulk = bulkTxids.has(ev.txid);
-      if (isBulk) priceSats = null;
-      // No-extractable-payment: refuse to tag (ord-net is cooperative-only,
-      // so this gates the entire upgrade path). Mirrors ME §7.7. We do
+      if (isBulk && !settlement) priceSats = null;
+      // Legacy cooperative shape without payment: refuse to tag. The new
+      // executed bulk-listing proof can establish a sale without its gross
+      // price. Preserve the original safeguard for legacy matches. We do
       // still tag rows that already have a sale_price_sats from another
       // path — the marketplace identification is sound even when our
       // extractor can't resolve the per-tx price.
-      if (priceSats == null && ev.sale_price_sats == null) {
+      if (!settlement && priceSats == null && ev.sale_price_sats == null) {
         if (ARGS.verbose) {
           console.log(
             `[ord-net-fp] SKIP-NO-PAYMENT insc=${ev.inscription_number} tx=${ev.txid.slice(0, 12)}`
@@ -291,6 +301,7 @@ async function main() {
       }
       const meta = JSON.stringify({
         source: 'onchain-ord-net-fp',
+        detector_version: 2,
         shape: match.shape,
         fee_vout_idx: match.feeVoutIdx,
         extracted_price_sats: priceSats,
@@ -337,9 +348,7 @@ async function main() {
         if (!ARGS.dryRun) tagSold.run({ id: ev.id, meta });
         tagged++;
         if (ARGS.verbose)
-          console.log(
-            `[ord-net-fp] TAG insc=${ev.inscription_number} tx=${ev.txid.slice(0, 12)}`
-          );
+          console.log(`[ord-net-fp] TAG insc=${ev.inscription_number} tx=${ev.txid.slice(0, 12)}`);
       }
     }
   }
@@ -354,6 +363,7 @@ async function main() {
       (ARGS.dryRun ? ' (DRY RUN — no writes)' : '')
   );
   db.close();
+  if (rpcFails > 0) process.exitCode = 1;
 }
 
 main().catch(e => {

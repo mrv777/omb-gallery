@@ -4,6 +4,7 @@ import { getDb, getStmts } from './db';
 import { bitcoindConfigured, getRawTransaction } from './bitcoind';
 import { detectMarketplace, extractSalePriceSats } from './marketplaceFingerprint';
 import { log } from './log';
+import { detectOrdNetSettlement } from '../../scripts/lib/ord-net-settlement';
 
 const PER_TICK_LIMIT = 200;
 const RPC_CONCURRENCY = 8;
@@ -26,7 +27,7 @@ type TickResult = {
 /**
  * Live ord.net sale detector. Sibling of `runMagicEdenFingerprintTick` —
  * walks `transferred` events the ord poll has just written and applies the
- * §2.11 fingerprint from ONCHAIN_TAGGING.md. On match the row is upgraded in
+ * §2.11/§2.11.1 fingerprints from ONCHAIN_TAGGING.md. On match the row is upgraded in
  * place to `sold` with `marketplace='ord-net'`.
  *
  * On first run after deploy, cursor is bootstrapped to the current
@@ -87,7 +88,7 @@ export async function runOrdNetFingerprintTick(opts: { live: boolean }): Promise
 
   const candidates = db
     .prepare(
-      `SELECT id, txid, old_owner, inscription_number
+      `SELECT id, txid, old_owner, new_owner, new_satpoint, inscription_number
          FROM events
         WHERE id > @cursor
           AND event_type = 'transferred'
@@ -99,6 +100,8 @@ export async function runOrdNetFingerprintTick(opts: { live: boolean }): Promise
     id: number;
     txid: string;
     old_owner: string | null;
+    new_owner: string | null;
+    new_satpoint: string | null;
     inscription_number: number;
   }>;
 
@@ -141,6 +144,7 @@ export async function runOrdNetFingerprintTick(opts: { live: boolean }): Promise
     marketplace: 'ord-net' | null;
     salePriceSats: number | null;
     rpcFail: boolean;
+    shape?: string;
   };
   const probes: Probe[] = [];
   let next = 0;
@@ -158,6 +162,17 @@ export async function runOrdNetFingerprintTick(opts: { live: boolean }): Promise
           txid: c.txid,
           error: e instanceof Error ? e.message : String(e),
         });
+        continue;
+      }
+      const settlement = detectOrdNetSettlement(tx, c);
+      if (settlement) {
+        probes[idx] = {
+          cand: c,
+          marketplace: 'ord-net',
+          salePriceSats: settlement.priceSats,
+          shape: settlement.shape,
+          rpcFail: false,
+        };
         continue;
       }
       const match = detectMarketplace(tx);
@@ -205,6 +220,8 @@ export async function runOrdNetFingerprintTick(opts: { live: boolean }): Promise
       for (const p of upgrades) {
         const meta = JSON.stringify({
           source: 'onchain-ord-net-fp',
+          detector_version: 2,
+          shape: p.shape ?? 'cooperative',
           extracted_price_sats: p.salePriceSats,
           matched_at: Math.floor(Date.now() / 1000),
         });
