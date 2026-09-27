@@ -52,6 +52,17 @@ pnpm start
 
 ## Operational safety and marketplace contracts
 
+- Schema v47 reconciles stored trade totals with events, reapplies mint
+  classification, and schedules a bounded historical sales rescan. Back up the
+  SQLite database before deployment; the normal poll cron resumes the rescan
+  across ticks and restarts. Incremental sales catch-up also retains progress
+  after upstream failures or page/time limits. Current ownership remains
+  anchored to ord, with borrower attribution retained during active loans.
+- Activity refresh revalidates loaded rows in bounded batches, so reclassified
+  sales and deleted events no longer remain indefinitely in a filtered feed.
+  Holder event totals count distinct events across linked wallets; Roles
+  holding counts include OMBs only.
+
 - Per-IP abuse controls trust `CF-Connecting-IP` / `X-Forwarded-For`
   only when the origin rejects direct public traffic and accepts ingress
   solely from the configured proxy. Enforce that at the firewall, with

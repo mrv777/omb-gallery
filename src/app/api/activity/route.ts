@@ -1,13 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getStmts, type EventRow, type PollStateRow } from '@/lib/db';
+import { getDb, getStmts, type EventRow, type PollStateRow } from '@/lib/db';
 import { matricaProfilesForEvents } from '@/lib/matricaOverlay';
 import { colorParamForSql, parseColorParam } from '@/lib/colorFilter';
+import { SQL_EXCLUDED_OWNERS_LIST } from '@/lib/walletLabels';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
+const MAX_REVALIDATE_IDS = 200;
+
+let eventsByIdsStatement: ReturnType<ReturnType<typeof getDb>['prepare']> | null = null;
+
+function getEventsByIdsStatement() {
+  if (eventsByIdsStatement) return eventsByIdsStatement;
+  eventsByIdsStatement = getDb().prepare(`
+  SELECT e.* FROM json_each(@ids_json) requested
+  JOIN events e ON e.id = CAST(requested.value AS INTEGER)
+  JOIN inscriptions i ON i.inscription_number = e.inscription_number
+  WHERE i.collection_slug = @collection
+    AND (@color IS NULL OR i.color = @color)
+    AND (i.current_owner IS NULL OR i.current_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST}))
+    AND e.event_type != 'listed'
+    AND (
+      (@mode = 'all')
+      OR (@mode = 'sales' AND e.event_type = 'sold')
+      OR (@mode = 'transfers' AND e.event_type = 'transferred')
+      OR (@mode = 'loans' AND e.event_type IN ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked'))
+    )
+`);
+  return eventsByIdsStatement;
+}
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
@@ -34,6 +58,44 @@ export async function GET(req: NextRequest) {
   const eventType =
     typeParam === 'sales' ? 'sold' : typeParam === 'transfers' ? 'transferred' : null;
   const loanOnly = typeParam === 'loans';
+
+  // Exact-ID revalidation lets a client reconcile already-loaded pages without
+  // downloading the entire feed again. Missing IDs are authoritative: they
+  // were deleted or no longer match the active feed predicates.
+  if (url.searchParams.has('ids')) {
+    const rawIds = url.searchParams.get('ids') ?? '';
+    const pieces = rawIds.split(',');
+    if (
+      pieces.length === 0 ||
+      pieces.length > MAX_REVALIDATE_IDS ||
+      pieces.some(piece => !/^\d+$/.test(piece))
+    ) {
+      return NextResponse.json(
+        { error: `ids must contain 1-${MAX_REVALIDATE_IDS} positive integers` },
+        { status: 400 }
+      );
+    }
+    const ids = [...new Set(pieces.map(Number))];
+    if (ids.some(id => !Number.isSafeInteger(id) || id <= 0)) {
+      return NextResponse.json({ error: 'invalid event id' }, { status: 400 });
+    }
+    const events = getEventsByIdsStatement().all({
+      ids_json: JSON.stringify(ids),
+      collection,
+      color,
+      mode: loanOnly
+        ? 'loans'
+        : typeParam === 'sales'
+          ? 'sales'
+          : typeParam === 'transfers'
+            ? 'transfers'
+            : 'all',
+    }) as EventRow[];
+    return NextResponse.json(
+      { events, matrica: matricaProfilesForEvents(events, { includeInferred: true }) },
+      { headers: { 'Cache-Control': 'no-store' } }
+    );
+  }
 
   const stmts = getStmts();
   const events = (

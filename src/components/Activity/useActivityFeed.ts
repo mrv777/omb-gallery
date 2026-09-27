@@ -6,6 +6,7 @@ import type { ColorFilter } from '@/lib/types';
 
 const PAGE_SIZE = 60;
 const REFRESH_MS = 60_000;
+const REVALIDATE_BATCH_SIZE = 200;
 
 export type FeedFilter = 'all' | 'sales' | 'transfers' | 'loans';
 
@@ -42,6 +43,45 @@ export function mergeRefreshedEvents(current: ApiEvent[], incoming: ApiEvent[]):
   );
 }
 
+/** Reconcile an exact bounded ID snapshot without disturbing older rows that
+ * were not part of the request. Missing requested IDs were deleted or no
+ * longer match the active feed filters and must be removed. */
+export function mergeRevalidatedEvents(
+  current: ApiEvent[],
+  requestedIds: number[],
+  incoming: ApiEvent[]
+): ApiEvent[] {
+  const requested = new Set(requestedIds);
+  const replacements = new Map(
+    incoming.filter(event => requested.has(event.id)).map(event => [event.id, event])
+  );
+  return current
+    .filter(event => !requested.has(event.id) || replacements.has(event.id))
+    .map(event => replacements.get(event.id) ?? event)
+    .toSorted((left, right) => right.block_timestamp - left.block_timestamp || right.id - left.id);
+}
+
+/** Select a bounded rotating slice of loaded IDs. Rotation uses an array
+ * offset so continuously loading older pages cannot starve them. */
+export function selectRevalidationBatch(
+  events: ApiEvent[],
+  offset: number,
+  batchSize = REVALIDATE_BATCH_SIZE
+): { ids: number[]; nextOffset: number } {
+  if (events.length === 0 || batchSize <= 0) return { ids: [], nextOffset: 0 };
+  const count = Math.min(batchSize, events.length);
+  const start = ((offset % events.length) + events.length) % events.length;
+  const ids = Array.from({ length: count }, (_, i) => events[(start + i) % events.length].id);
+  return { ids: [...new Set(ids)], nextOffset: (start + count) % events.length };
+}
+
+function sameEvent(left: ApiEvent | undefined, right: ApiEvent | undefined): boolean {
+  if (!left || !right) return left === right;
+  return Object.keys(left).every(
+    key => left[key as keyof ApiEvent] === right[key as keyof ApiEvent]
+  );
+}
+
 export function useActivityFeed(
   filter: FeedFilter = 'all',
   color: ColorFilter = 'all',
@@ -56,6 +96,8 @@ export function useActivityFeed(
     error: null,
     reachedEnd: initial != null && initial.next_cursor == null,
   }));
+  const eventsRef = useRef(state.events);
+  eventsRef.current = state.events;
   const cursorRef = useRef<string | null>(initial?.next_cursor ?? null);
   const loadingRef = useRef<boolean>(false);
   const seenIdsRef = useRef<Set<number>>(new Set(initial?.events.map(e => e.id) ?? []));
@@ -64,6 +106,11 @@ export function useActivityFeed(
   // Bumped on filter reset so an in-flight fetch's response can be discarded
   // when the filter has changed underneath it.
   const reqGenRef = useRef(0);
+  // Any response that mutates the event list invalidates a concurrently
+  // running revalidation snapshot, preventing it from overwriting newer page
+  // or head-refresh data.
+  const eventMutationRef = useRef(0);
+  const revalidationOffsetRef = useRef(0);
   // Skip the very first reset-and-fetch when the server already provided data
   // for the default filter; subsequent filter changes still reset normally.
   const skipInitialReset = useRef<boolean>(initial != null);
@@ -92,6 +139,7 @@ export function useActivityFeed(
       const fresh = data.events.filter(e => !seenIdsRef.current.has(e.id));
       for (const e of fresh) seenIdsRef.current.add(e.id);
       cursorRef.current = data.next_cursor;
+      eventMutationRef.current++;
       setState(prev => ({
         ...prev,
         events: [...prev.events, ...fresh],
@@ -134,6 +182,7 @@ export function useActivityFeed(
       if (myGen !== reqGenRef.current) return;
       const newOnes = data.events.filter(e => !seenIdsRef.current.has(e.id));
       for (const e of newOnes) seenIdsRef.current.add(e.id);
+      eventMutationRef.current++;
       setState(prev => ({
         ...prev,
         events: mergeRefreshedEvents(prev.events, data.events),
@@ -143,6 +192,46 @@ export function useActivityFeed(
       }));
     } catch {
       // refresh failures are silent
+    }
+  }, [buildUrl]);
+
+  const revalidateLoaded = useCallback(async () => {
+    const snapshot = eventsRef.current;
+    const selection = selectRevalidationBatch(snapshot, revalidationOffsetRef.current);
+    if (selection.ids.length === 0) return;
+    const myGen = reqGenRef.current;
+    const myMutation = eventMutationRef.current;
+    const url = new URL(buildUrl(null));
+    url.searchParams.set('ids', selection.ids.join(','));
+    try {
+      const res = await fetch(url.toString());
+      if (!res.ok || myGen !== reqGenRef.current || myMutation !== eventMutationRef.current) return;
+      const data: ApiActivityResponse = await res.json();
+      if (myGen !== reqGenRef.current || myMutation !== eventMutationRef.current) return;
+      const requested = new Set(selection.ids);
+      const returned = data.events.filter(event => requested.has(event.id));
+      const returnedIds = new Set(returned.map(event => event.id));
+      const oldById = new Map(snapshot.map(event => [event.id, event]));
+      const returnedById = new Map(returned.map(event => [event.id, event]));
+      const changedOrRemoved = selection.ids.some(id => {
+        const old = oldById.get(id);
+        const fresh = returnedById.get(id);
+        return !fresh || !sameEvent(old, fresh);
+      });
+      revalidationOffsetRef.current = selection.nextOffset;
+      if (!changedOrRemoved) return;
+      for (const id of selection.ids) {
+        if (!returnedIds.has(id)) seenIdsRef.current.delete(id);
+      }
+      for (const event of returned) seenIdsRef.current.add(event.id);
+      eventMutationRef.current++;
+      setState(prev => ({
+        ...prev,
+        events: mergeRevalidatedEvents(prev.events, selection.ids, returned),
+        matrica: { ...prev.matrica, ...(data.matrica ?? {}) },
+      }));
+    } catch {
+      // A later cycle retries this batch when a revalidation request fails.
     }
   }, [buildUrl]);
 
@@ -178,12 +267,24 @@ export function useActivityFeed(
     loadMore();
   }, [filter, color, loadMore]);
 
-  // Periodic head-refresh while tab is visible
+  // Periodically refresh the head and reconcile a bounded rotating slice of
+  // loaded IDs. The second request catches type upgrades/removals below the
+  // first page without downloading every historical page again.
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
+    let refreshing = false;
     const start = () => {
       if (timer) return;
-      timer = setInterval(refreshHead, REFRESH_MS);
+      timer = setInterval(async () => {
+        if (refreshing) return;
+        refreshing = true;
+        try {
+          await refreshHead();
+          await revalidateLoaded();
+        } finally {
+          refreshing = false;
+        }
+      }, REFRESH_MS);
     };
     const stop = () => {
       if (timer) {
@@ -201,7 +302,7 @@ export function useActivityFeed(
       stop();
       document.removeEventListener('visibilitychange', onVis);
     };
-  }, [refreshHead]);
+  }, [refreshHead, revalidateLoaded]);
 
   return { ...state, loadMore };
 }

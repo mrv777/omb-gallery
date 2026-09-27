@@ -1,4 +1,5 @@
 import 'server-only';
+import type { Statement } from 'better-sqlite3';
 
 // Forward-tick loan detection. Mirrors the structural logic in
 // scripts/backfill-loans.js but processes only NEW transferred events since
@@ -61,6 +62,31 @@ const TIMELOCK_BLOCKS_MIN = 144;
 const TIMELOCK_BLOCKS_MAX = 5_000_000;
 
 const DETECTOR_VERSION = 3;
+
+type OriginationAggregateStatements = {
+  onOrigination: Statement;
+  onSoldOrigination: Statement;
+  recomputeHighestSale: Statement;
+};
+
+/** Keep sale aggregates aligned when a movement is reclassified as a loan. */
+export function applyOriginationAggregateUpdates(
+  stmts: OriginationAggregateStatements,
+  existing: { event_type: 'transferred' | 'sold'; sale_price_sats: number | null },
+  inscriptionNumber: number,
+  borrower: string
+): void {
+  if (existing.event_type === 'sold') {
+    stmts.onSoldOrigination.run({
+      inscription_number: inscriptionNumber,
+      sale_price_sats: existing.sale_price_sats ?? 0,
+      borrower,
+    });
+    stmts.recomputeHighestSale.run({ inscription_number: inscriptionNumber });
+  } else {
+    stmts.onOrigination.run({ inscription_number: inscriptionNumber, borrower });
+  }
+}
 
 // Liquidium-specific internal pubkey. See ONCHAIN_TAGGING.md §2.2 — empirically
 // 1,544 of 1,547 loan resolutions in our DB use this constant. The 3 outliers
@@ -1006,19 +1032,7 @@ export async function runLoanTick(
         raw_json: raw,
       });
       if (u.changes > 0) {
-        if (existing.event_type === 'sold') {
-          stmts.onSoldOrigination.run({
-            inscription_number: orig.inscriptionNumber,
-            sale_price_sats: existing.sale_price_sats ?? 0,
-            borrower: ombSender,
-          });
-          stmts.recomputeHighestSale.run({ inscription_number: orig.inscriptionNumber });
-        } else {
-          stmts.onOrigination.run({
-            inscription_number: orig.inscriptionNumber,
-            borrower: ombSender,
-          });
-        }
+        applyOriginationAggregateUpdates(stmts, existing, orig.inscriptionNumber, ombSender);
         stmts.dequeueNotify.run({ id: existing.id });
         writeStats.originations++;
       }
@@ -1059,10 +1073,9 @@ export async function runLoanTick(
         raw_json: raw,
       });
       if (u.changes > 0) {
-        stmts.onOrigination.run({
-          inscription_number: orig.inscriptionNumber,
-          borrower: ombSender,
-        });
+        if (existing) {
+          applyOriginationAggregateUpdates(stmts, existing, orig.inscriptionNumber, ombSender);
+        }
         if (existing) stmts.dequeueNotify.run({ id: existing.id });
         writeStats.originations++;
       }

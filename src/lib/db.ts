@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_BRAVOCADO_DISTRIBUTION_LIST, SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 46;
+const SCHEMA_VERSION = 47;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -62,6 +62,20 @@ const MINT_WALLETS: MintWallet[] = [
     description: 'Black eyes mint distribution',
   },
 ];
+
+/** Apply the same distribution rules during ingestion as historical migrations. */
+export function isPrimaryMintDistribution(
+  number: number,
+  owner: string | null,
+  timestamp: number
+): boolean {
+  const wallet = MINT_WALLETS.find(w => w.addr === owner && timestamp <= w.valid_until_ts);
+  if (!wallet) return false;
+  const row = getDb()
+    .prepare('SELECT color, collection_slug FROM inscriptions WHERE inscription_number = ?')
+    .get(number) as { color: string | null; collection_slug: string } | undefined;
+  return row?.collection_slug === 'omb' && row.color === wallet.color;
+}
 
 // OMB-shape entry: filename = "<inscription_number>.jpg|webp", per-color groups.
 type ImageEntry = { filename: string; description: string; tags: string[] };
@@ -228,9 +242,48 @@ function migrate(db: DB): void {
       if (current < 45) upgradeV44ToV45(db);
       if (current < 46) upgradeV45ToV46(db);
     }
+    upgradeV46ToV47(db);
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
   tx();
+}
+
+function upgradeV46ToV47(db: DB): void {
+  // Reapply mint rules to history imported since v24, then reconcile trade
+  // aggregates (including sold rows later reclassified as recovered loans).
+  const mint = db.prepare(`UPDATE events SET event_type='mint', marketplace=NULL
+    WHERE event_type IN ('transferred','sold') AND old_owner=@addr
+      AND block_timestamp <= @valid_until_ts
+      AND inscription_number IN (SELECT inscription_number FROM inscriptions
+        WHERE collection_slug='omb' AND color=@color)`);
+  for (const wallet of MINT_WALLETS) mint.run(wallet);
+  db.exec(`
+    WITH agg AS (
+      SELECT i.inscription_number AS num,
+        SUM(CASE WHEN e.event_type='transferred' THEN 1 ELSE 0 END) AS transfers,
+        SUM(CASE WHEN e.event_type='sold' THEN 1 ELSE 0 END) AS sales,
+        COALESCE(SUM(CASE WHEN e.event_type='sold' THEN e.sale_price_sats END),0) AS volume,
+        COALESCE(MAX(CASE WHEN e.event_type='sold' THEN e.sale_price_sats END),0) AS highest
+      FROM inscriptions i LEFT JOIN events e USING(inscription_number)
+      GROUP BY i.inscription_number
+    )
+    UPDATE inscriptions SET transfer_count=agg.transfers,sale_count=agg.sales,
+      total_volume_sats=agg.volume,highest_sale_sats=agg.highest
+    FROM agg WHERE inscription_number=agg.num;
+
+    CREATE INDEX IF NOT EXISTS idx_events_loan_borrower ON events
+      (json_extract(raw_json, '$.borrower_addr'), block_timestamp DESC, id DESC)
+      WHERE event_type IN ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked')
+        AND json_valid(raw_json);
+    CREATE INDEX IF NOT EXISTS idx_events_loan_lender ON events
+      (json_extract(raw_json, '$.lender_addr'), block_timestamp DESC, id DESC)
+      WHERE event_type IN ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked')
+        AND json_valid(raw_json);
+    -- One complete historical sweep repairs gaps left by the old incremental
+    -- page cap. This uses the existing bounded, resumable backfill workflow.
+    UPDATE poll_state SET is_backfilling=1,last_cursor='page:1',backfill_unresolved_seen=0
+      WHERE stream='satflow';
+  `);
 }
 
 function initSchemaLatest(db: DB): void {
@@ -2786,7 +2839,10 @@ type Stmts = {
   bumpInscriptionAggregates: ReturnType<DB['prepare']>;
   unbumpTransferOnUpgrade: ReturnType<DB['prepare']>;
   recomputeInscriptionRecency: ReturnType<DB['prepare']>;
+  recomputeTradeAggregates: ReturnType<DB['prepare']>;
+  updateEventToMint: ReturnType<DB['prepare']>;
   setInscriptionState: ReturnType<DB['prepare']>;
+  reconcileInscriptionOwner: ReturnType<DB['prepare']>;
   setInscriptionId: ReturnType<DB['prepare']>;
   setInscriptionInscribeAt: ReturnType<DB['prepare']>;
   setInscriptionOwnerIfNewer: ReturnType<DB['prepare']>;
@@ -2961,14 +3017,28 @@ export function getStmts(): Stmts {
       UPDATE inscriptions SET
         transfer_count    = transfer_count    + CASE WHEN @event_type = 'transferred' THEN 1 ELSE 0 END,
         sale_count        = sale_count        + CASE WHEN @event_type = 'sold'        THEN 1 ELSE 0 END,
-        total_volume_sats = total_volume_sats + COALESCE(@sale_price_sats, 0),
-        highest_sale_sats = MAX(highest_sale_sats, COALESCE(@sale_price_sats, 0)),
+        total_volume_sats = total_volume_sats + CASE WHEN @event_type='sold' THEN COALESCE(@sale_price_sats, 0) ELSE 0 END,
+        highest_sale_sats = MAX(highest_sale_sats, CASE WHEN @event_type='sold' THEN COALESCE(@sale_price_sats, 0) ELSE 0 END),
         last_movement_at  = CASE
-                              WHEN @event_type IN ('transferred','sold')
+                              WHEN @event_type IN ('transferred','sold','mint')
                                 THEN MAX(COALESCE(last_movement_at, 0), @block_timestamp)
                               ELSE last_movement_at
                             END
       WHERE inscription_number = @inscription_number
+    `),
+
+    updateEventToMint: db.prepare(`
+      UPDATE events SET event_type='mint',marketplace=NULL,
+        sale_price_sats=COALESCE(sale_price_sats,@sale_price_sats)
+      WHERE id=@id AND event_type IN ('transferred','sold','mint')
+    `),
+    recomputeTradeAggregates: db.prepare(`
+      UPDATE inscriptions SET
+        transfer_count=(SELECT COUNT(*) FROM events WHERE inscription_number=@inscription_number AND event_type='transferred'),
+        sale_count=(SELECT COUNT(*) FROM events WHERE inscription_number=@inscription_number AND event_type='sold'),
+        total_volume_sats=(SELECT COALESCE(SUM(sale_price_sats),0) FROM events WHERE inscription_number=@inscription_number AND event_type='sold'),
+        highest_sale_sats=(SELECT COALESCE(MAX(sale_price_sats),0) FROM events WHERE inscription_number=@inscription_number AND event_type='sold')
+      WHERE inscription_number=@inscription_number
     `),
 
     // When upgrading a transferred row to a sold row, the transfer was already counted —
@@ -2991,7 +3061,7 @@ export function getStmts(): Stmts {
         last_movement_at = (
           SELECT MAX(block_timestamp) FROM events
            WHERE inscription_number = @inscription_number
-             AND event_type IN ('transferred','sold')
+             AND event_type IN ('transferred','sold','mint','loan-originated','loan-defaulted','loan-unlocked')
         )
       WHERE inscription_number = @inscription_number
     `),
@@ -3000,14 +3070,12 @@ export function getStmts(): Stmts {
       UPDATE inscriptions
       SET current_output  = @current_output,
           current_owner   = @current_owner,
-          -- effective_owner mirrors current_owner here (the on-chain truth).
-          -- The loan backfill is the only writer that diverges them: when
-          -- it detects an inscription is currently in escrow, it overwrites
-          -- effective_owner to the borrower. That overwrite happens AFTER
-          -- ord ticks, so the brief window between an ord tick observing
-          -- a transfer-into-escrow and the loan backfill catching it shows
-          -- the escrow address as owner — acceptable.
-          effective_owner = @current_owner,
+          -- Preserve borrower attribution on initialization/self-transfers;
+          -- a genuinely different on-chain owner still advances ownership.
+          effective_owner = CASE
+            WHEN active_loan_count > 0 AND (current_output IS NULL OR current_owner IS @current_owner)
+              THEN COALESCE(effective_owner, @current_owner)
+            ELSE @current_owner END,
           inscription_id  = COALESCE(inscriptions.inscription_id, @inscription_id)
       WHERE inscription_number = @inscription_number
     `),
@@ -3016,6 +3084,17 @@ export function getStmts(): Stmts {
       UPDATE inscriptions
       SET inscription_id = COALESCE(inscriptions.inscription_id, @inscription_id)
       WHERE inscription_number = @inscription_number
+    `),
+
+    // Repair stale sale-derived ownership even when the output hasn't moved.
+    // An active loan's effective owner remains the borrower, not the escrow.
+    reconcileInscriptionOwner: db.prepare(`
+      UPDATE inscriptions
+      SET current_owner = @current_owner,
+          effective_owner = CASE WHEN active_loan_count > 0 THEN effective_owner
+                                 ELSE @current_owner END
+      WHERE inscription_number = @inscription_number
+        AND current_owner IS NOT @current_owner
     `),
 
     // Set inscribe_at (genesis timestamp) only if not already set. Used by the
@@ -3038,6 +3117,7 @@ export function getStmts(): Stmts {
           effective_owner = @new_owner
       WHERE inscription_number = @inscription_number
         AND @new_owner IS NOT NULL
+        AND current_output IS NULL
         AND (last_movement_at IS NULL OR @block_timestamp > last_movement_at)
     `),
 
@@ -3082,7 +3162,7 @@ export function getStmts(): Stmts {
         AND old_owner       IS @old_owner
         AND new_owner       IS @new_owner
         AND block_timestamp = @block_timestamp
-        AND event_type IN ('transferred','sold')
+        AND event_type IN ('transferred','sold','mint')
       ORDER BY CASE event_type WHEN 'sold' THEN 0 ELSE 1 END
       LIMIT 1
     `),
@@ -3446,12 +3526,14 @@ export function getStmts(): Stmts {
         UNION ALL
         SELECT * FROM events
           WHERE event_type IN ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked')
+            AND json_valid(raw_json)
             AND json_extract(raw_json, '$.borrower_addr') = @owner
             AND COALESCE(new_owner, '') != @owner
             AND COALESCE(old_owner, '') != @owner
         UNION ALL
         SELECT * FROM events
           WHERE event_type IN ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked')
+            AND json_valid(raw_json)
             AND json_extract(raw_json, '$.lender_addr') = @owner
             AND COALESCE(new_owner, '') != @owner
             AND COALESCE(old_owner, '') != @owner
@@ -3474,12 +3556,14 @@ export function getStmts(): Stmts {
         UNION ALL
         SELECT * FROM events
           WHERE event_type IN ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked')
+            AND json_valid(raw_json)
             AND json_extract(raw_json, '$.borrower_addr') = @owner
             AND COALESCE(new_owner, '') != @owner
             AND COALESCE(old_owner, '') != @owner
         UNION ALL
         SELECT * FROM events
           WHERE event_type IN ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked')
+            AND json_valid(raw_json)
             AND json_extract(raw_json, '$.lender_addr') = @owner
             AND COALESCE(new_owner, '') != @owner
             AND COALESCE(old_owner, '') != @owner
@@ -3501,12 +3585,14 @@ export function getStmts(): Stmts {
            AND old_owner != COALESCE(new_owner, ''))
         + (SELECT COUNT(*) FROM events
             WHERE event_type IN ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked')
-              AND json_extract(raw_json, '$.borrower_addr') = @owner
+              AND json_valid(raw_json)
+            AND json_extract(raw_json, '$.borrower_addr') = @owner
               AND COALESCE(new_owner, '') != @owner
               AND COALESCE(old_owner, '') != @owner)
         + (SELECT COUNT(*) FROM events
             WHERE event_type IN ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked')
-              AND json_extract(raw_json, '$.lender_addr') = @owner
+              AND json_valid(raw_json)
+            AND json_extract(raw_json, '$.lender_addr') = @owner
               AND COALESCE(new_owner, '') != @owner
               AND COALESCE(old_owner, '') != @owner
               AND COALESCE(json_extract(raw_json, '$.borrower_addr'), '') != @owner)

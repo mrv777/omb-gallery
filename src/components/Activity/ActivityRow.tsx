@@ -73,6 +73,7 @@ const ActivityRow = memo(function ActivityRow({ event, groupedWithPrev, matrica 
 
   return (
     <div
+      style={{ contentVisibility: 'auto', containIntrinsicSize: '64px' }}
       className={`flex items-center gap-x-3 sm:gap-x-4 px-2 sm:px-4 py-2 border-b border-ink-2 hover:bg-ink-1/60 transition-colors ${
         isSold ? 'bg-accent-green/[0.03]' : ''
       } ${groupedWithPrev ? '' : 'border-t border-t-bone-dim/20'}`}
@@ -256,7 +257,11 @@ function OwnerLink({ addr, matrica }: { addr: string | null; matrica: ApiMatrica
       : addr;
   return (
     <Tooltip content={tooltipBody}>
-      <Link href={`/holder/${addr}`} prefetch={false} className="hover:text-accent-orange truncate inline-flex items-baseline gap-1">
+      <Link
+        href={`/holder/${addr}`}
+        prefetch={false}
+        className="hover:text-accent-orange truncate inline-flex items-baseline gap-1"
+      >
         {manual ? (
           <span className="text-accent-orange normal-case tracking-normal">{manual.name}</span>
         ) : username ? (

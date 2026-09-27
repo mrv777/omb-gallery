@@ -114,6 +114,62 @@ export function resolveCanonicalHolderAddress(address: string): string | null {
 
 export type HolderEventsCursor = { ts: number; id: number };
 
+export type HolderEventCounts = { total: number; inferred: number };
+
+/** Count distinct events touching a wallet set, matching the holder timeline's
+ * event-role rules. This deliberately counts event IDs rather than summing
+ * per-wallet counts: an internal transfer belongs to the profile once even
+ * though both endpoints are in its wallet set. `inferred` is likewise a
+ * distinct-event subset count. */
+export function countHolderEvents(wallets: string[], inferredWallets: string[]): HolderEventCounts {
+  if (wallets.length === 0) return { total: 0, inferred: 0 };
+  const rows = getDb()
+    .prepare(
+      `WITH addresses AS (
+         SELECT value AS wallet_addr, 0 AS inferred FROM json_each(@wallets_json)
+       ), inferred_addresses AS (
+         SELECT value AS wallet_addr FROM json_each(@inferred_json)
+       ), matches AS (
+         SELECT e.id AS event_id, a.wallet_addr, a.inferred
+         FROM addresses a JOIN events e ON e.new_owner = a.wallet_addr
+         WHERE e.event_type != 'listed'
+         UNION ALL
+         SELECT e.id, a.wallet_addr, a.inferred
+         FROM addresses a JOIN events e ON e.old_owner = a.wallet_addr
+         WHERE e.event_type != 'listed'
+           AND e.old_owner != COALESCE(e.new_owner, '')
+         UNION ALL
+         SELECT e.id, a.wallet_addr, a.inferred
+         FROM addresses a JOIN events e
+           ON e.event_type IN ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked')
+          AND json_valid(e.raw_json)
+          AND json_extract(e.raw_json, '$.borrower_addr') = a.wallet_addr
+         WHERE COALESCE(e.new_owner, '') != a.wallet_addr
+           AND COALESCE(e.old_owner, '') != a.wallet_addr
+         UNION ALL
+         SELECT e.id, a.wallet_addr, a.inferred
+         FROM addresses a JOIN events e
+           ON e.event_type IN ('loan-originated','loan-defaulted','loan-repaid','loan-unlocked')
+          AND json_valid(e.raw_json)
+          AND json_extract(e.raw_json, '$.lender_addr') = a.wallet_addr
+         WHERE COALESCE(e.new_owner, '') != a.wallet_addr
+           AND COALESCE(e.old_owner, '') != a.wallet_addr
+           AND COALESCE(json_extract(e.raw_json, '$.borrower_addr'), '') != a.wallet_addr
+       ), deduped AS (
+         SELECT DISTINCT event_id, wallet_addr, inferred FROM matches
+       )
+       SELECT COUNT(DISTINCT event_id) AS total,
+              COUNT(DISTINCT CASE WHEN wallet_addr IN (SELECT wallet_addr FROM inferred_addresses)
+                                  THEN event_id END) AS inferred
+       FROM deduped`
+    )
+    .get({
+      wallets_json: JSON.stringify(wallets),
+      inferred_json: JSON.stringify(inferredWallets),
+    }) as { total: number; inferred: number };
+  return rows;
+}
+
 /**
  * Fan-out fetch of events across multiple wallets, deduped by event id and
  * sorted globally by (block_timestamp DESC, id DESC). Used by both the SSR

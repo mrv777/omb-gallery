@@ -34,6 +34,7 @@ function stmts() {
       FROM wallet_links wl
       JOIN inscriptions  i ON i.effective_owner = wl.wallet_addr
       WHERE wl.matrica_user_id IS NOT NULL
+        AND i.collection_slug = 'omb'
         AND i.color IS NOT NULL
       GROUP BY wl.matrica_user_id, i.color
     `),
@@ -60,6 +61,7 @@ function stmts() {
       FROM inscriptions i
       JOIN wallet_links wl ON wl.wallet_addr = i.effective_owner
       WHERE wl.matrica_user_id = @user_id
+        AND i.collection_slug = 'omb'
         AND i.color IS NOT NULL
       GROUP BY i.color
     `),
@@ -79,6 +81,7 @@ function stmts() {
       FROM inscriptions i
       LEFT JOIN wallet_links wl ON wl.wallet_addr = i.effective_owner
       WHERE i.color IS NOT NULL
+        AND i.collection_slug = 'omb'
         AND i.effective_owner IS NOT NULL
         AND i.effective_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST})
       GROUP BY i.color
@@ -101,6 +104,7 @@ function stmts() {
           SELECT COUNT(*) FROM inscriptions i
           JOIN wallet_links wl ON wl.wallet_addr = i.effective_owner
           WHERE wl.matrica_user_id = re.matrica_user_id
+            AND i.collection_slug = 'omb'
         ) AS inscription_count,
         (
           SELECT wallet_addr FROM wallet_links
@@ -137,7 +141,13 @@ export function runRolesTick(): RolesTickResult {
   // Bucket counts per user.
   const countsByUser: Map<string, ColorCounts> = new Map();
   for (const r of colorRows) {
-    if (r.color !== 'black' && r.color !== 'orange' && r.color !== 'green' && r.color !== 'blue' && r.color !== 'red') {
+    if (
+      r.color !== 'black' &&
+      r.color !== 'orange' &&
+      r.color !== 'green' &&
+      r.color !== 'blue' &&
+      r.color !== 'red'
+    ) {
       continue;
     }
     let c = countsByUser.get(r.user_id);
@@ -174,13 +184,13 @@ export function runRolesTick(): RolesTickResult {
   let removedCount = 0;
 
   const tx = db.transaction(() => {
-    Array.from(allUserIds).forEach((userId) => {
+    Array.from(allUserIds).forEach(userId => {
       const counts = countsByUser.get(userId) ?? emptyCounts();
       const earnedNow: Set<string> = new Set(evaluateRoles(counts));
       const had: Map<string, number> = existing.get(userId) ?? new Map();
 
       // Insert / preserve.
-      Array.from(earnedNow).forEach((roleId) => {
+      Array.from(earnedNow).forEach(roleId => {
         const prevEarnedAt = had.get(roleId);
         if (prevEarnedAt === undefined) {
           s.insertEarned.run({
@@ -195,7 +205,7 @@ export function runRolesTick(): RolesTickResult {
       });
 
       // Remove rows no longer earned.
-      Array.from(had.keys()).forEach((roleId) => {
+      Array.from(had.keys()).forEach(roleId => {
         if (!earnedNow.has(roleId)) {
           s.deleteEarned.run({ user_id: userId, role_id: roleId });
           removedCount++;
@@ -217,7 +227,7 @@ export function runRolesTick(): RolesTickResult {
 
 export function getRolesForUser(userId: string): string[] {
   const rows = stmts().selectEarnedForUser.all({ user_id: userId }) as Array<{ role_id: string }>;
-  return rows.map((r) => r.role_id);
+  return rows.map(r => r.role_id);
 }
 
 export function getColorCountsForUser(userId: string): ColorCounts {
@@ -227,7 +237,13 @@ export function getColorCountsForUser(userId: string): ColorCounts {
     n: number;
   }>;
   for (const r of rows) {
-    if (r.color === 'black' || r.color === 'orange' || r.color === 'green' || r.color === 'blue' || r.color === 'red') {
+    if (
+      r.color === 'black' ||
+      r.color === 'orange' ||
+      r.color === 'green' ||
+      r.color === 'blue' ||
+      r.color === 'red'
+    ) {
       counts[r.color as EyeColor] = r.n;
     }
   }
@@ -291,7 +307,7 @@ export function getLinkageStats(): LinkageStats {
   }
   // Rarest → commonest mint order, for stable display.
   const order: EyeColor[] = ['red', 'blue', 'green', 'orange', 'black'];
-  const byColor = order.map((color) => {
+  const byColor = order.map(color => {
     const v = map.get(color) ?? { total: 0, linked: 0 };
     return { color, total: v.total, linked: v.linked };
   });

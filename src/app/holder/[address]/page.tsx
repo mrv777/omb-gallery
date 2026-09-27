@@ -19,6 +19,7 @@ import { buildSocial } from '@/lib/metadata';
 import { lookupWalletLabel } from '@/lib/walletLabels';
 import {
   encodeCursor,
+  countHolderEvents,
   fetchHolderColorHighlights,
   fetchHolderEventsPage,
   resolveAggregatedWallets,
@@ -164,13 +165,10 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
     null,
     RECENT_EVENTS_DISPLAY
   );
-  let eventTotalSum = 0;
-  let eventsFromInferred = 0;
-  for (const w of wallets) {
-    const c = stmts.countEventsByAddress.get({ owner: w }) as { n: number };
-    eventTotalSum += c.n;
-    if (inferredSet.has(w)) eventsFromInferred += c.n;
-  }
+  const { total: eventTotal, inferred: eventsFromInferred } = countHolderEvents(
+    wallets,
+    inferredWallets
+  );
   const initialEventsCursor = initialNextCursor ? encodeCursor(initialNextCursor) : null;
 
   // Bag-size-over-time deltas — separate from the events list because we need
@@ -215,7 +213,7 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
   // a wallet that emptied out (no current holdings but has past events)
   // should still render so users can see the activity. For aggregated users,
   // we 404 only if NONE of their linked wallets has anything either.
-  if (ombHoldings.length === 0 && bravoHoldings.length === 0 && eventTotalSum === 0) {
+  if (ombHoldings.length === 0 && bravoHoldings.length === 0 && eventTotal === 0) {
     notFound();
   }
 
@@ -229,7 +227,7 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
         ombHoldings={ombHoldings}
         bravoHoldings={bravoHoldings}
         events={events}
-        eventTotal={eventTotalSum}
+        eventTotal={eventTotal}
         initialEventsCursor={initialEventsCursor}
         tileCap={TILE_CAP}
         ownershipDeltas={ownershipDeltas}

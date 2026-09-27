@@ -6,6 +6,7 @@ import {
   walCheckpoint,
   getOrdState,
   setOrdState,
+  isPrimaryMintDistribution,
   type CollectionRow,
   type PollStateRow,
 } from '@/lib/db';
@@ -849,7 +850,17 @@ function applyOrdStates(
         continue;
       }
 
-      if (oldOutput === newOutput) continue;
+      if (oldOutput === newOutput) {
+        // Satflow/history imports may have changed ownership without changing
+        // the chain output. Reconcile against ord, preserving loan attribution.
+        if (known.current_owner !== s.address) {
+          stmts.reconcileInscriptionOwner.run({
+            inscription_number: known.inscription_number,
+            current_owner: s.address,
+          });
+        }
+        continue;
+      }
 
       // Self-transfer: the UTXO changed but the owner didn't (postage move,
       // UTXO consolidation, fee bump). Real on-chain spend, but not a
@@ -897,7 +908,13 @@ function applyOrdStates(
       const ev = {
         inscription_id: s.inscription_id,
         inscription_number: known.inscription_number,
-        event_type: 'transferred' as const,
+        event_type: isPrimaryMintDistribution(
+          known.inscription_number,
+          known.current_owner,
+          enriched?.block_timestamp ?? nowTs
+        )
+          ? ('mint' as const)
+          : ('transferred' as const),
         block_height: enriched?.block_height ?? null,
         block_timestamp: enriched?.block_timestamp ?? nowTs,
         new_satpoint: newOutput,
@@ -1142,7 +1159,7 @@ async function runHealHeightsTick(): Promise<TickResult> {
 
     const db = getDb();
     const selectBatch = db.prepare(
-      `SELECT id, inscription_number, new_satpoint, block_height, block_timestamp
+      `SELECT id, inscription_number, new_satpoint, block_height, block_timestamp, old_owner, event_type, sale_price_sats
        FROM events
        WHERE id > ? AND new_satpoint IS NOT NULL
        ORDER BY id ASC
@@ -1159,7 +1176,7 @@ async function runHealHeightsTick(): Promise<TickResult> {
                              WHERE inscription_number = inscriptions.inscription_number),
          last_movement_at = (SELECT MAX(block_timestamp) FROM events
                              WHERE inscription_number = inscriptions.inscription_number
-                               AND event_type IN ('transferred','sold'))
+                               AND event_type IN ('transferred','sold','mint','loan-originated','loan-defaulted','loan-unlocked'))
        WHERE inscription_number = ?`
     );
     const heightToTs = new Map<number, number>();
@@ -1186,6 +1203,9 @@ async function runHealHeightsTick(): Promise<TickResult> {
         new_satpoint: string;
         block_height: number | null;
         block_timestamp: number;
+        old_owner: string | null;
+        event_type: string;
+        sale_price_sats: number | null;
       }>;
       if (rows.length === 0) {
         // End of table — wrap cursor for the next run so heal continuously
@@ -1250,6 +1270,13 @@ async function runHealHeightsTick(): Promise<TickResult> {
             continue;
           }
           updateRow.run(correctHeight, correctTs, row.id);
+          if (
+            (row.event_type === 'transferred' || row.event_type === 'sold') &&
+            isPrimaryMintDistribution(row.inscription_number, row.old_owner, correctTs)
+          ) {
+            getStmts().updateEventToMint.run({ id: row.id, sale_price_sats: row.sale_price_sats });
+            getStmts().recomputeTradeAggregates.run({ inscription_number: row.inscription_number });
+          }
           updated++;
           if (wasNull) nullsFilled++;
           touchedInscriptions.add(row.inscription_number);
@@ -1317,12 +1344,14 @@ async function runSatflowTick(
   const maxPages = backfilling
     ? SATFLOW_BACKFILL_MAX_PAGES_PER_TICK
     : SATFLOW_INCREMENTAL_MAX_PAGES;
-  // Cross-tick sticky counter: any unresolved sale seen during this backfill
+  // Cross-tick sticky counter: any unresolved sale seen during a pending
   // walk (across multiple ticks) keeps us from declaring "done" until we
   // restart at page 1 and confirm everything resolves. Without this, an
   // unresolved sale on an early page is permanently skipped after the cursor
   // advances past it.
-  const priorUnresolvedSeen = backfilling ? (state.backfill_unresolved_seen ?? 0) : 0;
+  const pendingIncremental = !backfilling && /^incremental:\d+$/.test(state.last_cursor ?? '');
+  const priorUnresolvedSeen =
+    backfilling || pendingIncremental ? (state.backfill_unresolved_seen ?? 0) : 0;
 
   // Pagination model:
   //   incremental: walk page 1 → N with sortDirection=desc (newest first),
@@ -1333,7 +1362,11 @@ async function runSatflowTick(
   //     sales land on the latest page and don't shift older pages we're
   //     still walking through.
   const sortDirection: 'asc' | 'desc' = backfilling ? 'asc' : 'desc';
-  let nextPage = backfilling ? Math.max(1, parsePageFromCursor(state.last_cursor) ?? 1) : 1;
+  let nextPage = backfilling
+    ? Math.max(1, parsePageFromCursor(state.last_cursor) ?? 1)
+    : pendingIncremental
+      ? Math.max(1, Number(state.last_cursor!.slice('incremental:'.length)))
+      : 1;
 
   // Build the inscription_id → inscription_number resolution map once per
   // tick. Sales whose inscription_id isn't in this map are skipped (counted
@@ -1357,17 +1390,22 @@ async function runSatflowTick(
     if (Date.now() - startedAt > TICK_WALLCLOCK_BUDGET_MS) break;
     if (i > 0 && backfilling) await sleep(SATFLOW_BACKFILL_POLITENESS_MS);
 
+    // Keep the live head fresh while draining an interrupted incremental scan.
+    // New descending-feed entries shift offsets toward newer rows (overlap is
+    // idempotent). Never treat that overlap as proof the pending tail is done.
+    const headOnly = pendingIncremental && nextPage > 1 && i === 0;
+    const requestedPage = headOnly ? 1 : nextPage;
     let page;
     try {
       page = await fetchSalesPage({
         collectionSlug: collection.satflow_slug,
-        page: nextPage,
+        page: requestedPage,
         pageSize: SATFLOW_PAGE_SIZE,
         sortDirection,
         apiKey,
       });
       pagesUsed++;
-      lastPageReached = nextPage;
+      if (!headOnly) lastPageReached = requestedPage;
       totalReported = page.total;
     } catch (err) {
       errMsg = errorMessage(err);
@@ -1385,12 +1423,20 @@ async function runSatflowTick(
     unresolved += ap.unresolved;
     cleaned += ap.cleaned;
 
+    if (headOnly) continue;
+
     // Incremental stop condition: an entire page yielded zero new writes
     // (every sale is already in events). Once that's true newer pages can
     // only repeat what we've seen, so further fetching is wasteful. `cleaned`
     // doesn't count as "new work" — it's a side-effect of re-processing rows
     // we've already written, so a page that's pure cleanup still drains.
-    if (!backfilling && ap.inserted === 0 && ap.upgraded === 0 && ap.unresolved === 0) {
+    if (
+      !backfilling &&
+      !pendingIncremental &&
+      ap.inserted === 0 &&
+      ap.upgraded === 0 &&
+      ap.unresolved === 0
+    ) {
       drained = true;
       break;
     }
@@ -1404,18 +1450,19 @@ async function runSatflowTick(
   }
 
   // Persist cursor + cross-tick unresolved counter:
-  //   incremental: no cursor; counter not used.
+  //   incremental: persist pending tail; retry unresolved walks from page 1.
   //   backfill mid-walk: park at next page; persist running unresolved total.
   //   backfill drained, ANY unresolved across this walk: reset to page 1 and
   //     zero the counter so the next pass (after ord catches up) re-walks the
   //     whole history. The flag stays set.
   //   backfill drained, all clean: park at last page; flag clears below.
-  const totalUnresolvedSeen = backfilling ? priorUnresolvedSeen + unresolved : 0;
+  const totalUnresolvedSeen = priorUnresolvedSeen + unresolved;
   const fullyClean = totalUnresolvedSeen === 0;
   let nextCursor: string | null;
   let nextUnresolvedSeen = totalUnresolvedSeen;
   if (!backfilling) {
-    nextCursor = null;
+    nextCursor = drained && fullyClean ? null : `incremental:${drained ? 1 : nextPage}`;
+    if (drained) nextUnresolvedSeen = 0;
   } else if (drained && !fullyClean) {
     nextCursor = 'page:1';
     nextUnresolvedSeen = 0;
@@ -1425,7 +1472,7 @@ async function runSatflowTick(
     nextCursor = `page:${nextPage}`;
   }
 
-  stmts.setPollResult.run({
+  stmts.setPollResultExactCursor.run({
     stream: 'satflow',
     collection: collection.slug,
     status: errMsg ? errMsg.slice(0, 500) : 'ok',
@@ -1433,13 +1480,11 @@ async function runSatflowTick(
     cursor: nextCursor,
   });
 
-  if (backfilling) {
-    stmts.setBackfillUnresolvedSeen.run({
-      stream: 'satflow',
-      collection: collection.slug,
-      count: nextUnresolvedSeen,
-    });
-  }
+  stmts.setBackfillUnresolvedSeen.run({
+    stream: 'satflow',
+    collection: collection.slug,
+    count: nextUnresolvedSeen,
+  });
 
   // Only clear the backfilling flag once we've drained AND every sale across
   // the whole walk resolved (not just this tick). Otherwise keep is_backfilling=1
@@ -1470,7 +1515,7 @@ async function runSatflowTick(
     upgraded,
     unresolved,
     cleaned,
-    unresolvedSeenTotal: backfilling ? nextUnresolvedSeen : 0,
+    unresolvedSeenTotal: nextUnresolvedSeen,
     lastPage: lastPageReached,
     total: totalReported,
     done: drained && fullyClean,
@@ -1595,6 +1640,69 @@ function applySalesTransaction(
         // once bootstrap catches up. (For OMB-only collectionSlug, every
         // inscription should eventually be known.)
         unresolved++;
+        continue;
+      }
+
+      // Primary distributions keep their price for display, but must never
+      // contribute to secondary-market sale/volume rankings. Apply this on
+      // every import (including replay), not only during schema migrations.
+      if (isPrimaryMintDistribution(inscription_number, sale.seller, sale.block_timestamp)) {
+        const existingMint = (stmts.findEventByInscriptionAndTxid.get({
+          inscription_id: sale.inscription_id,
+          txid: sale.txid,
+        }) ??
+          stmts.findEventByMovement.get({
+            inscription_id: sale.inscription_id,
+            old_owner: sale.seller,
+            new_owner: sale.buyer,
+            block_timestamp: sale.block_timestamp,
+          })) as { id: number; event_type: string } | undefined;
+        if (existingMint) {
+          if (
+            existingMint.event_type === 'transferred' ||
+            existingMint.event_type === 'sold' ||
+            existingMint.event_type === 'mint'
+          ) {
+            stmts.updateEventToMint.run({
+              id: existingMint.id,
+              sale_price_sats: sale.sale_price_sats,
+            });
+            if (existingMint.event_type !== 'mint') {
+              stmts.recomputeTradeAggregates.run({ inscription_number });
+              upgraded++;
+            }
+          }
+        } else {
+          stmts.upsertInscriptionFromEvent.run({
+            inscription_number,
+            inscription_id: sale.inscription_id,
+            inscribe_at: null,
+            block_timestamp: sale.block_timestamp,
+          });
+          const result = stmts.insertEvent.run({
+            inscription_id: sale.inscription_id,
+            inscription_number,
+            event_type: 'mint',
+            block_height: sale.block_height,
+            block_timestamp: sale.block_timestamp,
+            new_satpoint: null,
+            old_owner: sale.seller,
+            new_owner: sale.buyer,
+            marketplace: null,
+            sale_price_sats: sale.sale_price_sats,
+            txid: sale.txid,
+            raw_json: sale.raw_json,
+          });
+          if (result.changes > 0) {
+            stmts.bumpInscriptionAggregates.run({
+              inscription_number,
+              event_type: 'mint',
+              sale_price_sats: sale.sale_price_sats,
+              block_timestamp: sale.block_timestamp,
+            });
+            inserted++;
+          }
+        }
         continue;
       }
 
