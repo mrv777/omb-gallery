@@ -27,18 +27,15 @@ type Props = {
 export default function ActivityFeed({ initial, dailyTransfers, sparklineDays = 90 }: Props) {
   const [filter, setFilter] = useState<FeedFilter>('all');
   const { color } = useColorFilter();
-  const { events, totals, poll, matrica, loading, error, reachedEnd, loadMore } = useActivityFeed(
-    filter,
-    color,
-    initial
-  );
+  const { events, totals, poll, matrica, loading, refreshing, error, reachedEnd, loadMore } =
+    useActivityFeed(filter, color, initial);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const pollStatus = describeOrdPollStatus(poll?.last_status ?? null);
 
   // Infinite scroll
   useEffect(() => {
     const el = sentinelRef.current;
-    if (!el) return;
+    if (!el || loading || refreshing || reachedEnd || error) return;
     const observer = new IntersectionObserver(
       entries => {
         for (const entry of entries) {
@@ -49,7 +46,7 @@ export default function ActivityFeed({ initial, dailyTransfers, sparklineDays = 
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [loadMore]);
+  }, [loadMore, events, loading, refreshing, reachedEnd, error]);
 
   // Pre-compute "is grouped with previous row" flags so each row knows whether
   // to dim its thumbnail (consecutive events on the same inscription).
@@ -146,6 +143,20 @@ export default function ActivityFeed({ initial, dailyTransfers, sparklineDays = 
         </div>
       )}
 
+      {error && (
+        <button
+          type="button"
+          onClick={loadMore}
+          disabled={loading || refreshing}
+          className="mt-6 font-mono text-xs text-bone underline underline-offset-4"
+        >
+          {loading
+            ? 'Retrying…'
+            : events.length > 0
+              ? 'Couldn’t load more activity. Retry'
+              : 'Retry'}
+        </button>
+      )}
       <div ref={sentinelRef} className="h-px w-full mt-12" aria-hidden />
       {loading && events.length > 0 && (
         <div className="font-mono text-[11px] tracking-[0.08em] uppercase text-bone-dim mt-6">

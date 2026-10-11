@@ -159,9 +159,11 @@ export async function GET(req: NextRequest) {
   // 30s + SWR matches the cron cadence (data only changes every 5 min) and
   // the 60s client refreshHead window.
   const headers =
-    cursor == null
-      ? { 'Cache-Control': 'public, max-age=30, stale-while-revalidate=300' }
-      : undefined;
+    url.searchParams.get('refresh') === '1'
+      ? { 'Cache-Control': 'no-store' }
+      : cursor == null
+        ? { 'Cache-Control': 'public, max-age=30, stale-while-revalidate=300' }
+        : undefined;
 
   return NextResponse.json(
     {

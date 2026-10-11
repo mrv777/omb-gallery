@@ -35,21 +35,35 @@ function loadTurnstileScript(): Promise<void> {
   if (scriptPromise) return scriptPromise;
   scriptPromise = new Promise<void>((resolve, reject) => {
     const existing = document.querySelector<HTMLScriptElement>(`script[src="${SCRIPT_SRC}"]`);
-    if (existing) {
-      existing.addEventListener('load', () => resolve());
-      existing.addEventListener('error', () => reject(new Error('turnstile-script')));
-      return;
-    }
-    const s = document.createElement('script');
-    s.src = SCRIPT_SRC;
-    s.async = true;
-    s.defer = true;
-    s.onload = () => resolve();
-    s.onerror = () => {
+    const script = existing ?? document.createElement('script');
+    const cleanup = () => {
+      clearTimeout(timeout);
+      script.removeEventListener('load', loaded);
+      script.removeEventListener('error', failed);
+    };
+    const failed = () => {
+      cleanup();
+      script.remove();
       scriptPromise = null;
       reject(new Error('turnstile-script'));
     };
-    document.head.appendChild(s);
+    const loaded = () => {
+      if (!window.turnstile) {
+        failed();
+        return;
+      }
+      cleanup();
+      resolve();
+    };
+    const timeout = setTimeout(failed, 15_000);
+    script.addEventListener('load', loaded);
+    script.addEventListener('error', failed);
+    if (!existing) {
+      script.src = SCRIPT_SRC;
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    }
   });
   return scriptPromise;
 }
@@ -71,6 +85,8 @@ export default function ShareDialog({ ids, defaultTitle, onClose }: Props) {
   const [state, setState] = useState<State>({ kind: 'idle' });
   const [token, setToken] = useState<string>('');
   const [copyFlash, setCopyFlash] = useState(false);
+  const [verificationFailed, setVerificationFailed] = useState(false);
+  const [verificationAttempt, setVerificationAttempt] = useState(0);
   const widgetHost = useRef<HTMLDivElement | null>(null);
   const widgetId = useRef<string | null>(null);
 
@@ -86,13 +102,27 @@ export default function ShareDialog({ ids, defaultTitle, onClose }: Props) {
           sitekey: siteKey,
           size: 'flexible',
           theme: 'dark',
-          callback: t => setToken(t),
-          'error-callback': () => setToken(''),
-          'expired-callback': () => setToken(''),
+          callback: t => {
+            if (cancelled) return;
+            setToken(t);
+            setVerificationFailed(false);
+          },
+          'error-callback': () => {
+            if (cancelled) return;
+            setToken('');
+            setVerificationFailed(true);
+            setState({ kind: 'error', message: 'Verification failed. Please retry.' });
+          },
+          'expired-callback': () => {
+            if (!cancelled) setToken('');
+          },
         });
       })
       .catch(() => {
-        if (!cancelled) setState({ kind: 'error', message: 'Could not load verification.' });
+        if (!cancelled) {
+          setVerificationFailed(true);
+          setState({ kind: 'error', message: 'Could not load verification. Please retry.' });
+        }
       });
     return () => {
       cancelled = true;
@@ -101,7 +131,7 @@ export default function ShareDialog({ ids, defaultTitle, onClose }: Props) {
         widgetId.current = null;
       }
     };
-  }, [siteKey]);
+  }, [siteKey, verificationAttempt]);
 
   const shareUrl =
     state.kind === 'success' ? `${window.location.origin}/slideshow/${state.slug}` : '';
@@ -226,8 +256,25 @@ export default function ShareDialog({ ids, defaultTitle, onClose }: Props) {
               </p>
             )}
 
+            {verificationFailed && (
+              <button
+                type="button"
+                onClick={() => {
+                  setState({ kind: 'idle' });
+                  setToken('');
+                  setVerificationFailed(false);
+                  setVerificationAttempt(attempt => attempt + 1);
+                }}
+                className="h-10 px-3 mb-3 text-bone border border-bone hover:bg-bone hover:text-ink-0 transition-colors"
+              >
+                retry verification
+              </button>
+            )}
+
             {state.kind === 'error' && (
-              <p className="text-accent-red mb-3 normal-case tracking-normal">{state.message}</p>
+              <p role="alert" className="text-accent-red mb-3 normal-case tracking-normal">
+                {state.message}
+              </p>
             )}
 
             <div className="flex items-center justify-end gap-2">

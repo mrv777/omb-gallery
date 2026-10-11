@@ -58,8 +58,10 @@ pnpm start
   across ticks and restarts. Incremental sales catch-up also retains progress
   after upstream failures or page/time limits. Current ownership remains
   anchored to ord, with borrower attribution retained during active loans.
-- Activity refresh revalidates loaded rows in bounded batches, so reclassified
+- Activity refresh catches up through every new page, so bursts between refreshes
+  do not leave gaps. Loaded rows are revalidated in bounded batches, so reclassified
   sales and deleted events no longer remain indefinitely in a filtered feed.
+  Failed refreshes preserve the readable feed; failed page loads offer Retry.
   Holder event totals count distinct events across linked wallets; Roles
   holding counts include OMBs only.
 

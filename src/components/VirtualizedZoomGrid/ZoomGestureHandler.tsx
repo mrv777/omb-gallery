@@ -15,7 +15,7 @@ export default function ZoomGestureHandler({
   disabled,
 }: ZoomGestureHandlerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const lastScale = useRef(1);
+  const lastScale = useRef<number | null>(null);
 
   // Prevent the browser's own pinch-zoom so a pinch changes column count
   // instead of scaling the page.
@@ -43,21 +43,18 @@ export default function ZoomGestureHandler({
   useGesture(
     {
       // Pinch gesture for mobile
-      onPinch: ({ offset: [scale], memo = lastScale.current }) => {
-        if (disabled) return memo;
+      onPinch: ({ offset: [scale], first }) => {
+        const previous = first ? null : lastScale.current;
+        lastScale.current = scale;
+        if (disabled || previous === null) return;
 
-        // Calculate delta from previous scale
-        const delta = scale - memo;
-        if (Math.abs(delta) > 0.05) {
-          // Negative delta = zooming out (pinch in), want more columns
-          // Positive delta = zooming in (pinch out), want fewer columns
-          onZoom(-delta * 100, false);
-          lastScale.current = scale;
-        }
-        return scale;
+        // useZoomLevel owns the threshold and accumulates these small frames.
+        // Rebasing each gesture avoids jumps from use-gesture's persistent offset.
+        const delta = scale - previous;
+        if (delta !== 0) onZoom(-delta * 100, false);
       },
       onPinchEnd: () => {
-        lastScale.current = 1;
+        lastScale.current = null;
       },
 
       // Wheel gesture for desktop

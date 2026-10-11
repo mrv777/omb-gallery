@@ -54,6 +54,21 @@ describe('activity head refresh', () => {
     expect(reconciled[1]).toMatchObject({ event_type: 'sold', sale_price_sats: 1000 });
   });
 
+  it('reorders timestamp-corrected exact IDs and ignores unrequested response rows', () => {
+    const current = [event(4, 'transferred'), event(3, 'transferred'), event(2, 'transferred')];
+    const corrected = { ...event(2, 'sold'), block_timestamp: 10 };
+    const result = mergeRevalidatedEvents(current, [2], [corrected, event(99, 'sold')]);
+    expect(result.map(item => item.id)).toEqual([2, 4, 3]);
+  });
+
+  it('caps reconciliation at 200 IDs for thousands of loaded rows', () => {
+    const current = Array.from({ length: 10_000 }, (_, i) => event(10_000 - i, 'transferred'));
+    const selection = selectRevalidationBatch(current, 8000);
+    expect(selection.ids).toHaveLength(200);
+    expect(selection.ids[0]).toBe(2000);
+    expect(selection.nextOffset).toBe(8200);
+  });
+
   it('rotates bounded batches over loaded rows, including wraparound', () => {
     const page = [event(5, 'transferred'), event(4, 'transferred'), event(3, 'transferred')];
     expect(selectRevalidationBatch(page, 0, 2)).toEqual({ ids: [5, 4], nextOffset: 2 });

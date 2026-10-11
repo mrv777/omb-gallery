@@ -3,10 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ApiActivityResponse, ApiEvent, ApiMatricaMap } from './types';
 import type { ColorFilter } from '@/lib/types';
+import { mergeRefreshedEvents, refreshActivityWindow } from './refreshActivityWindow';
+
+export { mergeRefreshedEvents } from './refreshActivityWindow';
 
 const PAGE_SIZE = 60;
 const REFRESH_MS = 60_000;
 const REVALIDATE_BATCH_SIZE = 200;
+const REQUEST_TIMEOUT_MS = 30_000;
 
 export type FeedFilter = 'all' | 'sales' | 'transfers' | 'loans';
 
@@ -19,6 +23,7 @@ export type FeedState = {
    * a row's username overlay is loaded it stays for the session. */
   matrica: ApiMatricaMap;
   loading: boolean;
+  refreshing: boolean;
   error: string | null;
   reachedEnd: boolean;
 };
@@ -33,15 +38,6 @@ export type InitialActivity = {
   poll: ApiActivityResponse['poll'];
   matrica: ApiMatricaMap;
 };
-
-export function mergeRefreshedEvents(current: ApiEvent[], incoming: ApiEvent[]): ApiEvent[] {
-  const currentIds = new Set(current.map(event => event.id));
-  const incomingById = new Map(incoming.map(event => [event.id, event]));
-  const newEvents = incoming.filter(event => !currentIds.has(event.id));
-  return [...newEvents, ...current.map(event => incomingById.get(event.id) ?? event)].toSorted(
-    (left, right) => right.block_timestamp - left.block_timestamp || right.id - left.id
-  );
-}
 
 /** Reconcile an exact bounded ID snapshot without disturbing older rows that
  * were not part of the request. Missing requested IDs were deleted or no
@@ -93,31 +89,31 @@ export function useActivityFeed(
     poll: initial?.poll ?? null,
     matrica: initial?.matrica ?? {},
     loading: !initial,
+    refreshing: false,
     error: null,
     reachedEnd: initial != null && initial.next_cursor == null,
   }));
   const eventsRef = useRef(state.events);
-  eventsRef.current = state.events;
   const cursorRef = useRef<string | null>(initial?.next_cursor ?? null);
   const loadingRef = useRef<boolean>(false);
+  const requestRef = useRef<AbortController | null>(null);
   const seenIdsRef = useRef<Set<number>>(new Set(initial?.events.map(e => e.id) ?? []));
   const filterRef = useRef<FeedFilter>(filter);
   const colorRef = useRef<ColorFilter>(color);
   // Bumped on filter reset so an in-flight fetch's response can be discarded
   // when the filter has changed underneath it.
   const reqGenRef = useRef(0);
-  // Any response that mutates the event list invalidates a concurrently
-  // running revalidation snapshot, preventing it from overwriting newer page
-  // or head-refresh data.
+  // A filter reset or newer event mutation invalidates staged revalidation.
   const eventMutationRef = useRef(0);
   const revalidationOffsetRef = useRef(0);
   // Skip the very first reset-and-fetch when the server already provided data
   // for the default filter; subsequent filter changes still reset normally.
   const skipInitialReset = useRef<boolean>(initial != null);
 
-  const buildUrl = useCallback((cursor: string | null) => {
+  const buildUrl = useCallback((cursor: string | null, refresh = false) => {
     const url = new URL('/api/activity', window.location.origin);
-    url.searchParams.set('limit', String(PAGE_SIZE));
+    url.searchParams.set('limit', String(refresh ? 100 : PAGE_SIZE));
+    if (refresh) url.searchParams.set('refresh', '1');
     if (cursor != null) url.searchParams.set('cursor', cursor);
     if (filterRef.current !== 'all') url.searchParams.set('type', filterRef.current);
     if (colorRef.current !== 'all') url.searchParams.set('color', colorRef.current);
@@ -130,19 +126,27 @@ export function useActivityFeed(
     if (cursorRef.current == null && seenIdsRef.current.size > 0) return;
     loadingRef.current = true;
     const myGen = reqGenRef.current;
+    const controller = new AbortController();
+    requestRef.current = controller;
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    setState(prev => ({ ...prev, loading: true, error: null }));
     try {
-      const res = await fetch(buildUrl(cursorRef.current));
+      const res = await fetch(buildUrl(cursorRef.current), { signal: controller.signal });
       if (myGen !== reqGenRef.current) return;
+      if (controller.signal.aborted) throw new Error('Activity request timed out');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: ApiActivityResponse = await res.json();
       if (myGen !== reqGenRef.current) return;
+      if (controller.signal.aborted) throw new Error('Activity request timed out');
       const fresh = data.events.filter(e => !seenIdsRef.current.has(e.id));
       for (const e of fresh) seenIdsRef.current.add(e.id);
       cursorRef.current = data.next_cursor;
       eventMutationRef.current++;
+      eventsRef.current = mergeRefreshedEvents(eventsRef.current, data.events);
+      const events = eventsRef.current;
       setState(prev => ({
         ...prev,
-        events: [...prev.events, ...fresh],
+        events,
         // The API only returns totals on first-page requests; preserve the last
         // value we saw so paginated responses don't blank the header.
         totals: data.totals ?? prev.totals,
@@ -163,75 +167,110 @@ export function useActivityFeed(
       // Only release the lock if this fetch is still the active generation —
       // otherwise the next-generation loadMore that's already running would
       // have its in-flight flag stomped by a stale fetch resolving late.
-      if (myGen === reqGenRef.current) loadingRef.current = false;
+      clearTimeout(timeout);
+      if (myGen === reqGenRef.current) {
+        loadingRef.current = false;
+        requestRef.current = null;
+      }
     }
   }, [buildUrl]);
 
   const refreshHead = useCallback(async () => {
-    // Pull the first page, prepend new rows, and replace matching IDs whose
-    // enrichment changed (for example transferred -> sold).
-    // Capture the request generation so a stale response from a previous filter
-    // is discarded if the user changed filters mid-flight — otherwise old-filter
-    // events would prepend into a freshly-reset feed and pollute seenIdsRef.
+    // Pagination and refresh share one lock: no stale continuation can append
+    // after a head catch-up changes its cursor or reconciles removed rows.
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     const myGen = reqGenRef.current;
+    const controller = new AbortController();
+    requestRef.current = controller;
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    setState(prev => ({ ...prev, refreshing: true }));
     try {
-      const res = await fetch(buildUrl(null));
-      if (myGen !== reqGenRef.current) return;
-      if (!res.ok) return;
-      const data: ApiActivityResponse = await res.json();
-      if (myGen !== reqGenRef.current) return;
-      const newOnes = data.events.filter(e => !seenIdsRef.current.has(e.id));
-      for (const e of newOnes) seenIdsRef.current.add(e.id);
+      const snapshot = eventsRef.current;
+      const selection = selectRevalidationBatch(snapshot, revalidationOffsetRef.current);
+      // Remember the next old ID so prepending a large arrival burst cannot
+      // make the rotating batch repeatedly select the same historical rows.
+      const nextId = snapshot[selection.nextOffset]?.id;
+      const data = await refreshActivityWindow(
+        snapshot,
+        async cursor => {
+          const res = await fetch(buildUrl(cursor, true), {
+            signal: controller.signal,
+            cache: 'no-store',
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const page: ApiActivityResponse = await res.json();
+          if (controller.signal.aborted || myGen !== reqGenRef.current) {
+            throw new Error('Activity refresh cancelled');
+          }
+          return page;
+        },
+        cursorRef.current
+      );
+      if (controller.signal.aborted || myGen !== reqGenRef.current) return;
+      eventsRef.current = data.events;
+      seenIdsRef.current = new Set(data.events.map(event => event.id));
+      cursorRef.current = data.next_cursor;
       eventMutationRef.current++;
       setState(prev => ({
         ...prev,
-        events: mergeRefreshedEvents(prev.events, data.events),
+        events: data.events,
         totals: data.totals,
         poll: data.poll,
-        matrica: { ...prev.matrica, ...(data.matrica ?? {}) },
+        matrica: { ...prev.matrica, ...data.matrica },
+        loading: false,
+        error: null,
+        reachedEnd: data.next_cursor == null,
       }));
-    } catch {
-      // refresh failures are silent
-    }
-  }, [buildUrl]);
 
-  const revalidateLoaded = useCallback(async () => {
-    const snapshot = eventsRef.current;
-    const selection = selectRevalidationBatch(snapshot, revalidationOffsetRef.current);
-    if (selection.ids.length === 0) return;
-    const myGen = reqGenRef.current;
-    const myMutation = eventMutationRef.current;
-    const url = new URL(buildUrl(null));
-    url.searchParams.set('ids', selection.ids.join(','));
-    try {
-      const res = await fetch(url.toString());
-      if (!res.ok || myGen !== reqGenRef.current || myMutation !== eventMutationRef.current) return;
-      const data: ApiActivityResponse = await res.json();
-      if (myGen !== reqGenRef.current || myMutation !== eventMutationRef.current) return;
+      // Revalidate the old loaded slice even when its IDs were absent from
+      // the head response. Missing IDs mean deletion or a filter mismatch.
+      if (selection.ids.length === 0) return;
+      const myMutation = eventMutationRef.current;
+      const url = new URL(buildUrl(null, true));
+      url.searchParams.set('ids', selection.ids.join(','));
+      const res = await fetch(url.toString(), { signal: controller.signal, cache: 'no-store' });
+      if (!res.ok) return;
+      const refreshed: Pick<ApiActivityResponse, 'events' | 'matrica'> = await res.json();
+      if (
+        controller.signal.aborted ||
+        myGen !== reqGenRef.current ||
+        myMutation !== eventMutationRef.current
+      )
+        return;
       const requested = new Set(selection.ids);
-      const returned = data.events.filter(event => requested.has(event.id));
-      const returnedIds = new Set(returned.map(event => event.id));
-      const oldById = new Map(snapshot.map(event => [event.id, event]));
+      const returned = refreshed.events.filter(event => requested.has(event.id));
+      const oldById = new Map(eventsRef.current.map(event => [event.id, event]));
       const returnedById = new Map(returned.map(event => [event.id, event]));
-      const changedOrRemoved = selection.ids.some(id => {
-        const old = oldById.get(id);
-        const fresh = returnedById.get(id);
-        return !fresh || !sameEvent(old, fresh);
-      });
-      revalidationOffsetRef.current = selection.nextOffset;
-      if (!changedOrRemoved) return;
-      for (const id of selection.ids) {
-        if (!returnedIds.has(id)) seenIdsRef.current.delete(id);
+      const changedOrRemoved = selection.ids.some(
+        id => !sameEvent(oldById.get(id), returnedById.get(id))
+      );
+      if (changedOrRemoved) {
+        eventsRef.current = mergeRevalidatedEvents(eventsRef.current, selection.ids, returned);
+        seenIdsRef.current = new Set(eventsRef.current.map(event => event.id));
+        eventMutationRef.current++;
       }
-      for (const event of returned) seenIdsRef.current.add(event.id);
-      eventMutationRef.current++;
+      const nextIndex =
+        nextId == null ? -1 : eventsRef.current.findIndex(event => event.id === nextId);
+      revalidationOffsetRef.current = nextIndex >= 0 ? nextIndex : selection.nextOffset;
+      const events = eventsRef.current;
+      // Profiles can change independently of events, so reconcile the overlay
+      // even when none of the event fields changed.
       setState(prev => ({
         ...prev,
-        events: mergeRevalidatedEvents(prev.events, selection.ids, returned),
-        matrica: { ...prev.matrica, ...(data.matrica ?? {}) },
+        events,
+        matrica: { ...prev.matrica, ...(refreshed.matrica ?? {}) },
       }));
     } catch {
-      // A later cycle retries this batch when a revalidation request fails.
+      // Preserve the readable window/cursor if catch-up fails. If only the
+      // ID request fails, the successfully staged head remains available.
+    } finally {
+      clearTimeout(timeout);
+      if (myGen === reqGenRef.current) {
+        loadingRef.current = false;
+        requestRef.current = null;
+        setState(prev => (prev.refreshing ? { ...prev, refreshing: false } : prev));
+      }
     }
   }, [buildUrl]);
 
@@ -249,6 +288,10 @@ export function useActivityFeed(
     }
     filterRef.current = filter;
     colorRef.current = color;
+    requestRef.current?.abort();
+    eventsRef.current = [];
+    revalidationOffsetRef.current = 0;
+    eventMutationRef.current++;
     cursorRef.current = null;
     seenIdsRef.current = new Set();
     // Invalidate any in-flight request and clear the lock so the new loadMore
@@ -261,48 +304,45 @@ export function useActivityFeed(
       poll: null,
       matrica: {},
       loading: true,
+      refreshing: false,
       error: null,
       reachedEnd: false,
     });
     loadMore();
   }, [filter, color, loadMore]);
 
-  // Periodically refresh the head and reconcile a bounded rotating slice of
-  // loaded IDs. The second request catches type upgrades/removals below the
-  // first page without downloading every historical page again.
+  useEffect(
+    () => () => {
+      reqGenRef.current++;
+      requestRef.current?.abort();
+      loadingRef.current = false;
+    },
+    []
+  );
+
+  // Refresh immediately on returning to the tab, then every visible minute.
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
-    let refreshing = false;
     const start = () => {
-      if (timer) return;
-      timer = setInterval(async () => {
-        if (refreshing) return;
-        refreshing = true;
-        try {
-          await refreshHead();
-          await revalidateLoaded();
-        } finally {
-          refreshing = false;
-        }
-      }, REFRESH_MS);
+      if (!timer) timer = setInterval(refreshHead, REFRESH_MS);
     };
     const stop = () => {
-      if (timer) {
-        clearInterval(timer);
-        timer = null;
-      }
+      if (timer) clearInterval(timer);
+      timer = null;
     };
     const onVis = () => {
-      if (document.visibilityState === 'visible') start();
-      else stop();
+      if (document.visibilityState === 'visible') {
+        start();
+        void refreshHead();
+      } else stop();
     };
-    onVis();
+    if (document.visibilityState === 'visible') start();
     document.addEventListener('visibilitychange', onVis);
     return () => {
       stop();
       document.removeEventListener('visibilitychange', onVis);
     };
-  }, [refreshHead, revalidateLoaded]);
+  }, [refreshHead]);
 
   return { ...state, loadMore };
 }
