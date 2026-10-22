@@ -3,7 +3,6 @@ import 'server-only';
 import {
   createCipheriv,
   createDecipheriv,
-  createHash,
   createHmac,
   randomBytes,
   timingSafeEqual,
@@ -17,6 +16,14 @@ export const ORDNET_SESSION_COOKIE_NAME = 'omb_ordnet_session';
 export const BUYER_SESSION_MAX_AGE_SEC = 180 * 24 * 60 * 60;
 export const BUYER_NONCE_MAX_AGE_SEC = 10 * 60;
 export const ORDNET_SESSION_MAX_AGE_SEC = 60 * 60;
+
+type SignedPurpose = 'buyer-nonce' | 'buyer-session';
+type CookiePurpose = SignedPurpose | 'ordnet-session';
+
+// Challenge cookies are public, pre-authentication data. Keep each cookie
+// purpose in both its authenticated payload and its derived key. Deliberately
+// reject legacy cookies: some may be sessions minted from a substituted nonce.
+const COOKIE_KEY_DOMAIN = 'omb-wallet-cookie:v2:';
 
 export type BuyerSession = {
   v: 1;
@@ -72,13 +79,13 @@ export function createBuyerNonce(
   };
   return {
     nonce,
-    cookieValue: signPayload(nonce),
+    cookieValue: signPayload(nonce, 'buyer-nonce'),
     message: signInMessage(nonce.nonce),
   };
 }
 
 export function parseBuyerNonce(raw: string | undefined | null): BuyerNonce | null {
-  const payload = parseSignedJson(raw);
+  const payload = parseSignedJson(raw, 'buyer-nonce');
   if (!payload || payload.v !== 1 || typeof payload.nonce !== 'string') return null;
   if (typeof payload.ord_addr !== 'string' || payload.ord_addr.length === 0) return null;
   if (payload.pay_addr != null && typeof payload.pay_addr !== 'string') return null;
@@ -98,15 +105,18 @@ export function mintBuyerSession(
     issued_at?: number;
   }
 ): string | null {
-  return signPayload({
-    v: 1,
-    ...session,
-    issued_at: session.issued_at ?? Math.floor(Date.now() / 1000),
-  });
+  return signPayload(
+    {
+      v: 1,
+      ...session,
+      issued_at: session.issued_at ?? Math.floor(Date.now() / 1000),
+    },
+    'buyer-session'
+  );
 }
 
 export function parseBuyerSession(raw: string | undefined | null): BuyerSession | null {
-  const payload = parseSignedJson(raw);
+  const payload = parseSignedJson(raw, 'buyer-session');
   if (!payload || payload.v !== 1) return null;
   if (typeof payload.ord_addr !== 'string' || payload.ord_addr.length === 0) return null;
   if (payload.pay_addr != null && typeof payload.pay_addr !== 'string') return null;
@@ -180,17 +190,20 @@ export function verifyBuyerSignature(args: {
   }
 }
 
-function signPayload(payload: unknown): string | null {
-  const secret = getSecret();
+function signPayload(payload: Record<string, unknown>, purpose: SignedPurpose): string | null {
+  const secret = getPurposeKey(purpose);
   if (!secret) return null;
-  const payloadB = Buffer.from(JSON.stringify(payload), 'utf8');
+  const payloadB = Buffer.from(JSON.stringify({ ...payload, purpose }), 'utf8');
   const sig = createHmac('sha256', secret).update(payloadB).digest();
   return `${b64uEncode(payloadB)}.${b64uEncode(sig)}`;
 }
 
-function parseSignedJson(raw: string | undefined | null): Record<string, unknown> | null {
+function parseSignedJson(
+  raw: string | undefined | null,
+  purpose: SignedPurpose
+): Record<string, unknown> | null {
   if (!raw) return null;
-  const secret = getSecret();
+  const secret = getPurposeKey(purpose);
   if (!secret) return null;
   const parts = raw.split('.');
   if (parts.length !== 2) return null;
@@ -201,19 +214,23 @@ function parseSignedJson(raw: string | undefined | null): Record<string, unknown
   if (sigB.length !== expected.length || !timingSafeEqual(sigB, expected)) return null;
   try {
     const parsed = JSON.parse(payloadB.toString('utf8'));
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+    return parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      parsed.purpose === purpose
+      ? (parsed as Record<string, unknown>)
+      : null;
   } catch {
     return null;
   }
 }
 
-function encryptPayload(payload: unknown): string | null {
-  const secret = getSecret();
-  if (!secret) return null;
-  const key = createHash('sha256').update(secret).digest();
+function encryptPayload(payload: Record<string, unknown>): string | null {
+  const key = getPurposeKey('ordnet-session');
+  if (!key) return null;
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', key, iv);
-  const plaintext = Buffer.from(JSON.stringify(payload), 'utf8');
+  const plaintext = Buffer.from(JSON.stringify({ ...payload, purpose: 'ordnet-session' }), 'utf8');
   const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
   const tag = cipher.getAuthTag();
   return `enc.${b64uEncode(iv)}.${b64uEncode(tag)}.${b64uEncode(encrypted)}`;
@@ -221,8 +238,8 @@ function encryptPayload(payload: unknown): string | null {
 
 function parseEncryptedJson(raw: string | undefined | null): Record<string, unknown> | null {
   if (!raw) return null;
-  const secret = getSecret();
-  if (!secret) return null;
+  const key = getPurposeKey('ordnet-session');
+  if (!key) return null;
   const parts = raw.split('.');
   if (parts.length !== 4 || parts[0] !== 'enc') return null;
   const iv = b64uDecode(parts[1]);
@@ -230,21 +247,25 @@ function parseEncryptedJson(raw: string | undefined | null): Record<string, unkn
   const encrypted = b64uDecode(parts[3]);
   if (!iv || !tag || !encrypted) return null;
   try {
-    const key = createHash('sha256').update(secret).digest();
     const decipher = createDecipheriv('aes-256-gcm', key, iv);
     decipher.setAuthTag(tag);
     const plaintext = Buffer.concat([decipher.update(encrypted), decipher.final()]);
     const parsed = JSON.parse(plaintext.toString('utf8'));
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+    return parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      parsed.purpose === 'ordnet-session'
+      ? (parsed as Record<string, unknown>)
+      : null;
   } catch {
     return null;
   }
 }
 
-function getSecret(): Buffer | null {
+function getPurposeKey(purpose: CookiePurpose): Buffer | null {
   const secret = rawSecret();
   if (!secret) return null;
-  return Buffer.from(secret, 'utf8');
+  return createHmac('sha256', secret).update(`${COOKIE_KEY_DOMAIN}${purpose}`).digest();
 }
 
 function rawSecret(): string | null {
