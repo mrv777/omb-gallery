@@ -27,6 +27,7 @@ import {
   type EvidenceItem,
 } from './cluster';
 import { log } from './log';
+import { DISTRIBUTION_WALLETS } from './walletLabels';
 
 const STREAM = 'cluster';
 const COLLECTION = 'omb';
@@ -142,7 +143,7 @@ function stmts() {
 
 function loadBlacklist(): Set<string> {
   const s = stmts();
-  const out = new Set<string>(MINT_WALLET_ADDRS);
+  const out = new Set<string>(DISTRIBUTION_WALLETS);
   for (const r of s.selectBlacklist.all() as Array<{ address: string }>) {
     out.add(r.address);
   }
@@ -150,14 +151,14 @@ function loadBlacklist(): Set<string> {
 }
 
 /**
- * Hard blacklist for the v2 recompute: mint wallets + non-auto reasons
+ * Hard blacklist for the v2 recompute: distribution wallets + non-auto reasons
  * only. We deliberately exclude `auto-high-degree` rows because those
  * ARE the multi-source receivers we want to classify as personal vs
  * not — using the soft blacklist would zero out the MSR set every
  * recompute (since it self-references the previous run's output).
  */
 function loadHardBlacklist(): Set<string> {
-  const out = new Set<string>(MINT_WALLET_ADDRS);
+  const out = new Set<string>(DISTRIBUTION_WALLETS);
   const rows = getDb()
     .prepare(`SELECT address FROM cluster_blacklist WHERE reason != 'auto-high-degree'`)
     .all() as Array<{ address: string }>;
@@ -1013,7 +1014,13 @@ export function recomputeClusterAnchors(): {
     .all(IDENTITY_FOLD_THRESHOLD) as Array<{ addr_a: string; addr_b: string }>;
 
   const uf = new UnionFind();
-  for (const e of edges) uf.union(e.addr_a, e.addr_b);
+  const distributionWallets = new Set(DISTRIBUTION_WALLETS);
+  for (const e of edges) {
+    // Guard both evidence sources, including eligible rows persisted before
+    // distribution wallets were excluded. Never bridge recipients via a mint.
+    if (distributionWallets.has(e.addr_a) || distributionWallets.has(e.addr_b)) continue;
+    uf.union(e.addr_a, e.addr_b);
+  }
   const components = uf.groups();
 
   // Bulk-look up Matrica linkage for every node in any component, so we

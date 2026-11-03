@@ -86,6 +86,13 @@ const MINT_WALLET_ADDRS = [
   'bc1p4a29gzwlear4csc9sz6ll97j9yl7877tasy75evq8wm6r3admtqq3m72k0',
   'bc1q86ssqhk04chjah6kkuqw3fv5wjy7v2nflyg50t',
 ];
+// Mirror src/lib/walletLabels.ts DISTRIBUTION_WALLETS. CLI runs without
+// the Next.js/TypeScript resolver, so keep the confirmed addresses in sync.
+const DISTRIBUTION_WALLETS = [
+  ...MINT_WALLET_ADDRS,
+  'bc1qc3vmv3r5l9dlj8tx07yqsdgt4s2dc6f6tucad0', // Bravocados Dispensary
+  'bc1pjzt0tk4f8s6gu5kl2lgtq3ruymce09kmxjw6637ceqdldrwumt7shxwl4u', // Bravocados Reserve
+];
 
 const DB_PATH = process.env.OMB_DB_PATH ?? path.resolve(__dirname, '..', 'tmp', 'dev.db');
 const HOME = process.env.HOME || process.env.USERPROFILE || path.resolve(__dirname, '..', 'tmp');
@@ -318,7 +325,7 @@ async function main() {
     .all(...eligibleTypes);
   console.log(`[cluster-backfill] CIH-eligible distinct txids: ${txidRows.length}`);
 
-  const seedBlacklist = new Set(MINT_WALLET_ADDRS);
+  const seedBlacklist = new Set(DISTRIBUTION_WALLETS);
   for (const r of db.prepare(`SELECT address FROM cluster_blacklist`).all()) {
     seedBlacklist.add(r.address);
   }
@@ -644,7 +651,7 @@ function runV2Recompute(db) {
   // HARD blacklist only — exclude auto-high-degree (those ARE the MSRs
   // we want to evaluate this run). Mirror of loadHardBlacklist in
   // src/lib/clusterStore.ts.
-  const blacklist = new Set(MINT_WALLET_ADDRS);
+  const blacklist = new Set(DISTRIBUTION_WALLETS);
   for (const r of db
     .prepare(`SELECT address FROM cluster_blacklist WHERE reason != 'auto-high-degree'`)
     .all()) {
@@ -1162,7 +1169,11 @@ function recomputeAnchorsForBackfill(db) {
     const rb = findRoot(b);
     if (ra !== rb) parent.set(ra, rb);
   };
-  for (const e of edges) unionAB(e.addr_a, e.addr_b);
+  const distributionWallets = new Set(DISTRIBUTION_WALLETS);
+  for (const e of edges) {
+    if (distributionWallets.has(e.addr_a) || distributionWallets.has(e.addr_b)) continue;
+    unionAB(e.addr_a, e.addr_b);
+  }
 
   const components = new Map();
   for (const node of parent.keys()) {

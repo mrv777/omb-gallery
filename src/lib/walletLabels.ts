@@ -32,6 +32,19 @@ export const BRAVOCADO_DISTRIBUTION_WALLETS: readonly string[] = [
   BRAVOCADO_RESERVE_ADDRESS,
 ];
 
+// Distribution -> recipient -> quick listing is not evidence of shared
+// identity. Exclude these endpoints from every inferred merge, including
+// rebuilds from old edges. This does not change authoritative Matrica links.
+// Keep scripts/backfill-cluster.js DISTRIBUTION_WALLETS in sync.
+export const DISTRIBUTION_WALLETS: readonly string[] = [
+  GREEN_MINT_ADDRESS,
+  BLUE_MINT_ADDRESS,
+  RED_MINT_ADDRESS,
+  ORANGE_MINT_ADDRESS,
+  BLACK_MINT_ADDRESS,
+  ...BRAVOCADO_DISTRIBUTION_WALLETS,
+];
+
 export type WalletLabel = {
   name: string;
   /** Short qualifier shown beneath / beside the name in some surfaces. */

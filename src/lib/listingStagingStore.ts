@@ -4,7 +4,7 @@ import { getDb } from './db';
 import { recomputeClusterAnchors } from './clusterStore';
 import { isTradeShapedPmxEdge } from './cluster';
 import { log } from './log';
-import { EXCLUDED_OWNERS } from './walletLabels';
+import { DISTRIBUTION_WALLETS, EXCLUDED_OWNERS } from './walletLabels';
 
 const STREAM = 'listing_staging';
 const COLLECTION = 'omb';
@@ -619,7 +619,7 @@ function loadClusterEdges(): Map<string, ClusterEdgeSignals> {
 }
 
 function loadSuppressedWallets(): Set<string> {
-  const out = new Set<string>(EXCLUDED_OWNERS);
+  const out = new Set<string>([...EXCLUDED_OWNERS, ...DISTRIBUTION_WALLETS]);
   const rows = getDb()
     .prepare(`SELECT address FROM cluster_blacklist WHERE reason != 'auto-high-degree'`)
     .all() as Array<{

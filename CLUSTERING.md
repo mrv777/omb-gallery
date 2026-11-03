@@ -105,7 +105,9 @@ An edge is eligible for identity fold only when all of these hold:
 - previous event is `transferred`, `marketplace IS NULL`
 - previous `new_owner` equals the seller, and previous `old_owner`
   differs from the seller
-- neither endpoint is blacklisted or manually excluded
+- neither endpoint is blacklisted or manually excluded, including every known
+  distribution wallet in `walletLabels.ts` `DISTRIBUTION_WALLETS` (the five
+  OMB mint wallets plus Bravocados Dispensary and Reserve)
 - endpoints do not map to two different real Matrica profiles
 - the pair is not already known-same by Matrica or an existing
   cluster edge at `>=9500`
@@ -124,6 +126,18 @@ is site-wide after the daily recompute. The holder page shows the
 source -> seller evidence trail; activity rows and leaderboards do not
 show an explicit staging badge in v1, though their grouping can change
 through `cluster_anchors`.
+
+Distribution wallets are also excluded from incremental/global cluster signals
+and from the final anchor rebuild, including the host-side backfill script.
+The final guard ignores stale eligible edges so an old distribution link cannot
+recreate a merge or bridge unrelated recipients. Distribution labels remain on
+their own profiles; authoritative Matrica linkage is unchanged.
+
+When deploying this exclusion, rebuild `cluster_anchors` with the cluster
+recompute before validating holder counts and redirects, and run the
+listing-staging recompute to refresh its audit/suppression rows. Existing
+materialized anchors remain until rebuilt. No inscription ownership or event
+history needs changing.
 
 ## Confidence formula
 
