@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import sharedAnchorFixture from './chain-fixtures/shared-ord-net-anchor.json';
 import {
   BRAVOCADO_DISPENSARY_ADDRESS as DISPENSARY,
   BRAVOCADO_RESERVE_ADDRESS as RESERVE,
@@ -41,6 +42,137 @@ beforeEach(async () => {
   db.prepare(
     'INSERT INTO wallet_links (wallet_addr, matrica_user_id, checked_at) VALUES (?, ?, 0)'
   ).run(RECIPIENT, USER);
+});
+
+describe('shared ord.net anchor is not a holder identity', () => {
+  const anchor = sharedAnchorFixture.anchorAddress;
+  const holder = sharedAnchorFixture.holderAddress;
+  const userId = sharedAnchorFixture.matricaUserId;
+
+  beforeEach(() => {
+    const db = dbModule.getDb();
+    db.prepare('INSERT INTO matrica_users (user_id, username, updated_at) VALUES (?, ?, 0)').run(
+      userId,
+      sharedAnchorFixture.username
+    );
+    db.prepare(
+      'INSERT INTO wallet_links (wallet_addr, matrica_user_id, checked_at) VALUES (?, ?, 0)'
+    ).run(holder, userId);
+    db.prepare(
+      `UPDATE inscriptions SET current_owner = ?, effective_owner = ?
+      WHERE inscription_number = 11209376`
+    ).run(holder, holder);
+  });
+
+  function seedStoredMerge() {
+    insertClusterEdge(holder, anchor);
+    dbModule.getDb().prepare(`UPDATE wallet_cluster_edges SET cih_count = 8`).run();
+    for (const wallet of [holder, anchor]) {
+      dbModule
+        .getDb()
+        .prepare(
+          `INSERT INTO cluster_anchors
+        (wallet_addr, anchor_id, matrica_user_id, cluster_size) VALUES (?, ?, ?, 2)`
+        )
+        .run(wallet, userId, userId);
+    }
+  }
+
+  it('replays the eight confirmed delivery transactions without inferring control of the anchor', async () => {
+    const db = dbModule.getDb();
+    const txs = sharedAnchorFixture.txs as Record<
+      string,
+      (typeof sharedAnchorFixture.txs)[keyof typeof sharedAnchorFixture.txs]
+    >;
+    for (const event of sharedAnchorFixture.events) {
+      db.prepare(
+        `INSERT INTO events (inscription_id, inscription_number, txid,
+        event_type, old_owner, new_owner, block_timestamp, created_at)
+        VALUES (?, ?, ?, 'transferred', ?, ?, ?, 0)`
+      ).run(
+        event.inscription_id,
+        event.inscription_number,
+        event.txid,
+        event.old_owner,
+        event.new_owner,
+        txs[event.txid].blocktime
+      );
+    }
+    db.exec(`UPDATE poll_state SET last_cursor = '0' WHERE stream = 'cluster'`);
+    rpc.get.mockImplementation(async (txid: string) => txs[txid]);
+    expect(await clusters.runClusterTick()).toMatchObject({ scanned: 8, edges_touched: 0 });
+    expect(rpc.get).toHaveBeenCalledTimes(8);
+    expect(db.prepare('SELECT * FROM wallet_cluster_edges').all()).toEqual([]);
+    expect(holders.resolveAggregatedWallets(holder).wallets).toEqual([holder]);
+  });
+
+  it('hides the stored eight-transaction inference from profiles and link suggestions before and after rebuilding', () => {
+    seedStoredMerge();
+    // A deployment must not surface the stale service association while its
+    // materialized groups are waiting for the explicit rebuild.
+    expect(holders.resolveAggregatedWallets(holder).wallets).toEqual([holder]);
+    expect(holders.resolveCanonicalHolderAddress(anchor)).toBeNull();
+    expect(clusters.getInferredLinksForAddress(holder, 9900)).toEqual([]);
+    expect(clusters.getInferredLinksForAddress(anchor, 9900)).toEqual([]);
+    expect(clusters.getLikelyLinkedForWallets([holder])).toEqual([]);
+    expect(clusters.getLikelyLinkedForWallets([anchor])).toEqual([]);
+    expect(clusters.getClusterForAddress(holder, 9900)).toEqual({ members: [holder], edges: 0 });
+    expect(clusters.getClusterForAddress(anchor, 9900)).toEqual({ members: [anchor], edges: 0 });
+    insertClusterEdge('ordinary-a', 'ordinary-b');
+    dbModule
+      .getDb()
+      .prepare(
+        `UPDATE inscriptions SET effective_owner = 'ordinary-b'
+      WHERE inscription_number = 103092`
+      )
+      .run();
+    expect(clusters.recomputeClusterAnchors()).toMatchObject({ components: 1, members: 2 });
+    expect(holders.resolveAggregatedWallets(holder).wallets).toEqual([holder]);
+    expect(holders.resolveCanonicalHolderAddress(anchor)).toBeNull();
+    expect(clusters.getLikelyLinkedForWallets(['ordinary-a']).map(r => r.peer)).toEqual([
+      'ordinary-b',
+    ]);
+    expect(
+      dbModule.getStmts().getInscriptionsByOwner.all({ owner: holder, collection: 'omb' })
+    ).toHaveLength(1);
+    // Raw evidence stays available for audits; only identity inference is suppressed.
+    expect(
+      dbModule
+        .getDb()
+        .prepare('SELECT cih_count FROM wallet_cluster_edges WHERE addr_a = ? OR addr_b = ?')
+        .get(anchor, anchor)
+    ).toEqual({ cih_count: 8 });
+  });
+
+  it('also excludes shared infrastructure from staging evidence and stale staging suggestions', () => {
+    seedQuickListings(anchor);
+    expect(staging.runListingStagingRecompute()).toMatchObject({
+      eligible_edges: 0,
+      suppressed_blacklist: 1,
+    });
+    dbModule.getDb().exec(`UPDATE wallet_staging_edges SET eligible_for_fold = 1,
+      suppression_reason = NULL`);
+    expect(staging.getListingStagingLinksForWallets([RECIPIENT])).toEqual([]);
+    expect(staging.getListingStagingLinksForWallets([anchor])).toEqual([]);
+  });
+
+  it('keeps the standalone backfill from restoring the shared anchor merge', () => {
+    seedStoredMerge();
+    insertClusterEdge('ordinary-a', 'ordinary-b');
+    execFileSync(
+      process.execPath,
+      [path.resolve('scripts/backfill-cluster.js'), `--cache-dir=${dir}`],
+      { env: { ...process.env }, stdio: 'pipe' }
+    );
+    expect(
+      dbModule.getDb().prepare('SELECT * FROM cluster_anchors WHERE wallet_addr = ?').get(anchor)
+    ).toBeUndefined();
+    expect(holders.resolveAggregatedWallets(holder).wallets).toEqual([holder]);
+    expect(clusters.getClusterMembersForAddress('ordinary-a')).toEqual([
+      'ordinary-a',
+      'ordinary-b',
+    ]);
+  });
 });
 
 afterEach(() => {

@@ -27,10 +27,11 @@ import {
   type EvidenceItem,
 } from './cluster';
 import { log } from './log';
-import { DISTRIBUTION_WALLETS } from './walletLabels';
+import { INFERRED_IDENTITY_EXCLUDED_WALLETS } from './walletLabels';
 
 const STREAM = 'cluster';
 const COLLECTION = 'omb';
+const excludedIdentityWallets = new Set(INFERRED_IDENTITY_EXCLUDED_WALLETS);
 
 // Per-tick budget: events to walk for CIH (we fetch a raw tx per event).
 // Sized to keep wallclock under 30s at prod RPC latency. The cluster mode
@@ -143,7 +144,7 @@ function stmts() {
 
 function loadBlacklist(): Set<string> {
   const s = stmts();
-  const out = new Set<string>(DISTRIBUTION_WALLETS);
+  const out = new Set<string>(INFERRED_IDENTITY_EXCLUDED_WALLETS);
   for (const r of s.selectBlacklist.all() as Array<{ address: string }>) {
     out.add(r.address);
   }
@@ -151,14 +152,14 @@ function loadBlacklist(): Set<string> {
 }
 
 /**
- * Hard blacklist for the v2 recompute: distribution wallets + non-auto reasons
+ * Hard blacklist for the v2 recompute: distribution/service wallets + non-auto reasons
  * only. We deliberately exclude `auto-high-degree` rows because those
  * ARE the multi-source receivers we want to classify as personal vs
  * not — using the soft blacklist would zero out the MSR set every
  * recompute (since it self-references the previous run's output).
  */
 function loadHardBlacklist(): Set<string> {
-  const out = new Set<string>(DISTRIBUTION_WALLETS);
+  const out = new Set<string>(INFERRED_IDENTITY_EXCLUDED_WALLETS);
   const rows = getDb()
     .prepare(`SELECT address FROM cluster_blacklist WHERE reason != 'auto-high-degree'`)
     .all() as Array<{ address: string }>;
@@ -1014,11 +1015,10 @@ export function recomputeClusterAnchors(): {
     .all(IDENTITY_FOLD_THRESHOLD) as Array<{ addr_a: string; addr_b: string }>;
 
   const uf = new UnionFind();
-  const distributionWallets = new Set(DISTRIBUTION_WALLETS);
   for (const e of edges) {
     // Guard both evidence sources, including eligible rows persisted before
-    // distribution wallets were excluded. Never bridge recipients via a mint.
-    if (distributionWallets.has(e.addr_a) || distributionWallets.has(e.addr_b)) continue;
+    // distribution/service wallets were excluded. Never bridge their users.
+    if (excludedIdentityWallets.has(e.addr_a) || excludedIdentityWallets.has(e.addr_b)) continue;
     uf.union(e.addr_a, e.addr_b);
   }
   const components = uf.groups();
@@ -1099,6 +1099,7 @@ export function getClusterAnchorForAddress(address: string): {
   matrica_user_id: string | null;
   cluster_size: number;
 } | null {
+  if (excludedIdentityWallets.has(address)) return null;
   const db = getDb();
   const row = db
     .prepare(
@@ -1127,7 +1128,7 @@ export function getClusterMembersForMatricaUser(userId: string): string[] {
         WHERE matrica_user_id = ? ORDER BY wallet_addr ASC`
     )
     .all(userId) as Array<{ wallet_addr: string }>;
-  return rows.map(r => r.wallet_addr);
+  return rows.map(r => r.wallet_addr).filter(w => !excludedIdentityWallets.has(w));
 }
 
 /**
@@ -1145,7 +1146,7 @@ export function getClusterMembersForAddress(address: string): string[] {
         WHERE anchor_id = ? ORDER BY wallet_addr ASC`
     )
     .all(anchor.anchor_id) as Array<{ wallet_addr: string }>;
-  const members = rows.map(r => r.wallet_addr);
+  const members = rows.map(r => r.wallet_addr).filter(w => !excludedIdentityWallets.has(w));
   // Hoist `address` to the front for caller convenience (page deep-links).
   if (!members.includes(address)) return [address, ...members];
   return [address, ...members.filter(m => m !== address)];
@@ -1187,6 +1188,7 @@ export function getInferredLinksForAddress(
   evidence: EvidenceItem[];
   last_seen_at: number;
 }> {
+  if (excludedIdentityWallets.has(addr)) return [];
   const db = getDb();
   const rows = db
     .prepare(
@@ -1216,6 +1218,7 @@ export function getInferredLinksForAddress(
   const msrSet = loadMsrSet();
   const out: ReturnType<typeof getInferredLinksForAddress> = [];
   for (const r of rows) {
+    if (excludedIdentityWallets.has(r.addr_a) || excludedIdentityWallets.has(r.addr_b)) continue;
     if (isCrossTraderEdge(r, msrSet)) continue;
     let evidence: EvidenceItem[] = [];
     try {
@@ -1247,6 +1250,7 @@ export function getClusterForAddress(
   minConfidence: number,
   maxNodes = 200
 ): { members: string[]; edges: number } {
+  if (excludedIdentityWallets.has(addr)) return { members: [addr], edges: 0 };
   const db = getDb();
   const selectNeighbors = db.prepare(
     `SELECT addr_a, addr_b
@@ -1263,8 +1267,9 @@ export function getClusterForAddress(
       addr_a: string;
       addr_b: string;
     }>;
-    edges += rows.length;
     for (const r of rows) {
+      if (excludedIdentityWallets.has(r.addr_a) || excludedIdentityWallets.has(r.addr_b)) continue;
+      edges++;
       const peer = r.addr_a === current ? r.addr_b : r.addr_a;
       if (!visited.has(peer)) {
         visited.add(peer);
@@ -1336,6 +1341,7 @@ export function getLikelyLinkedForWallets(
 
   const msrSet = loadMsrSet();
   for (const w of wallets) {
+    if (excludedIdentityWallets.has(w)) continue;
     const rows = select.all({ addr: w, min: minConfidence }) as Array<{
       addr_a: string;
       addr_b: string;
@@ -1350,6 +1356,7 @@ export function getLikelyLinkedForWallets(
       last_seen_at: number;
     }>;
     for (const r of rows) {
+      if (excludedIdentityWallets.has(r.addr_a) || excludedIdentityWallets.has(r.addr_b)) continue;
       if (isCrossTraderEdge(r, msrSet)) continue;
       const peer = r.addr_a === w ? r.addr_b : r.addr_a;
       if (owned.has(peer)) continue;

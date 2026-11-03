@@ -105,9 +105,9 @@ An edge is eligible for identity fold only when all of these hold:
 - previous event is `transferred`, `marketplace IS NULL`
 - previous `new_owner` equals the seller, and previous `old_owner`
   differs from the seller
-- neither endpoint is blacklisted or manually excluded, including every known
-  distribution wallet in `walletLabels.ts` `DISTRIBUTION_WALLETS` (the five
-  OMB mint wallets plus Bravocados Dispensary and Reserve)
+- neither endpoint is blacklisted or manually excluded, including every wallet
+  in `walletLabels.ts` `INFERRED_IDENTITY_EXCLUDED_WALLETS` (the five OMB mint
+  wallets, Bravocados Dispensary and Reserve, and the shared ord.net anchor)
 - endpoints do not map to two different real Matrica profiles
 - the pair is not already known-same by Matrica or an existing
   cluster edge at `>=9500`
@@ -127,11 +127,25 @@ source -> seller evidence trail; activity rows and leaderboards do not
 show an explicit staging badge in v1, though their grouping can change
 through `cluster_anchors`.
 
-Distribution wallets are also excluded from incremental/global cluster signals
-and from the final anchor rebuild, including the host-side backfill script.
-The final guard ignores stale eligible edges so an old distribution link cannot
-recreate a merge or bridge unrelated recipients. Distribution labels remain on
-their own profiles; authoritative Matrica linkage is unchanged.
+Distribution and confirmed service wallets are excluded from incremental/global
+cluster signals and from the final anchor rebuild, including the host-side
+backfill script. The final guard ignores stale eligible edges so an old
+distribution/service link cannot recreate a merge or bridge unrelated users.
+Distribution labels remain on
+their own profiles; authoritative Matrica linkage is unchanged. Readers also
+exclude these endpoints from inferred members, redirects, link suggestions,
+and graph traversal, so retained historical evidence cannot reappear as a
+"likely linked" wallet after a rebuild.
+
+The shared ord.net anchor is
+`bc1q0h8mujmkue3yvfwdg5dhqvgcpmmse050anch0r`. A 2026-11-03 audit confirmed
+eight delivery legs incorrectly linked it to `thepresident` via common inputs:
+each combined the holder's inscription with a shared 330-sat anchor input and
+returned 309 sats to the anchor. Independent transactions used the same address
+for other holders, and full ord.net settlements regenerate its anchor outputs.
+The anchor had no tracked holdings or inscription events; the false association
+affected the wallet list and canonical redirect. Regression fixtures preserve
+all eight transactions in `tests/chain-fixtures/shared-ord-net-anchor.json`.
 
 When deploying this exclusion, rebuild `cluster_anchors` with the cluster
 recompute before validating holder counts and redirects, and run the

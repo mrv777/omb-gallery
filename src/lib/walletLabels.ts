@@ -35,7 +35,6 @@ export const BRAVOCADO_DISTRIBUTION_WALLETS: readonly string[] = [
 // Distribution -> recipient -> quick listing is not evidence of shared
 // identity. Exclude these endpoints from every inferred merge, including
 // rebuilds from old edges. This does not change authoritative Matrica links.
-// Keep scripts/backfill-cluster.js DISTRIBUTION_WALLETS in sync.
 export const DISTRIBUTION_WALLETS: readonly string[] = [
   GREEN_MINT_ADDRESS,
   BLUE_MINT_ADDRESS,
@@ -43,6 +42,19 @@ export const DISTRIBUTION_WALLETS: readonly string[] = [
   ORANGE_MINT_ADDRESS,
   BLACK_MINT_ADDRESS,
   ...BRAVOCADO_DISTRIBUTION_WALLETS,
+];
+
+// Shared ord.net transaction infrastructure. Verified in delivery legs
+// (330-sat input -> 309-sat output) and full settlements across different
+// holders. Co-signing with this address does not establish a personal identity.
+export const ORDNET_SHARED_ANCHOR_ADDRESS = 'bc1q0h8mujmkue3yvfwdg5dhqvgcpmmse050anch0r';
+
+// Keep scripts/backfill-cluster.js INFERRED_IDENTITY_EXCLUDED_WALLETS in sync.
+// This is separate from EXCLUDED_OWNERS: service addresses must never enter
+// inferred identity groups, regardless of whether they hold tracked assets.
+export const INFERRED_IDENTITY_EXCLUDED_WALLETS: readonly string[] = [
+  ...DISTRIBUTION_WALLETS,
+  ORDNET_SHARED_ANCHOR_ADDRESS,
 ];
 
 export type WalletLabel = {

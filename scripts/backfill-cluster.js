@@ -86,12 +86,13 @@ const MINT_WALLET_ADDRS = [
   'bc1p4a29gzwlear4csc9sz6ll97j9yl7877tasy75evq8wm6r3admtqq3m72k0',
   'bc1q86ssqhk04chjah6kkuqw3fv5wjy7v2nflyg50t',
 ];
-// Mirror src/lib/walletLabels.ts DISTRIBUTION_WALLETS. CLI runs without
+// Mirror src/lib/walletLabels.ts INFERRED_IDENTITY_EXCLUDED_WALLETS. CLI runs without
 // the Next.js/TypeScript resolver, so keep the confirmed addresses in sync.
-const DISTRIBUTION_WALLETS = [
+const INFERRED_IDENTITY_EXCLUDED_WALLETS = [
   ...MINT_WALLET_ADDRS,
   'bc1qc3vmv3r5l9dlj8tx07yqsdgt4s2dc6f6tucad0', // Bravocados Dispensary
   'bc1pjzt0tk4f8s6gu5kl2lgtq3ruymce09kmxjw6637ceqdldrwumt7shxwl4u', // Bravocados Reserve
+  'bc1q0h8mujmkue3yvfwdg5dhqvgcpmmse050anch0r', // Shared ord.net anchor
 ];
 
 const DB_PATH = process.env.OMB_DB_PATH ?? path.resolve(__dirname, '..', 'tmp', 'dev.db');
@@ -325,7 +326,7 @@ async function main() {
     .all(...eligibleTypes);
   console.log(`[cluster-backfill] CIH-eligible distinct txids: ${txidRows.length}`);
 
-  const seedBlacklist = new Set(DISTRIBUTION_WALLETS);
+  const seedBlacklist = new Set(INFERRED_IDENTITY_EXCLUDED_WALLETS);
   for (const r of db.prepare(`SELECT address FROM cluster_blacklist`).all()) {
     seedBlacklist.add(r.address);
   }
@@ -651,7 +652,7 @@ function runV2Recompute(db) {
   // HARD blacklist only — exclude auto-high-degree (those ARE the MSRs
   // we want to evaluate this run). Mirror of loadHardBlacklist in
   // src/lib/clusterStore.ts.
-  const blacklist = new Set(DISTRIBUTION_WALLETS);
+  const blacklist = new Set(INFERRED_IDENTITY_EXCLUDED_WALLETS);
   for (const r of db
     .prepare(`SELECT address FROM cluster_blacklist WHERE reason != 'auto-high-degree'`)
     .all()) {
@@ -1169,9 +1170,9 @@ function recomputeAnchorsForBackfill(db) {
     const rb = findRoot(b);
     if (ra !== rb) parent.set(ra, rb);
   };
-  const distributionWallets = new Set(DISTRIBUTION_WALLETS);
+  const excludedIdentityWallets = new Set(INFERRED_IDENTITY_EXCLUDED_WALLETS);
   for (const e of edges) {
-    if (distributionWallets.has(e.addr_a) || distributionWallets.has(e.addr_b)) continue;
+    if (excludedIdentityWallets.has(e.addr_a) || excludedIdentityWallets.has(e.addr_b)) continue;
     unionAB(e.addr_a, e.addr_b);
   }
 

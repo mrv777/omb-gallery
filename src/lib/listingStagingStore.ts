@@ -4,7 +4,7 @@ import { getDb } from './db';
 import { recomputeClusterAnchors } from './clusterStore';
 import { isTradeShapedPmxEdge } from './cluster';
 import { log } from './log';
-import { DISTRIBUTION_WALLETS, EXCLUDED_OWNERS } from './walletLabels';
+import { INFERRED_IDENTITY_EXCLUDED_WALLETS, EXCLUDED_OWNERS } from './walletLabels';
 
 const STREAM = 'listing_staging';
 const COLLECTION = 'omb';
@@ -619,7 +619,7 @@ function loadClusterEdges(): Map<string, ClusterEdgeSignals> {
 }
 
 function loadSuppressedWallets(): Set<string> {
-  const out = new Set<string>([...EXCLUDED_OWNERS, ...DISTRIBUTION_WALLETS]);
+  const out = new Set<string>([...EXCLUDED_OWNERS, ...INFERRED_IDENTITY_EXCLUDED_WALLETS]);
   const rows = getDb()
     .prepare(`SELECT address FROM cluster_blacklist WHERE reason != 'auto-high-degree'`)
     .all() as Array<{
@@ -652,6 +652,8 @@ export function getListingStagingLinksForWallets(
       LEFT JOIN wallet_links twl ON twl.wallet_addr = e.seller_wallet
       LEFT JOIN matrica_users tmu ON tmu.user_id = twl.matrica_user_id
       WHERE e.eligible_for_fold = 1
+        AND e.source_wallet NOT IN (SELECT value FROM json_each(@excluded_json))
+        AND e.seller_wallet NOT IN (SELECT value FROM json_each(@excluded_json))
         AND (
           e.source_wallet IN (SELECT value FROM json_each(@wallets_json))
           OR e.seller_wallet IN (SELECT value FROM json_each(@wallets_json))
@@ -664,7 +666,11 @@ export function getListingStagingLinksForWallets(
       LIMIT @limit
       `
     )
-    .all({ wallets_json: JSON.stringify(wallets), limit }) as Array<
+    .all({
+      wallets_json: JSON.stringify(wallets),
+      excluded_json: JSON.stringify(INFERRED_IDENTITY_EXCLUDED_WALLETS),
+      limit,
+    }) as Array<
     Omit<ListingStagingLinkRow, 'evidence' | 'source_matrica' | 'seller_matrica'> & {
       evidence_json: string;
       source_user_id: string | null;
