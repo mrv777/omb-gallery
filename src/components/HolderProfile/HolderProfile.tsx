@@ -50,14 +50,14 @@ type Props = {
    * bag-size-over-time chart. Internal transfers (between two of the user's
    * own wallets) are pre-filtered out by the page. */
   colorHighlights: HolderColorHighlight[];
-  /** Earned role IDs for this Matrica user (priority-ordered). Empty for
-   * unlinked wallets — badges only render for Matrica-linked identities. */
+  /** Earned role IDs for this public identity (priority-ordered). */
   roleIds: string[];
   /** Aggregated per-color holdings across all linked wallets — drives the
    * ladder progress text. Zero counts for unlinked wallets. */
   colorCounts: ColorCounts;
-  /** Whether the holder is Matrica-linked. Gates the badges + ladder UI. */
-  isMatricaUser: boolean;
+  /** Whether the holder has a public identity. Gates badges and ladder. */
+  isLinkedUser: boolean;
+  identityProvider: 'matrica' | 'ordnet' | null;
   /** On-chain-inferred peers not already in `wallets`. Empty when the
    * cluster pipeline hasn't run or no edges meet the public threshold. */
   likelyLinked: LikelyLinkedRow[];
@@ -93,7 +93,8 @@ export default function HolderProfile({
   colorHighlights,
   roleIds,
   colorCounts,
-  isMatricaUser,
+  isLinkedUser,
+  identityProvider,
   likelyLinked,
   listingStagingLinks,
   inferredWallets,
@@ -118,7 +119,7 @@ export default function HolderProfile({
   const ombHidden = ombHoldings.length - ombShown.length;
   const bravoShown = bravoHoldings.slice(0, BRAVO_TILE_CAP);
   const bravoHidden = bravoHoldings.length - bravoShown.length;
-  const linked = !!manual || !!username;
+  const linked = !!manual || !!username || isLinkedUser;
   // Per-tile lookup: which OMBs sit in an inferred-only wallet, so the tile
   // can render the bone-dim dot. Skipped when no wallets were folded —
   // membership check is otherwise per-tile.
@@ -155,9 +156,17 @@ export default function HolderProfile({
                         manual ? 'text-accent-orange' : 'text-bone'
                       }`}
                     >
-                      {manual ? manual.name : username}
+                      {manual ? manual.name : (username ?? truncateAddr(address, 10, 8))}
                     </h1>
-                    {isMatricaUser && roleIds.length > 0 && (
+                    {identityProvider === 'ordnet' && (
+                      <span
+                        className="text-[9px] tracking-[0.1em] uppercase text-bone-dim border border-ink-2 px-1.5 py-0.5"
+                        title="Public profile shared by this wallet through ORD.NET. Discord verification is separate."
+                      >
+                        ord.net
+                      </span>
+                    )}
+                    {isLinkedUser && roleIds.length > 0 && (
                       <RoleBadges roleIds={roleIds} className="shrink-0" />
                     )}
                   </div>
@@ -194,7 +203,7 @@ export default function HolderProfile({
               inferredWallets={inferredWallets}
               stagingWallets={stagingWallets}
             />
-            {isMatricaUser && <RoleLadder earned={roleIds} counts={colorCounts} />}
+            {isLinkedUser && <RoleLadder earned={roleIds} counts={colorCounts} />}
           </>
         ) : (
           // ── Wallet-centric header (no Matrica profile). Today's layout.

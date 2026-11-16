@@ -66,7 +66,7 @@ export default function SearchResults({ q, results }: Props) {
       )}
 
       {results.users.length > 0 && (
-        <Section title="Matrica users">
+        <Section title="Profiles">
           <ul className="divide-y divide-ink-2 border border-ink-2 bg-ink-1">
             {results.users.map(u => (
               <UserRow key={u.user_id} item={u} />
@@ -284,7 +284,7 @@ function EmptyTips({ compact = false }: { compact?: boolean } = {}) {
           last few characters you remember
         </li>
         <li>
-          a Matrica username — e.g. <span className="text-bone">@alice</span>
+          a Matrica or ORD.NET username — e.g. <span className="text-bone">@alice</span>
         </li>
         <li>a transaction id — 64-char hex from any explorer</li>
       </ul>

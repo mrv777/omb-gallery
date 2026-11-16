@@ -4,7 +4,7 @@ import {
   getStmts,
   type EventRow,
   type HolderColorHighlightRow,
-  type WalletLinkRow,
+  type PublicWalletLinkRow,
 } from '@/lib/db';
 import {
   getClusterAnchorForAddress,
@@ -16,7 +16,7 @@ import {
  * Resolve the full set of wallets a profile aggregates over.
  *
  * Two layers fold into the wallet set:
- *   1. Matrica siblings — authoritative, always included when present.
+ *   1. Public identity siblings — Matrica or individually shared ORD.NET wallets.
  *   2. cluster_anchors members — on-chain inferred peers from high-confidence
  *      clustering or repeated listing-staging evidence. Folded in alongside
  *      Matrica siblings so OMB count, tiles, events, color spread, and
@@ -25,45 +25,61 @@ import {
  *      wallet's identity is preserved even if it sits in a heuristic
  *      component.
  *
- * `inferredCount` is the number of wallets added by cluster_anchors that
- * weren't already covered by Matrica — surfaced in the UI as a small
+ * `inferredWallets` lists wallets added by cluster_anchors that
+ * weren't already covered by an explicit identity link — surfaced in the UI as a small
  * "+N inferred" hint near the WALLETS list. Mirrors the same fan-out
  * used by /api/holder/[address]/events so SSR and pagination see the
  * same set.
  */
 export function resolveAggregatedWallets(address: string): {
   wallets: string[];
-  link: WalletLinkRow | undefined;
-  /** Subset of `wallets` that came from cluster_anchors and aren't Matrica
-   * siblings. Used to render the "+N inferred" hint and tag those rows
+  link: PublicWalletLinkRow | undefined;
+  /** Subset of `wallets` that came from cluster_anchors rather than explicit
+   * identity links. Used to render the "+N inferred" hint and tag those rows
    * in the wallets list. */
   inferredWallets: string[];
 } {
+  // Events pagination can arrive through an inferred sibling directly,
+  // without the page redirect. Resolve the same profile before fan-out.
+  const canonical = resolveCanonicalHolderAddress(address);
+  if (canonical) return resolveAggregatedWallets(canonical);
   const stmts = getStmts();
-  const link = stmts.getWalletLink.get({ wallet_addr: address }) as WalletLinkRow | undefined;
-  const userId = link?.matrica_user_id ?? null;
-  const matricaSet = new Set<string>([address]);
+  const link = stmts.getPublicWalletLink.get({ wallet_addr: address }) as
+    | PublicWalletLinkRow
+    | undefined;
+  const userId = link?.identity_id ?? null;
+  const explicitSet = new Set<string>([address]);
   if (userId) {
-    const siblings = stmts.getWalletsForUser.all({ user_id: userId }) as Array<{
+    const siblings = stmts.getPublicWalletsForUser.all({ user_id: userId }) as Array<{
       wallet_addr: string;
     }>;
-    for (const s of siblings) matricaSet.add(s.wallet_addr);
+    for (const s of siblings) explicitSet.add(s.wallet_addr);
   }
   // Cluster fold: union members reachable from the input address with the
   // full Matrica-keyed cluster set. The Matrica-keyed lookup is the load-
   // bearing one — cluster_anchors only stores wallets that actually have
   // edges, so a Matrica user's "main" wallet (no on-chain link) wouldn't
   // see its inferred-peer siblings via getClusterMembersForAddress alone.
-  const clusterMembers = new Set<string>(getClusterMembersForAddress(address));
-  if (userId) {
+  const clusterMembers = new Set<string>(
+    link?.provider === 'ordnet' ? [] : getClusterMembersForAddress(address)
+  );
+  if (userId && link?.provider === 'matrica') {
     for (const w of getClusterMembersForMatricaUser(userId)) clusterMembers.add(w);
+  }
+  // A directly shared identity wins over older heuristic membership. This
+  // keeps opted-in ORD.NET wallets out of other profiles' inferred totals.
+  for (const member of clusterMembers) {
+    const direct = stmts.getPublicWalletLink.get({ wallet_addr: member }) as
+      | PublicWalletLinkRow
+      | undefined;
+    if (direct && direct.identity_id !== userId) clusterMembers.delete(member);
   }
   const inferredWallets: string[] = [];
   clusterMembers.forEach(m => {
-    if (!matricaSet.has(m)) inferredWallets.push(m);
+    if (!explicitSet.has(m)) inferredWallets.push(m);
   });
   const merged = new Set<string>([address]);
-  matricaSet.forEach(w => merged.add(w));
+  explicitSet.forEach(w => merged.add(w));
   clusterMembers.forEach(w => merged.add(w));
   const wallets = Array.from(merged);
   return { wallets, link, inferredWallets };
@@ -81,18 +97,21 @@ export function resolveAggregatedWallets(address: string): {
  * identity apart.
  *
  * Rules:
- *   - Matrica-linked address: render in place. Every Matrica sibling
- *     already aggregates the same identity; no need to canonicalize.
+ *   - Publicly linked address: render in place. Explicitly shared siblings
+ *     already aggregate the same identity; no need to canonicalize.
  *   - No Matrica directly, cluster_anchors with matrica_user_id set:
  *     redirect to the lex-min Matrica-linked wallet for that user.
  *   - No Matrica anywhere, unlinked cluster: redirect to the cluster's
- *     anchor wallet (lex-min member) when not already there.
+ *     lex-min member without a direct public identity. A former anchor that
+ *     now shares an ORD.NET profile cannot absorb its inferred siblings.
  *   - Singleton or unknown: render in place.
  */
 export function resolveCanonicalHolderAddress(address: string): string | null {
   const stmts = getStmts();
-  const link = stmts.getWalletLink.get({ wallet_addr: address }) as WalletLinkRow | undefined;
-  if (link?.matrica_user_id) return null;
+  const link = stmts.getPublicWalletLink.get({ wallet_addr: address }) as
+    | PublicWalletLinkRow
+    | undefined;
+  if (link?.identity_id) return null;
 
   const anchor = getClusterAnchorForAddress(address);
   if (!anchor) return null;
@@ -100,16 +119,19 @@ export function resolveCanonicalHolderAddress(address: string): string | null {
   if (anchor.matrica_user_id) {
     const row = getDb()
       .prepare(
-        `SELECT wallet_addr FROM wallet_links
-          WHERE matrica_user_id = ?
+        `SELECT wallet_addr FROM public_wallet_links
+          WHERE identity_id = ?
           ORDER BY wallet_addr ASC LIMIT 1`
       )
       .get(anchor.matrica_user_id) as { wallet_addr: string } | undefined;
-    if (row?.wallet_addr && row.wallet_addr !== address) return row.wallet_addr;
-    return null;
+    if (row?.wallet_addr) return row.wallet_addr !== address ? row.wallet_addr : null;
   }
 
-  return anchor.anchor_id !== address ? anchor.anchor_id : null;
+  const candidates = getClusterMembersForAddress(address)
+    .filter(member => !stmts.getPublicWalletLink.get({ wallet_addr: member }))
+    .sort();
+  const canonical = candidates[0] ?? address;
+  return canonical !== address ? canonical : null;
 }
 
 export type HolderEventsCursor = { ts: number; id: number };

@@ -2,7 +2,15 @@ export type ApiEvent = {
   id: number;
   inscription_id: string;
   inscription_number: number;
-  event_type: 'inscribed' | 'transferred' | 'sold' | 'mint' | 'loan-originated' | 'loan-defaulted' | 'loan-repaid' | 'loan-unlocked';
+  event_type:
+    | 'inscribed'
+    | 'transferred'
+    | 'sold'
+    | 'mint'
+    | 'loan-originated'
+    | 'loan-defaulted'
+    | 'loan-repaid'
+    | 'loan-unlocked';
   block_height: number | null;
   block_timestamp: number;
   new_satpoint: string | null;
@@ -19,15 +27,10 @@ export type ApiEvent = {
   created_at: number;
 };
 
-/** Matrica profile overlay: wallet_addr → display data. Only populated for
- * wallets that have a non-default Matrica profile. The map is restricted to
- * addresses appearing in the events on this page so payload stays small.
- * `user_id` lets the UI detect transfers between two wallets owned by the
- * same Matrica user (rendered as "internal").
- *
- * `inferred` is set when the wallet was matched via cluster_anchors (≥99%
- * on-chain confidence) rather than a direct Matrica link. UI marks these
- * subtly so heuristic folds don't read as authoritative. */
+/** Public profile overlay (legacy Matrica API name), restricted to addresses
+ * in this event window. `user_id` is namespaced for ORD.NET. `inferred` marks
+ * heuristic Matrica links; explicit ORD.NET publication never imports siblings.
+ */
 export type ApiMatricaMap = Record<
   string,
   {
@@ -35,6 +38,7 @@ export type ApiMatricaMap = Record<
     username: string | null;
     avatar_url: string | null;
     inferred?: boolean;
+    provider?: 'matrica' | 'ordnet';
   }
 >;
 

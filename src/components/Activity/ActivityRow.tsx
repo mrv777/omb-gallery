@@ -254,7 +254,9 @@ function OwnerLink({ addr, matrica }: { addr: string | null; matrica: ApiMatrica
     ? `${manual.name} — ${addr}`
     : inferred
       ? `${addr}\non-chain inferred to be ${username} (≥99% confidence, not Matrica-confirmed)`
-      : addr;
+      : profile?.provider === 'ordnet'
+        ? `${addr}\nPublic profile shared through ORD.NET`
+        : addr;
   return (
     <Tooltip content={tooltipBody}>
       <Link

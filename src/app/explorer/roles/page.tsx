@@ -21,7 +21,7 @@ const HOLDERS_PER_ROLE = 25;
 export async function generateMetadata(): Promise<Metadata> {
   const title = 'Roles';
   const description =
-    'Holder roles earned by Matrica-linked OMB holders, ranked by rarity. Each role corresponds to a configuration of colored eyes held.';
+    'Holder roles earned by publicly linked OMB holders, ranked by rarity. Each role corresponds to a configuration of colored eyes held.';
   return {
     title,
     description,
@@ -33,7 +33,7 @@ export default function RolesPage() {
   const counts = getRoleHolderCounts();
   const linkage = getLinkageStats();
 
-  const sections = ROLES.map((role) => ({
+  const sections = ROLES.map(role => ({
     role,
     holders: getHoldersForRole(role.id, HOLDERS_PER_ROLE),
     count: counts[role.id] ?? 0,
@@ -51,7 +51,7 @@ export default function RolesPage() {
         <header className="mb-8">
           <h1 className="font-mono text-sm tracking-[0.12em] uppercase text-bone mb-2">Roles</h1>
           <p className="font-mono text-[11px] text-bone-dim normal-case max-w-2xl">
-            Earned by Matrica-linked OMB holders based on the colored eyes they hold. Order is
+            Earned by publicly linked OMB holders based on the colored eyes they hold. Order is
             curated — rarest / hardest-earned first. Loaned-out OMBs still count for the original
             holder.
           </p>
@@ -156,9 +156,9 @@ function LinkageStatsStrip({ stats }: { stats: LinkageStats }) {
     <div className="border border-ink-2 bg-ink-1 mb-6">
       <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-ink-2">
         <Stat
-          label="Linked Matrica users"
+          label="Linked holders"
           value={stats.linkedUsers.toLocaleString()}
-          sub="Matrica-linked holders with at least 1 OMB"
+          sub="Matrica or ORD.NET profiles with at least 1 OMB"
         />
         <Stat
           label="Supply linked"
@@ -171,13 +171,13 @@ function LinkageStatsStrip({ stats }: { stats: LinkageStats }) {
           By eye color
         </div>
         <ul className="space-y-1.5">
-          {stats.byColor.map((row) => (
+          {stats.byColor.map(row => (
             <ColorRow key={row.color} row={row} />
           ))}
         </ul>
         <p className="font-mono text-[10px] text-bone-dim/70 normal-case mt-3">
           Protocol wallets (mint, treasury) excluded from totals. &ldquo;Unlinked&rdquo; includes
-          wallets the Matrica poller hasn&rsquo;t classified yet (cycles ~hourly).
+          wallets without a linked Matrica profile or an explicitly shared ORD.NET profile.
         </p>
       </div>
     </div>

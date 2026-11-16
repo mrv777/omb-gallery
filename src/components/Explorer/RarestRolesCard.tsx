@@ -26,7 +26,7 @@ export default function RarestRolesCard({ countsByRole }: Props) {
           </Link>
         </div>
         <p className="font-mono text-[10px] tracking-[0.04em] text-bone-dim mt-1 normal-case">
-          Holder roles based on colors they hold for matrica linked users only.
+          Holder roles based on eye colors held by linked Matrica or ORD.NET profiles.
         </p>
       </div>
       {/* Two columns on desktop so 11 roles fit without a tall card; one on mobile.

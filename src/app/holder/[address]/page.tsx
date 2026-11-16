@@ -6,7 +6,7 @@ import {
   getStmts,
   type InscriptionRow,
   type OwnershipDeltaRow,
-  type WalletLinkRow,
+  type PublicWalletLinkRow,
 } from '@/lib/db';
 import { getRolesForUser, getColorCountsForUser } from '@/lib/rolesStore';
 import { getLikelyLinkedForWallets } from '@/lib/clusterStore';
@@ -53,7 +53,9 @@ export const dynamic = 'force-dynamic';
 export async function generateMetadata({ params }: { params: Promise<Params> }): Promise<Metadata> {
   const { address } = await params;
   const stmts = getStmts();
-  const link = stmts.getWalletLink.get({ wallet_addr: address }) as WalletLinkRow | undefined;
+  const link = stmts.getPublicWalletLink.get({ wallet_addr: address }) as
+    | PublicWalletLinkRow
+    | undefined;
   // Manual label (treasury etc.) wins over Matrica handle, which wins over
   // the truncated address. Curated overrides need to be authoritative.
   const manual = lookupWalletLabel(address);
@@ -191,9 +193,9 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
   // Roles + per-color counts (for the badge row + ladder). Only populated
   // when this is a Matrica-linked identity — unlinked wallets render no
   // badges and no ladder.
-  const matricaUserId = link?.matrica_user_id ?? null;
-  const roleIds = matricaUserId ? getRolesForUser(matricaUserId) : [];
-  const colorCounts = matricaUserId ? getColorCountsForUser(matricaUserId) : emptyCounts();
+  const identityId = link?.identity_id ?? null;
+  const roleIds = identityId ? getRolesForUser(identityId) : [];
+  const colorCounts = identityId ? getColorCountsForUser(identityId) : emptyCounts();
 
   // On-chain inferred peers, with Matrica-confirmed siblings already
   // excluded. Threshold is the conservative public default — at our
@@ -234,7 +236,8 @@ export default async function HolderPage({ params }: { params: Promise<Params> }
         colorHighlights={colorHighlights}
         roleIds={roleIds}
         colorCounts={colorCounts}
-        isMatricaUser={!!matricaUserId}
+        isLinkedUser={!!identityId}
+        identityProvider={link?.provider ?? null}
         likelyLinked={likelyLinked}
         listingStagingLinks={listingStagingLinks}
         inferredWallets={inferredWallets}

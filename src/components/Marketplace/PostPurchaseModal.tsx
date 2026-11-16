@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import CommunityVerificationPrompt, { type MatricaState } from './CommunityVerificationPrompt';
 import { formatBtc, truncateAddr } from '@/lib/format';
 import type { MarketplaceListing } from '@/lib/marketplace/types';
 import { useWallet } from '@/components/wallet/WalletProvider';
@@ -10,33 +11,63 @@ type Props = {
   txid: string;
   discordInviteUrl: string;
   matricaSignupUrl: string;
+  nexusVerificationEnabled?: boolean;
   onClose: () => void;
 };
-
-type MatricaState =
-  | { status: 'loading' }
-  | { status: 'linked'; username: string; placeholder: boolean }
-  | { status: 'none' | 'unknown'; reason?: string };
 
 export default function PostPurchaseModal({
   listing,
   txid,
   discordInviteUrl,
   matricaSignupUrl,
+  nexusVerificationEnabled = false,
   onClose,
 }: Props) {
   const { wallet } = useWallet();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const [matrica, setMatrica] = useState<{ addr: string | null; state: MatricaState }>({
     addr: null,
     state: { status: 'loading' },
   });
-  const matricaUrl = buildMatricaUrl(matricaSignupUrl);
   const isMockTx = txid.startsWith('mock-');
   const activeMatrica: MatricaState = wallet?.ordAddr
     ? matrica.addr === wallet.ordAddr
       ? matrica.state
       : { status: 'loading' }
     : { status: 'unknown', reason: 'wallet unavailable' };
+
+  useEffect(() => {
+    const previousFocus = document.activeElement;
+    closeRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const elements = dialogRef.current?.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), [tabindex="0"]'
+      );
+      if (!elements?.length) return;
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true);
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
+    };
+  }, [onClose]);
 
   useEffect(() => {
     const addr = wallet?.ordAddr;
@@ -76,6 +107,7 @@ export default function PostPurchaseModal({
   return (
     <div className="fixed inset-0 z-[1700] bg-ink-0/85 backdrop-blur-sm" onClick={onClose}>
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Purchase receipt"
@@ -109,6 +141,7 @@ export default function PostPurchaseModal({
               </div>
             </div>
             <button
+              ref={closeRef}
               type="button"
               onClick={onClose}
               className="h-9 w-9 text-bone-dim hover:text-bone"
@@ -119,141 +152,19 @@ export default function PostPurchaseModal({
           </div>
 
           <div className="my-5 border-t border-ink-2" />
-          <MatricaBlock
+          <CommunityVerificationPrompt
             state={activeMatrica}
-            matricaUrl={matricaUrl}
+            matricaUrl={matricaSignupUrl}
             discordInviteUrl={discordInviteUrl}
+            nexusVerificationEnabled={nexusVerificationEnabled}
           />
           <div className="mt-auto pt-5 text-[10px] leading-relaxed text-bone-dim">
-            Tx is in the mempool. It typically confirms within an hour.
+            {isMockTx
+              ? 'Preview receipt. No Bitcoin transaction was sent.'
+              : 'Transaction submitted. Confirmation time depends on Bitcoin network fees.'}
           </div>
         </div>
       </div>
     </div>
-  );
-}
-
-function buildMatricaUrl(base: string): string {
-  try {
-    return new URL(base || 'https://matrica.io/settings').toString();
-  } catch {
-    return 'https://matrica.io/settings';
-  }
-}
-
-function MatricaBlock({
-  state,
-  matricaUrl,
-  discordInviteUrl,
-}: {
-  state: MatricaState;
-  matricaUrl: string;
-  discordInviteUrl: string;
-}) {
-  const discord = discordInviteUrl.trim();
-  if (state.status === 'loading') {
-    return <div className="text-[11px] text-bone-dim">checking matrica...</div>;
-  }
-  if (state.status === 'linked' && !state.placeholder) {
-    return (
-      <CommunityPrompt
-        label="matrica linked"
-        message={
-          <>
-            Linked as <span className="break-all text-bone">@{state.username}</span>. Confirm
-            Discord is linked there, then join Discord.
-          </>
-        }
-        actions={[
-          { href: matricaUrl, label: 'check matrica' },
-          discord ? { href: discord, label: 'join discord', primary: true } : null,
-        ]}
-      />
-    );
-  }
-  if (state.status === 'linked' && state.placeholder) {
-    return (
-      <CommunityPrompt
-        label="matrica profile needed"
-        message="Finish your Matrica profile and link Discord, then join Discord."
-        actions={[
-          { href: matricaUrl, label: 'finish matrica', primary: true },
-          discord ? { href: discord, label: 'join discord' } : null,
-        ]}
-      />
-    );
-  }
-  return (
-    <CommunityPrompt
-      label="matrica needed"
-      message={`Link this wallet${discord ? ' and Discord' : ''} on Matrica first, before you can join the Discord.`}
-      actions={[
-        { href: matricaUrl, label: 'link on matrica', primary: true },
-        discord ? { href: discord, label: 'join discord' } : null,
-      ]}
-    />
-  );
-}
-
-type CommunityAction = {
-  href: string;
-  label: string;
-  primary?: boolean;
-} | null;
-
-function CommunityPrompt({
-  label,
-  message,
-  actions,
-}: {
-  label: string;
-  message: ReactNode;
-  actions: CommunityAction[];
-}) {
-  return (
-    <div className="max-w-xl space-y-3 text-[11px] leading-relaxed text-bone-dim">
-      <div>
-        <div className="mb-1 text-[10px] text-bone">{label}</div>
-        <div>{message}</div>
-      </div>
-      <div className="grid gap-2 sm:flex sm:flex-wrap">
-        {actions.map(action =>
-          action ? (
-            <CommunityButton
-              key={`${action.href}-${action.label}`}
-              href={action.href}
-              primary={action.primary}
-            >
-              {action.label}
-            </CommunityButton>
-          ) : null
-        )}
-      </div>
-    </div>
-  );
-}
-
-function CommunityButton({
-  href,
-  primary = false,
-  children,
-}: {
-  href: string;
-  primary?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`inline-flex min-h-9 items-center justify-center border px-3 text-center text-[10px] transition-colors ${
-        primary
-          ? 'border-bone text-bone hover:border-accent-orange hover:text-accent-orange'
-          : 'border-ink-2 text-bone-dim hover:border-bone-dim hover:text-bone'
-      }`}
-    >
-      {children}
-    </a>
   );
 }

@@ -46,6 +46,7 @@ export default function MarketplacePage() {
           DEFAULT_DISCORD_INVITE_URL
         }
         matricaSignupUrl={process.env.MATRICA_SIGNUP_URL ?? 'https://matrica.io/settings'}
+        nexusVerificationEnabled={process.env.NEXUS_DISCORD_ENABLED === 'true'}
         sellerEnabled={process.env.MARKETPLACE_SELL_ENABLED === 'true'}
       />
     </SubpageShell>

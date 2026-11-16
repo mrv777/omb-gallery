@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_BRAVOCADO_DISTRIBUTION_LIST, SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 47;
+const SCHEMA_VERSION = 48;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -242,7 +242,8 @@ function migrate(db: DB): void {
       if (current < 45) upgradeV44ToV45(db);
       if (current < 46) upgradeV45ToV46(db);
     }
-    upgradeV46ToV47(db);
+    if (current < 47) upgradeV46ToV47(db);
+    if (current < 48) upgradeV47ToV48(db);
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
   tx();
@@ -287,6 +288,9 @@ function upgradeV46ToV47(db: DB): void {
 }
 
 function initSchemaLatest(db: DB): void {
+  // These additive profile tables are also installed on fresh databases.
+  // The views may reference Matrica tables created immediately below.
+  upgradeV47ToV48(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS collections (
       slug          TEXT PRIMARY KEY,
@@ -2657,6 +2661,56 @@ function upgradeV45ToV46(db: DB): void {
   `);
 }
 
+function upgradeV47ToV48(db: DB): void {
+  // Explicit, per-wallet publication. ORD.NET's private wallet bindings and
+  // trading tokens are never stored here, nor used as clustering ground truth.
+  // Real Matrica profiles retain precedence. Address-shaped auto-shell names
+  // yield only when this wallet explicitly shares ORD.NET. length > 30 matches
+  // looksLikeAddress (both its bc1/0x branches also exceed 30 characters).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ordnet_public_profiles (
+      profile_id TEXT PRIMARY KEY,
+      username TEXT,
+      avatar_url TEXT,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS ordnet_public_wallets (
+      wallet_addr TEXT PRIMARY KEY,
+      profile_id TEXT NOT NULL REFERENCES ordnet_public_profiles(profile_id),
+      verified_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ordnet_public_wallets_profile
+      ON ordnet_public_wallets(profile_id);
+    CREATE VIEW IF NOT EXISTS public_wallet_links AS
+      SELECT wl.wallet_addr, wl.matrica_user_id AS identity_id, wl.checked_at
+      FROM wallet_links wl
+      JOIN matrica_users mu ON mu.user_id = wl.matrica_user_id
+      WHERE NOT (
+        COALESCE(length(mu.username), 0) > 30
+        AND EXISTS (
+          SELECT 1 FROM ordnet_public_wallets ow WHERE ow.wallet_addr = wl.wallet_addr
+        )
+      )
+      UNION ALL
+      SELECT ow.wallet_addr, 'ordnet:' || ow.profile_id AS identity_id,
+             ow.verified_at AS checked_at
+      FROM ordnet_public_wallets ow
+      WHERE NOT EXISTS (
+        SELECT 1 FROM wallet_links wl
+        JOIN matrica_users mu ON mu.user_id = wl.matrica_user_id
+        WHERE wl.wallet_addr = ow.wallet_addr
+          AND COALESCE(length(mu.username), 0) <= 30
+      );
+    CREATE VIEW IF NOT EXISTS public_profiles AS
+      SELECT user_id, username, avatar_url, updated_at, 'matrica' AS provider
+      FROM matrica_users
+      UNION ALL
+      SELECT 'ordnet:' || profile_id AS user_id, username, avatar_url,
+             updated_at, 'ordnet' AS provider
+      FROM ordnet_public_profiles;
+  `);
+}
+
 function upgradeV30ToV31(db: DB): void {
   // Materialize connected components at IDENTITY_FOLD_THRESHOLD so the
   // top-holders leaderboard, color leaderboards, holder distribution
@@ -2937,6 +2991,8 @@ type Stmts = {
   upsertMatricaUser: ReturnType<DB['prepare']>;
   getWalletLink: ReturnType<DB['prepare']>;
   getWalletsForUser: ReturnType<DB['prepare']>;
+  getPublicWalletLink: ReturnType<DB['prepare']>;
+  getPublicWalletsForUser: ReturnType<DB['prepare']>;
   getMatricaProfilesForAddrs: ReturnType<DB['prepare']>;
   getMatricaProfilesForAddrsWithInferred: ReturnType<DB['prepare']>;
   topHoldersGrouped: ReturnType<DB['prepare']>;
@@ -4099,6 +4155,21 @@ export function getStmts(): Stmts {
       ORDER BY wallet_addr ASC
     `),
 
+    // Public display identities only. Matrica-only getters above remain the
+    // source of truth for clustering calibration and financial coordination.
+    getPublicWalletLink: db.prepare(`
+      SELECT wl.wallet_addr, wl.identity_id, wl.checked_at,
+             p.username, p.avatar_url, p.provider
+      FROM public_wallet_links wl
+      JOIN public_profiles p ON p.user_id = wl.identity_id
+      WHERE wl.wallet_addr = @wallet_addr
+    `),
+    getPublicWalletsForUser: db.prepare(`
+      SELECT wallet_addr FROM public_wallet_links
+      WHERE identity_id = @user_id
+      ORDER BY wallet_addr ASC
+    `),
+
     // Reader: bulk-lookup Matrica profile data for a JSON-array of wallet
     // addresses. Used by /api/activity and the activity SSR pass to overlay
     // @username on event rows. json_each(?) lets one prepared statement
@@ -4109,9 +4180,9 @@ export function getStmts(): Stmts {
     // an "internal transfer" — the strict guarantee is load-bearing for
     // delivery correctness, so it intentionally ignores cluster_anchors.
     getMatricaProfilesForAddrs: db.prepare(`
-      SELECT wl.wallet_addr, wl.matrica_user_id AS user_id, mu.username, mu.avatar_url
-      FROM wallet_links wl
-      JOIN matrica_users mu ON mu.user_id = wl.matrica_user_id
+      SELECT wl.wallet_addr, wl.identity_id AS user_id, mu.username, mu.avatar_url, mu.provider
+      FROM public_wallet_links wl
+      JOIN public_profiles mu ON mu.user_id = wl.identity_id
       WHERE wl.wallet_addr IN (SELECT value FROM json_each(@addrs_json))
     `),
 
@@ -4126,18 +4197,19 @@ export function getStmts(): Stmts {
     getMatricaProfilesForAddrsWithInferred: db.prepare(`
       SELECT
         addr.value AS wallet_addr,
-        COALESCE(wl.matrica_user_id, ca.matrica_user_id)        AS user_id,
-        COALESCE(mu_d.username,      mu_c.username)             AS username,
-        COALESCE(mu_d.avatar_url,    mu_c.avatar_url)           AS avatar_url,
-        CASE WHEN wl.matrica_user_id IS NOT NULL THEN 0 ELSE 1 END AS inferred
+        COALESCE(wl.identity_id, ca.matrica_user_id)        AS user_id,
+        CASE WHEN wl.identity_id IS NOT NULL THEN mu_d.username ELSE mu_c.username END AS username,
+        CASE WHEN wl.identity_id IS NOT NULL THEN mu_d.avatar_url ELSE mu_c.avatar_url END AS avatar_url,
+        COALESCE(mu_d.provider, mu_c.provider) AS provider,
+        CASE WHEN wl.identity_id IS NOT NULL THEN 0 ELSE 1 END AS inferred
       FROM json_each(@addrs_json) addr
-      LEFT JOIN wallet_links     wl   ON wl.wallet_addr = addr.value
-                                     AND wl.matrica_user_id IS NOT NULL
-      LEFT JOIN matrica_users    mu_d ON mu_d.user_id   = wl.matrica_user_id
+      LEFT JOIN public_wallet_links     wl   ON wl.wallet_addr = addr.value
+                                     AND wl.identity_id IS NOT NULL
+      LEFT JOIN public_profiles    mu_d ON mu_d.user_id   = wl.identity_id
       LEFT JOIN cluster_anchors  ca   ON ca.wallet_addr = addr.value
                                      AND ca.matrica_user_id IS NOT NULL
-      LEFT JOIN matrica_users    mu_c ON mu_c.user_id   = ca.matrica_user_id
-      WHERE COALESCE(wl.matrica_user_id, ca.matrica_user_id) IS NOT NULL
+      LEFT JOIN public_profiles    mu_c ON mu_c.user_id   = ca.matrica_user_id
+      WHERE COALESCE(wl.identity_id, ca.matrica_user_id) IS NOT NULL
     `),
 
     // Reader: top holders, collapsed by Matrica user when one is known,
@@ -4148,7 +4220,7 @@ export function getStmts(): Stmts {
     // the full wallet set; the route splits for `wallets[]` and uses the
     // first entry for deep-linking.
     //
-    // COALESCE order matters: wl.matrica_user_id beats ca.anchor_id so
+    // COALESCE order matters: wl.identity_id beats ca.anchor_id so
     // an authoritatively-linked wallet is never re-keyed by a heuristic
     // merge — the recompute also skips clusters that span multiple
     // distinct Matrica users to keep this guarantee tight. Display joins
@@ -4160,19 +4232,19 @@ export function getStmts(): Stmts {
     // 1-OMB "holder". Mirrors countHolders / topHolders / per-holder pages.
     topHoldersGrouped: db.prepare(`
       SELECT
-        COALESCE(wl.matrica_user_id, ca.anchor_id, i.effective_owner)            AS group_key,
-        CASE WHEN wl.matrica_user_id IS NOT NULL OR ca.matrica_user_id IS NOT NULL
+        COALESCE(wl.identity_id, ca.anchor_id, i.effective_owner)            AS group_key,
+        CASE WHEN wl.identity_id IS NOT NULL OR ca.matrica_user_id IS NOT NULL
              THEN 1 ELSE 0 END                                                   AS is_user,
-        COALESCE(mu.username,   mu_a.username)                                   AS username,
-        COALESCE(mu.avatar_url, mu_a.avatar_url)                                 AS avatar_url,
+        CASE WHEN wl.identity_id IS NOT NULL THEN mu.username ELSE mu_a.username END AS username,
+        CASE WHEN wl.identity_id IS NOT NULL THEN mu.avatar_url ELSE mu_a.avatar_url END AS avatar_url,
         GROUP_CONCAT(DISTINCT i.effective_owner)                                 AS wallets_csv,
         COUNT(*)                                                                 AS inscription_count,
         unixepoch()                                                              AS updated_at
       FROM inscriptions i
-      LEFT JOIN wallet_links     wl   ON wl.wallet_addr   = i.effective_owner
-      LEFT JOIN matrica_users    mu   ON mu.user_id       = wl.matrica_user_id
+      LEFT JOIN public_wallet_links     wl   ON wl.wallet_addr   = i.effective_owner
+      LEFT JOIN public_profiles    mu   ON mu.user_id       = wl.identity_id
       LEFT JOIN cluster_anchors  ca   ON ca.wallet_addr   = i.effective_owner
-      LEFT JOIN matrica_users    mu_a ON mu_a.user_id     = ca.matrica_user_id
+      LEFT JOIN public_profiles    mu_a ON mu_a.user_id     = ca.matrica_user_id
       WHERE i.effective_owner IS NOT NULL
         AND i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
@@ -4189,19 +4261,19 @@ export function getStmts(): Stmts {
     // cursor as HAVING avoids a wrapping subquery.
     topHoldersGroupedPaged: db.prepare(`
       SELECT
-        COALESCE(wl.matrica_user_id, ca.anchor_id, i.effective_owner)            AS group_key,
-        CASE WHEN wl.matrica_user_id IS NOT NULL OR ca.matrica_user_id IS NOT NULL
+        COALESCE(wl.identity_id, ca.anchor_id, i.effective_owner)            AS group_key,
+        CASE WHEN wl.identity_id IS NOT NULL OR ca.matrica_user_id IS NOT NULL
              THEN 1 ELSE 0 END                                                   AS is_user,
-        COALESCE(mu.username,   mu_a.username)                                   AS username,
-        COALESCE(mu.avatar_url, mu_a.avatar_url)                                 AS avatar_url,
+        CASE WHEN wl.identity_id IS NOT NULL THEN mu.username ELSE mu_a.username END AS username,
+        CASE WHEN wl.identity_id IS NOT NULL THEN mu.avatar_url ELSE mu_a.avatar_url END AS avatar_url,
         GROUP_CONCAT(DISTINCT i.effective_owner)                                 AS wallets_csv,
         COUNT(*)                                                                 AS inscription_count,
         unixepoch()                                                              AS updated_at
       FROM inscriptions i
-      LEFT JOIN wallet_links     wl   ON wl.wallet_addr   = i.effective_owner
-      LEFT JOIN matrica_users    mu   ON mu.user_id       = wl.matrica_user_id
+      LEFT JOIN public_wallet_links     wl   ON wl.wallet_addr   = i.effective_owner
+      LEFT JOIN public_profiles    mu   ON mu.user_id       = wl.identity_id
       LEFT JOIN cluster_anchors  ca   ON ca.wallet_addr   = i.effective_owner
-      LEFT JOIN matrica_users    mu_a ON mu_a.user_id     = ca.matrica_user_id
+      LEFT JOIN public_profiles    mu_a ON mu_a.user_id     = ca.matrica_user_id
       WHERE i.effective_owner IS NOT NULL
         AND i.collection_slug = @collection
         AND (@color IS NULL OR i.color = @color)
@@ -4218,9 +4290,9 @@ export function getStmts(): Stmts {
     // wallet). Mirrors the topHoldersGrouped collapse so the explorer's
     // "N holders" stat squares with the leaderboard row count.
     countHolderIdentities: db.prepare(`
-      SELECT COUNT(DISTINCT COALESCE(wl.matrica_user_id, ca.anchor_id, i.effective_owner)) AS n
+      SELECT COUNT(DISTINCT COALESCE(wl.identity_id, ca.anchor_id, i.effective_owner)) AS n
       FROM inscriptions i
-      LEFT JOIN wallet_links    wl ON wl.wallet_addr = i.effective_owner
+      LEFT JOIN public_wallet_links    wl ON wl.wallet_addr = i.effective_owner
       LEFT JOIN cluster_anchors ca ON ca.wallet_addr = i.effective_owner
       WHERE i.effective_owner IS NOT NULL
         AND i.collection_slug = @collection
@@ -4248,13 +4320,13 @@ export function getStmts(): Stmts {
         FROM (
           SELECT COUNT(*) AS cnt
           FROM inscriptions i
-          LEFT JOIN wallet_links    wl ON wl.wallet_addr = i.effective_owner
+          LEFT JOIN public_wallet_links    wl ON wl.wallet_addr = i.effective_owner
           LEFT JOIN cluster_anchors ca ON ca.wallet_addr = i.effective_owner
           WHERE i.effective_owner IS NOT NULL
             AND i.collection_slug = @collection
             AND (@color IS NULL OR i.color = @color)
             AND i.effective_owner NOT IN (${SQL_EXCLUDED_OWNERS_LIST})
-          GROUP BY COALESCE(wl.matrica_user_id, ca.anchor_id, i.effective_owner)
+          GROUP BY COALESCE(wl.identity_id, ca.anchor_id, i.effective_owner)
         )
       )
       GROUP BY bucket
@@ -4595,12 +4667,13 @@ export function getStmts(): Stmts {
     // Matrica username search: prefix-priority, falls back to substring when
     // the query is ≥3 chars. Single named param bound multiple times.
     searchUsersByName: db.prepare(`
-      SELECT mu.user_id, mu.username, mu.avatar_url,
+      SELECT mu.user_id, mu.username, mu.avatar_url, mu.provider,
              COUNT(wl.wallet_addr) AS wallet_count,
-             (SELECT wallet_addr FROM wallet_links WHERE matrica_user_id = mu.user_id LIMIT 1) AS first_wallet
-      FROM matrica_users mu
-      LEFT JOIN wallet_links wl ON wl.matrica_user_id = mu.user_id
+             (SELECT wallet_addr FROM public_wallet_links WHERE identity_id = mu.user_id LIMIT 1) AS first_wallet
+      FROM public_profiles mu
+      LEFT JOIN public_wallet_links wl ON wl.identity_id = mu.user_id
       WHERE mu.username IS NOT NULL
+        AND wl.wallet_addr IS NOT NULL
         AND (
           LOWER(mu.username) LIKE LOWER(@q) || '%'
           OR (LENGTH(@q) >= 3 AND LOWER(mu.username) LIKE '%' || LOWER(@q) || '%')
@@ -4779,6 +4852,15 @@ export type MatricaUserRow = {
   username: string | null;
   avatar_url: string | null;
   updated_at: number;
+};
+
+export type PublicWalletLinkRow = {
+  wallet_addr: string;
+  identity_id: string;
+  checked_at: number;
+  username: string | null;
+  avatar_url: string | null;
+  provider: 'matrica' | 'ordnet';
 };
 
 export type WalletLinkRow = {

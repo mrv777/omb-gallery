@@ -1,16 +1,13 @@
 import 'server-only';
 import { getStmts, type EventRow } from './db';
 
-/** Wallet → Matrica display data. Only addresses with a non-null username
- * are returned (default-square / no-profile wallets are dropped client-side
- * by exclusion from this map). `user_id` is the stable Matrica identity —
- * always non-null in returned rows because the SQL INNER JOINs matrica_users.
+/** Wallet → public display identity. Legacy Matrica names remain in the API
+ * contract for compatibility. `user_id` is stable and namespaced for ORD.NET;
+ * username/avatar may be null, while provider records link provenance.
  *
- * `inferred` is set when the resolution went through cluster_anchors rather
- * than a direct wallet_links → matrica_user_id link. UI layers should mark
- * inferred profiles visually so users can tell heuristic folds from
- * authoritative ones. Notifications intentionally never receive inferred
- * profiles — internal-transfer detection has to be Matrica-strict.
+ * `inferred` marks a Matrica identity resolved through cluster_anchors.
+ * Direct public links always win, and ORD.NET identities never import inferred
+ * siblings. Notifications use only explicit links for internal transfers.
  */
 export type MatricaOverlay = Record<
   string,
@@ -19,18 +16,19 @@ export type MatricaOverlay = Record<
     username: string | null;
     avatar_url: string | null;
     inferred?: boolean;
+    provider?: 'matrica' | 'ordnet';
   }
 >;
 
 type Options = {
-  /** When true, also resolve wallets that aren't directly Matrica-linked
+  /** When true, also resolve wallets without a direct public identity link
    * but sit in a cluster_anchors component anchored to a Matrica user.
    * Default false — preserves the original strict semantics. */
   includeInferred?: boolean;
 };
 
 /**
- * Look up Matrica profiles for every wallet address that appears as
+ * Look up public profiles for every wallet address that appears as
  * old_owner / new_owner in the given event list. Single SQL query via
  * json_each — the prepared statement is reused across requests.
  *
@@ -51,10 +49,7 @@ export function matricaProfilesForEvents(
   return matricaProfilesForAddrs(Array.from(addrs), options);
 }
 
-export function matricaProfilesForAddrs(
-  addrs: string[],
-  options: Options = {}
-): MatricaOverlay {
+export function matricaProfilesForAddrs(addrs: string[], options: Options = {}): MatricaOverlay {
   if (addrs.length === 0) return {};
   const stmts = getStmts();
   const stmt = options.includeInferred
@@ -68,6 +63,7 @@ export function matricaProfilesForAddrs(
     username: string | null;
     avatar_url: string | null;
     inferred?: number;
+    provider: 'matrica' | 'ordnet';
   }>;
   const out: MatricaOverlay = {};
   for (const r of rows) {
@@ -75,6 +71,7 @@ export function matricaProfilesForAddrs(
       user_id: r.user_id,
       username: r.username,
       avatar_url: r.avatar_url,
+      provider: r.provider,
       ...(r.inferred ? { inferred: true } : {}),
     };
   }

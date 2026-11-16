@@ -142,7 +142,7 @@ export function InscriptionRow({
 }
 
 export function HolderRow({ row, rank }: { row: ApiHolder; rank: number }) {
-  // Linked Matrica user: deep-link to the first wallet (which then aggregates
+  // Public identity: deep-link to the first wallet (which then aggregates
   // across all linked wallets server-side). Unlinked wallet: link to itself.
   const primaryWallet = row.wallets[0] ?? row.group_key;
   // Manual label takes precedence over Matrica — these are curated identity
@@ -155,8 +155,8 @@ export function HolderRow({ row, rank }: { row: ApiHolder; rank: number }) {
   const tooltip = manual
     ? `${manual.name}${manual.subtitle ? ` — ${manual.subtitle}` : ''}\n${primaryWallet}`
     : row.is_user
-      ? `Matrica: ${row.username ?? row.group_key} (${row.wallets.length} wallet${row.wallets.length === 1 ? '' : 's'})`
-      : row.group_key;
+      ? `${row.group_key.startsWith('ordnet:') ? 'ORD.NET' : 'Matrica'}: ${row.username ?? row.group_key} (${row.wallets.length} wallet${row.wallets.length === 1 ? '' : 's'})`
+      : primaryWallet;
   return (
     <li>
       <Link

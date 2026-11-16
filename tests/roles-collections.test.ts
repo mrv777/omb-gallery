@@ -24,42 +24,64 @@ afterEach(() => {
 });
 
 describe('roles collection scope', () => {
-  it('bases earned roles, profile counts, and role-holder size on OMB only', () => {
-    const db = dbModule.getDb();
-    const userId = 'roles-collection-test-user';
-    const wallet = 'bc1qrolescollectiontestwallet';
-    db.prepare(
-      `INSERT INTO matrica_users (user_id, username, avatar_url, updated_at) VALUES (?, ?, NULL, 1)`
-    ).run(userId, 'test-user');
-    db.prepare(
-      `INSERT INTO wallet_links (wallet_addr, matrica_user_id, checked_at) VALUES (?, ?, 1)`
-    ).run(wallet, userId);
+  it.each(['matrica', 'ordnet'] as const)(
+    'bases %s roles, profile counts, and role-holder size on OMB only',
+    async provider => {
+      const db = dbModule.getDb();
+      const profileId = 'roles-collection-test-user';
+      const userId = provider === 'ordnet' ? `ordnet:${profileId}` : profileId;
+      const wallet = 'bc1qrolescollectiontestwallet';
+      if (provider === 'matrica') {
+        db.prepare(
+          `INSERT INTO matrica_users (user_id, username, avatar_url, updated_at) VALUES (?, ?, NULL, 1)`
+        ).run(userId, 'test-user');
+        db.prepare(
+          `INSERT INTO wallet_links (wallet_addr, matrica_user_id, checked_at) VALUES (?, ?, 1)`
+        ).run(wallet, userId);
+      } else {
+        const { shareOrdnetIdentity } = await import('../src/lib/publicIdentityStore');
+        shareOrdnetIdentity({
+          walletAddress: wallet,
+          profile: { id: profileId, username: 'test-user', avatarUrl: null },
+          walletBindings: [
+            {
+              walletBindingId: 'binding',
+              label: 'wallet',
+              provider: 'xverse',
+              ordinalsAddress: wallet,
+              paymentAddress: 'private-payment',
+              isPublic: true,
+            },
+          ],
+        });
+      }
 
-    const omb = db
-      .prepare(`SELECT inscription_number FROM inscriptions WHERE collection_slug='omb' LIMIT 1`)
-      .get() as { inscription_number: number };
-    const bravo = db
-      .prepare(
-        `SELECT inscription_number FROM inscriptions WHERE collection_slug='bravocados' LIMIT 1`
-      )
-      .get() as { inscription_number: number };
-    db.prepare(
-      `UPDATE inscriptions SET effective_owner=?, current_owner=?, color='red' WHERE inscription_number=?`
-    ).run(wallet, wallet, omb.inscription_number);
-    db.prepare(
-      `UPDATE inscriptions SET effective_owner=?, current_owner=?, color='orange' WHERE inscription_number=?`
-    ).run(wallet, wallet, bravo.inscription_number);
+      const omb = db
+        .prepare(`SELECT inscription_number FROM inscriptions WHERE collection_slug='omb' LIMIT 1`)
+        .get() as { inscription_number: number };
+      const bravo = db
+        .prepare(
+          `SELECT inscription_number FROM inscriptions WHERE collection_slug='bravocados' LIMIT 1`
+        )
+        .get() as { inscription_number: number };
+      db.prepare(
+        `UPDATE inscriptions SET effective_owner=?, current_owner=?, color='red' WHERE inscription_number=?`
+      ).run(wallet, wallet, omb.inscription_number);
+      db.prepare(
+        `UPDATE inscriptions SET effective_owner=?, current_owner=?, color='orange' WHERE inscription_number=?`
+      ).run(wallet, wallet, bravo.inscription_number);
 
-    rolesStore.runRolesTick();
+      rolesStore.runRolesTick();
 
-    expect(rolesStore.getRolesForUser(userId)).toContain('red-1');
-    expect(rolesStore.getRolesForUser(userId)).not.toContain('orange-1');
-    expect(rolesStore.getColorCountsForUser(userId)).toMatchObject({ red: 1, orange: 0 });
+      expect(rolesStore.getRolesForUser(userId)).toContain('red-1');
+      expect(rolesStore.getRolesForUser(userId)).not.toContain('orange-1');
+      expect(rolesStore.getColorCountsForUser(userId)).toMatchObject({ red: 1, orange: 0 });
 
-    expect(rolesStore.getHoldersForRole('red-1', 10)).toContainEqual(
-      expect.objectContaining({ user_id: userId, inscription_count: 1, first_wallet: wallet })
-    );
-  });
+      expect(rolesStore.getHoldersForRole('red-1', 10)).toContainEqual(
+        expect.objectContaining({ user_id: userId, inscription_count: 1, first_wallet: wallet })
+      );
+    }
+  );
 
   it('does not let a colored non-OMB inscription change OMB linkage statistics', () => {
     const db = dbModule.getDb();

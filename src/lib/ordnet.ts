@@ -33,11 +33,37 @@ export type OrdnetWalletBinding = {
   isPublic: boolean;
 };
 
+export type OrdnetProfile = {
+  id: string;
+  username: string | null;
+  avatarUrl: string | null;
+};
+
+export type OrdnetProfileSession = {
+  profile: OrdnetProfile;
+  walletBindings: OrdnetWalletBinding[];
+};
+
 export type OrdnetVerifiedSession = {
   sessionToken: string;
   expiresAt: string;
   walletBindings: OrdnetWalletBinding[];
 };
+
+/** Profile data is read using the user's short-lived API token, never the service wallet. */
+export async function fetchOrdnetProfile(sessionToken: string): Promise<OrdnetProfileSession> {
+  const json = await getJson(`${ORDNET_API_BASE}/me`, sessionToken);
+  const obj = objectOrThrow(json, 'ORD.NET profile response was not an object.');
+  const profile = objectOrThrow(obj.profile, 'ORD.NET did not return a profile.');
+  return {
+    profile: {
+      id: stringField(profile, 'id'),
+      username: cleanString(profile.username),
+      avatarUrl: cleanString(profile.avatarUrl),
+    },
+    walletBindings: parseWalletBindings(obj),
+  };
+}
 
 export type OrdnetListing = {
   listing_id: string;
@@ -648,6 +674,11 @@ function parseAuthVerifyResponse(json: unknown): OrdnetVerifiedSession {
   const obj = objectOrThrow(json, 'ORD.NET auth verify response was not an object.');
   const sessionToken = stringField(obj, 'sessionToken');
   const expiresAt = stringField(obj, 'expiresAt');
+  const walletBindings = parseWalletBindings(obj);
+  return { sessionToken, expiresAt, walletBindings };
+}
+
+function parseWalletBindings(obj: Record<string, unknown>): OrdnetWalletBinding[] {
   const rawBindings = arrayField(obj, 'walletBindings');
   const walletBindings: OrdnetWalletBinding[] = [];
   for (const raw of rawBindings) {
@@ -658,10 +689,10 @@ function parseAuthVerifyResponse(json: unknown): OrdnetVerifiedSession {
       provider: stringField(b, 'provider'),
       ordinalsAddress: stringField(b, 'ordinalsAddress'),
       paymentAddress: stringField(b, 'paymentAddress'),
-      isPublic: Boolean(b.isPublic),
+      isPublic: b.isPublic === true,
     });
   }
-  return { sessionToken, expiresAt, walletBindings };
+  return walletBindings;
 }
 
 function parseListingsResponse(json: unknown): FetchOrdnetListingsResult {
@@ -982,6 +1013,7 @@ async function requestJsonOnce(
   try {
     const res = await fetch(url, {
       method: args.method,
+      cache: 'no-store',
       headers: {
         Accept: 'application/json',
         ...(args.method === 'POST' ? { 'Content-Type': 'application/json' } : {}),

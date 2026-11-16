@@ -83,6 +83,14 @@ export default function ConnectWalletButton({ compact = false }: { compact?: boo
             >
               VIEW HOLDINGS
             </Link>
+            <Link
+              href="/profile"
+              role="menuitem"
+              onClick={() => setOpen(false)}
+              className="block px-3 py-2 hover:bg-ink-1 hover:text-bone"
+            >
+              PROFILE & VERIFICATION
+            </Link>
             <button
               type="button"
               role="menuitem"

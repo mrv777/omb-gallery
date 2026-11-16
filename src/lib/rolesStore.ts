@@ -24,19 +24,21 @@ let cached: {
   selectLinkedUserCount: Statement;
 } | null = null;
 
+// roles_earned.matrica_user_id is a legacy column name; public ORD.NET
+// identities use the ordnet: namespace, never Matrica identity tables.
 function stmts() {
   if (cached) return cached;
   const db = getDb();
   cached = {
-    // For every Matrica-linked user, count inscriptions per color (effective_owner).
+    // For each public identity, count inscriptions per color (effective_owner).
     selectColorCountsForLinkedUsers: db.prepare(`
-      SELECT wl.matrica_user_id AS user_id, i.color AS color, COUNT(*) AS n
-      FROM wallet_links wl
+      SELECT wl.identity_id AS user_id, i.color AS color, COUNT(*) AS n
+      FROM public_wallet_links wl
       JOIN inscriptions  i ON i.effective_owner = wl.wallet_addr
-      WHERE wl.matrica_user_id IS NOT NULL
+      WHERE wl.identity_id IS NOT NULL
         AND i.collection_slug = 'omb'
         AND i.color IS NOT NULL
-      GROUP BY wl.matrica_user_id, i.color
+      GROUP BY wl.identity_id, i.color
     `),
 
     selectAllEarned: db.prepare(`
@@ -59,8 +61,8 @@ function stmts() {
     selectColorsForUser: db.prepare(`
       SELECT i.color AS color, COUNT(*) AS n
       FROM inscriptions i
-      JOIN wallet_links wl ON wl.wallet_addr = i.effective_owner
-      WHERE wl.matrica_user_id = @user_id
+      JOIN public_wallet_links wl ON wl.wallet_addr = i.effective_owner
+      WHERE wl.identity_id = @user_id
         AND i.collection_slug = 'omb'
         AND i.color IS NOT NULL
       GROUP BY i.color
@@ -77,9 +79,9 @@ function stmts() {
       SELECT
         i.color AS color,
         COUNT(*) AS total,
-        SUM(CASE WHEN wl.matrica_user_id IS NOT NULL THEN 1 ELSE 0 END) AS linked
+        SUM(CASE WHEN wl.identity_id IS NOT NULL THEN 1 ELSE 0 END) AS linked
       FROM inscriptions i
-      LEFT JOIN wallet_links wl ON wl.wallet_addr = i.effective_owner
+      LEFT JOIN public_wallet_links wl ON wl.wallet_addr = i.effective_owner
       WHERE i.color IS NOT NULL
         AND i.collection_slug = 'omb'
         AND i.effective_owner IS NOT NULL
@@ -102,17 +104,17 @@ function stmts() {
         mu.avatar_url      AS avatar_url,
         (
           SELECT COUNT(*) FROM inscriptions i
-          JOIN wallet_links wl ON wl.wallet_addr = i.effective_owner
-          WHERE wl.matrica_user_id = re.matrica_user_id
+          JOIN public_wallet_links wl ON wl.wallet_addr = i.effective_owner
+          WHERE wl.identity_id = re.matrica_user_id
             AND i.collection_slug = 'omb'
         ) AS inscription_count,
         (
-          SELECT wallet_addr FROM wallet_links
-          WHERE matrica_user_id = re.matrica_user_id
+          SELECT wallet_addr FROM public_wallet_links
+          WHERE identity_id = re.matrica_user_id
           ORDER BY wallet_addr ASC LIMIT 1
         ) AS first_wallet
       FROM roles_earned re
-      LEFT JOIN matrica_users mu ON mu.user_id = re.matrica_user_id
+      LEFT JOIN public_profiles mu ON mu.user_id = re.matrica_user_id
       WHERE re.role_id = @role_id
       ORDER BY inscription_count DESC, re.matrica_user_id ASC
       LIMIT @limit

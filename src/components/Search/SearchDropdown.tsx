@@ -158,7 +158,7 @@ function RenderSections({
       )}
 
       {results.users.length > 0 && (
-        <Section title="Matrica users">
+        <Section title="Profiles">
           {results.users.map(u => {
             const key = `user:${u.user_id}`;
             return (

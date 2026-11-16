@@ -23,6 +23,7 @@ type Props = {
   initialStats: MarketplaceStats;
   discordInviteUrl: string;
   matricaSignupUrl: string;
+  nexusVerificationEnabled?: boolean;
   sellerEnabled: boolean;
 };
 
@@ -34,6 +35,7 @@ export default function MarketplaceGrid({
   initialStats,
   discordInviteUrl,
   matricaSignupUrl,
+  nexusVerificationEnabled = false,
   sellerEnabled,
 }: Props) {
   const router = useRouter();
@@ -192,6 +194,7 @@ export default function MarketplaceGrid({
           txid={receipt.txid}
           discordInviteUrl={discordInviteUrl}
           matricaSignupUrl={matricaSignupUrl}
+          nexusVerificationEnabled={nexusVerificationEnabled}
           onClose={() => setReceipt(null)}
         />
       )}
