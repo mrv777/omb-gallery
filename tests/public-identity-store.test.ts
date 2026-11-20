@@ -48,7 +48,7 @@ afterAll(() => {
 
 describe('explicit ORD.NET identity publication', () => {
   it('creates v48 schema and publishes only the exact public ordinal wallet', () => {
-    expect(dbModule.getDb().pragma('user_version', { simple: true })).toBe(48);
+    expect(dbModule.getDb().pragma('user_version', { simple: true })).toBe(49);
     store.shareOrdnetIdentity({
       walletAddress: wallet,
       profile,
@@ -197,7 +197,7 @@ describe('explicit ORD.NET identity publication', () => {
     vi.resetModules();
     dbModule = await import('@/lib/db');
     store = await import('@/lib/publicIdentityStore');
-    expect(dbModule.getDb().pragma('user_version', { simple: true })).toBe(48);
+    expect(dbModule.getDb().pragma('user_version', { simple: true })).toBe(49);
     expect(
       dbModule
         .getDb()

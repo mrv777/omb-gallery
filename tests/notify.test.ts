@@ -38,16 +38,16 @@ afterEach(() => {
   }
 });
 
-function firstOmb(): { inscription_number: number; inscription_id: string } {
+function firstOmb(offset = 0): { inscription_number: number; inscription_id: string } {
   const row = dbModule
     .getDb()
     .prepare(
       `SELECT inscription_number
        FROM inscriptions
        WHERE collection_slug = 'omb'
-       LIMIT 1`
+       LIMIT 1 OFFSET ?`
     )
-    .get() as { inscription_number: number };
+    .get(offset) as { inscription_number: number };
   return {
     inscription_number: row.inscription_number,
     inscription_id: `${String(row.inscription_number).padStart(64, '0')}i0`,
@@ -56,18 +56,28 @@ function firstOmb(): { inscription_number: number; inscription_id: string } {
 
 function enqueueListedEvent(
   sourceId: string,
-  overrides: Partial<{ block_timestamp: number; ageSec: number }> = {}
+  overrides: {
+    block_timestamp?: number;
+    ageSec?: number;
+    priceSats?: number;
+    seller?: string;
+    marketplace?: 'satflow' | 'ord.net';
+    inscriptionOffset?: number;
+  } = {}
 ) {
-  const row = firstOmb();
+  const row = firstOmb(overrides.inscriptionOffset);
   const blockTimestamp = overrides.block_timestamp ?? 1_800_000_000;
-  const txid = `listed:satflow:${row.inscription_number}:id:${sourceId}`;
+  const priceSats = overrides.priceSats ?? 2_200_000;
+  const seller = overrides.seller ?? 'bc1pseller';
+  const marketplace = overrides.marketplace ?? 'satflow';
+  const txid = `listed:${marketplace}:${row.inscription_number}:id:${sourceId}`;
   dbModule.getStmts().upsertActiveListing.run({
     inscription_number: row.inscription_number,
     inscription_id: row.inscription_id,
     satflow_id: sourceId,
-    price_sats: 2_200_000,
-    seller: 'bc1pseller',
-    marketplace: 'satflow',
+    price_sats: priceSats,
+    seller,
+    marketplace,
     listed_at: blockTimestamp,
     refreshed_at: Math.floor(Date.now() / 1000),
   });
@@ -75,9 +85,9 @@ function enqueueListedEvent(
     inscription_id: row.inscription_id,
     inscription_number: row.inscription_number,
     block_timestamp: blockTimestamp,
-    seller: 'bc1pseller',
-    marketplace: 'satflow',
-    price_sats: 2_200_000,
+    seller,
+    marketplace,
+    price_sats: priceSats,
     txid,
   });
   const eventId = Number(insert.lastInsertRowid);
@@ -211,12 +221,17 @@ describe('runNotifyFanout delivery dedupe', () => {
       .prepare(`SELECT COUNT(*) AS n FROM notify_deliveries`)
       .get() as { n: number };
     expect(savedDeliveries.n).toBe(1);
+    const listingDeliveries = dbModule
+      .getDb()
+      .prepare(`SELECT COUNT(*) AS n FROM notify_discord_satflow_listings`);
+    expect(listingDeliveries.get()).toEqual({ n: 1 });
 
     const second = await runNotifyFanout();
     expect(second.events_dequeued).toBe(1);
     expect(second.events_deferred).toBe(0);
     expect(posts.filter(p => p.url.startsWith(WEBHOOK_A))).toHaveLength(1);
     expect(posts.filter(p => p.url.startsWith(WEBHOOK_B))).toHaveLength(2);
+    expect(listingDeliveries.get()).toEqual({ n: 2 });
 
     const pending = dbModule.getDb().prepare(`SELECT COUNT(*) AS n FROM notify_pending`).get() as {
       n: number;
@@ -252,6 +267,66 @@ describe('runNotifyFanout delivery dedupe', () => {
     expect(result.events_dequeued).toBe(2);
     expect(posts).toHaveLength(1);
     expect(posts[0].body.embeds).toHaveLength(1);
+  });
+
+  it('requires both an hour and a 1% drop from the last Discord alert for the same Satflow seller and OMB', async () => {
+    const fetchMock = vi.fn(async () => Response.json({}));
+    vi.stubGlobal('fetch', fetchMock);
+    await subscribeDiscordTargets(WEBHOOK_A);
+    const { runNotifyFanout } = await import('../src/lib/notify');
+
+    enqueueListedEvent('first-order');
+    expect((await runNotifyFanout()).delivered).toBe(1);
+
+    enqueueListedEvent('small-cut', { priceSats: 2_199_000 });
+    expect(await runNotifyFanout()).toMatchObject({ delivered: 0, events_dequeued: 1 });
+
+    enqueueListedEvent('large-cut-too-soon', { priceSats: 2_178_000 });
+    expect(await runNotifyFanout()).toMatchObject({ delivered: 0, events_dequeued: 1 });
+
+    dbModule
+      .getDb()
+      .exec(`UPDATE notify_discord_satflow_listings SET delivered_at = unixepoch() - 3600`);
+    enqueueListedEvent('one-sat-short', { priceSats: 2_178_001 });
+    expect(await runNotifyFanout()).toMatchObject({ delivered: 0, events_dequeued: 1 });
+
+    enqueueListedEvent('exactly-one-percent', { priceSats: 2_178_000 });
+    expect((await runNotifyFanout()).delivered).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(
+      dbModule.getDb().prepare(`SELECT price_sats FROM notify_discord_satflow_listings`).get()
+    ).toEqual({ price_sats: 2_178_000 });
+  });
+
+  it('keeps Satflow alert history per webhook, seller and OMB and allows other markets', async () => {
+    const posts: PostedWebhook[] = [];
+    vi.stubGlobal('fetch', async (input: URL, init: RequestInit) => {
+      posts.push({ url: String(input), body: JSON.parse(String(init.body)) });
+      return Response.json({});
+    });
+    await subscribeDiscordTargets(WEBHOOK_A);
+    const { runNotifyFanout } = await import('../src/lib/notify');
+
+    enqueueListedEvent('first-order');
+    enqueueListedEvent('another-order-same-batch', { priceSats: 2_199_000 });
+    expect(await runNotifyFanout()).toMatchObject({ delivered: 1, events_dequeued: 2 });
+    expect(posts[0].body.embeds).toHaveLength(1);
+    // The collapsed embed shows, and baselines, the seller's cheapest order.
+    expect(
+      dbModule.getDb().prepare(`SELECT price_sats FROM notify_discord_satflow_listings`).get()
+    ).toEqual({ price_sats: 2_199_000 });
+
+    await subscribeDiscordTargets(WEBHOOK_B);
+    enqueueListedEvent('repeat-order', { priceSats: 2_198_000 });
+    expect(await runNotifyFanout()).toMatchObject({ delivered: 1, events_dequeued: 1 });
+    expect(posts[1].url).toMatch(WEBHOOK_B);
+
+    enqueueListedEvent('new-seller', { seller: 'bc1pnewseller' });
+    enqueueListedEvent('other-omb', { inscriptionOffset: 1 });
+    enqueueListedEvent('other-market', { marketplace: 'ord.net' });
+    expect(await runNotifyFanout()).toMatchObject({ delivered: 2, events_dequeued: 3 });
+    expect(posts[2].body.embeds).toHaveLength(3);
+    expect(posts[3].body.embeds).toHaveLength(3);
   });
 
   it('defers fresh listed events during the listing notification grace window', async () => {

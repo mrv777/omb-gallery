@@ -895,7 +895,7 @@ describe('buy_intents schema', () => {
     vi.resetModules();
     dbModule = await import('../src/lib/db');
     const upgraded = dbModule.getDb();
-    expect(upgraded.pragma('user_version', { simple: true })).toBe(48);
+    expect(upgraded.pragma('user_version', { simple: true })).toBe(49);
     expect(
       (upgraded.prepare(`PRAGMA table_info(buy_intents)`).all() as Array<{ name: string }>).map(
         column => column.name

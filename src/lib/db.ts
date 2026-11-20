@@ -9,7 +9,7 @@ import bravocadosManifest from '../data/collections/bravocados/manifest.json';
 import { SQL_BRAVOCADO_DISTRIBUTION_LIST, SQL_EXCLUDED_OWNERS_LIST } from './walletLabels';
 
 const DB_PATH = process.env.OMB_DB_PATH ?? '/data/app.db';
-const SCHEMA_VERSION = 48;
+const SCHEMA_VERSION = 49;
 
 // Wallets that distributed inscriptions as primary-mint outflows. An event
 // is `event_type = 'mint'` only when ALL of:
@@ -244,6 +244,7 @@ function migrate(db: DB): void {
     }
     if (current < 47) upgradeV46ToV47(db);
     if (current < 48) upgradeV47ToV48(db);
+    if (current < 49) upgradeV48ToV49(db);
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });
   tx();
@@ -2708,6 +2709,23 @@ function upgradeV47ToV48(db: DB): void {
       SELECT 'ordnet:' || profile_id AS user_id, username, avatar_url,
              updated_at, 'ordnet' AS provider
       FROM ordnet_public_profiles;
+  `);
+}
+
+function upgradeV48ToV49(db: DB): void {
+  // Per-Discord-webhook baseline for Satflow re-list alerts. A seller re-listing
+  // the same OMB only re-alerts a webhook after DISCORD_RELIST_COOLDOWN_SEC and a
+  // >= DISCORD_RELIST_MIN_DROP_PERCENT price cut (see notify.ts). Rows are written
+  // only for successfully delivered messages, so a failed send never suppresses.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS notify_discord_satflow_listings (
+      channel_target_hash TEXT NOT NULL,
+      inscription_number INTEGER NOT NULL REFERENCES inscriptions(inscription_number) ON DELETE CASCADE,
+      seller TEXT NOT NULL,
+      price_sats INTEGER NOT NULL,
+      delivered_at INTEGER NOT NULL,
+      PRIMARY KEY (channel_target_hash, inscription_number, seller)
+    ) WITHOUT ROWID;
   `);
 }
 

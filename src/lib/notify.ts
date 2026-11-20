@@ -66,6 +66,8 @@ const FANOUT_BUDGET_MS = 8_000;
 const FANOUT_CONCURRENCY = 8;
 const NOTIFY_LOCK_STALE_SEC = 120;
 const LISTED_NOTIFY_GRACE_SEC = 30;
+const DISCORD_RELIST_COOLDOWN_SEC = 60 * 60;
+const DISCORD_RELIST_MIN_DROP_PERCENT = 1;
 
 function siteUrl(): string {
   return (process.env.NEXT_PUBLIC_SITE_URL || 'https://ordinalmaxibiz.wiki').replace(/\/$/, '');
@@ -415,6 +417,59 @@ function listedRenderKey(ev: EventRow): string | null {
   ].join('|');
 }
 
+type SatflowListingWithSeller = EventRow & { old_owner: string; sale_price_sats: number };
+
+function prepareDiscordSatflowListingStatements() {
+  const db = getDb();
+  return {
+    previous: db.prepare(`
+      SELECT price_sats, delivered_at FROM notify_discord_satflow_listings
+      WHERE channel_target_hash = ? AND inscription_number = ? AND seller = ?
+    `),
+    record: db.prepare(`
+      INSERT INTO notify_discord_satflow_listings (
+        channel_target_hash, inscription_number, seller, price_sats, delivered_at
+      ) VALUES (?, ?, ?, ?, unixepoch())
+      ON CONFLICT (channel_target_hash, inscription_number, seller) DO UPDATE SET
+        price_sats = excluded.price_sats, delivered_at = excluded.delivered_at
+    `),
+  };
+}
+
+let discordSatflowListingStatements: ReturnType<typeof prepareDiscordSatflowListingStatements>;
+
+function getDiscordSatflowListingStatements() {
+  return (discordSatflowListingStatements ??= prepareDiscordSatflowListingStatements());
+}
+
+function isSatflowListingWithSeller(ev: EventRow): ev is SatflowListingWithSeller {
+  return (
+    ev.event_type === 'listed' &&
+    ev.marketplace === 'satflow' &&
+    !!ev.old_owner &&
+    ev.sale_price_sats != null &&
+    ev.sale_price_sats > 0
+  );
+}
+
+function shouldSendDiscordSatflowListing(
+  ev: SatflowListingWithSeller,
+  targetHash: string,
+  nowSec: number
+): boolean {
+  const prior = getDiscordSatflowListingStatements().previous.get(
+    targetHash,
+    ev.inscription_number,
+    ev.old_owner
+  ) as { price_sats: number; delivered_at: number } | undefined;
+  if (!prior) return true;
+  const minDropSats = Math.ceil((prior.price_sats * DISCORD_RELIST_MIN_DROP_PERCENT) / 100);
+  return (
+    nowSec - prior.delivered_at >= DISCORD_RELIST_COOLDOWN_SEC &&
+    prior.price_sats - ev.sale_price_sats >= minDropSats
+  );
+}
+
 function activeListingTxid(row: ActiveListingRow): string {
   const sourceId = row.satflow_id.trim();
   const sourceIdentity = sourceId ? `id:${sourceId}` : `ts:${row.listed_at}`;
@@ -497,6 +552,18 @@ function recordDeliveredRecords(bucket: Bucket, eventIds: Set<number>): void {
   `);
   const tx = getDb().transaction((ids: number[]) => {
     for (const id of ids) stmt.run(id, bucket.channel, bucket.targetHash);
+    if (bucket.channel === 'discord') {
+      // Only prices in the successful message set the baseline for later alerts.
+      for (const ev of bucket.events) {
+        if (!isSatflowListingWithSeller(ev)) continue;
+        getDiscordSatflowListingStatements().record.run(
+          bucket.targetHash,
+          ev.inscription_number,
+          ev.old_owner,
+          ev.sale_price_sats
+        );
+      }
+    }
   });
   tx(Array.from(eventIds));
 }
@@ -759,6 +826,10 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
       if (deliveredBefore.has(deliveryRecordKey(ev.id, sub.channel, targetHash))) {
         continue;
       }
+      const discordSatflowListing = sub.channel === 'discord' && isSatflowListingWithSeller(ev);
+      if (discordSatflowListing && !shouldSendDiscordSatflowListing(ev, targetHash, nowSec))
+        continue;
+
       const key = `${sub.channel}:${sub.channel_target}`;
       wanting.add(key);
       let b = buckets.get(key);
@@ -777,9 +848,25 @@ export async function runNotifyFanout(): Promise<FanoutResult> {
       // Per-bucket dedupe (overlapping watches: same target subscribes to
       // both collection + inscription, etc.).
       if (b.eventIds.has(ev.id)) continue;
-      const renderKey = listedRenderKey(ev);
+      // A poll can pick up multiple active orders for this seller and OMB at once.
+      const renderKey = discordSatflowListing
+        ? `discord-satflow:${ev.inscription_number}:${ev.old_owner}`
+        : listedRenderKey(ev);
       if (renderKey && b.eventRenderKeys.has(renderKey)) {
         b.eventIds.add(ev.id);
+        if (discordSatflowListing) {
+          // Show (and baseline) the seller's cheapest order, not the first enqueued.
+          const i = b.events.findIndex(
+            e =>
+              isSatflowListingWithSeller(e) &&
+              e.inscription_number === ev.inscription_number &&
+              e.old_owner === ev.old_owner
+          );
+          const shown = i >= 0 ? b.events[i] : undefined;
+          if (shown?.sale_price_sats != null && ev.sale_price_sats < shown.sale_price_sats) {
+            b.events[i] = ev;
+          }
+        }
         continue;
       }
       // Cap: leftover events stay in queue → next tick → next message.

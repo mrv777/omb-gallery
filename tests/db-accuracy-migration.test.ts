@@ -36,7 +36,7 @@ describe('v47 data accuracy repair', () => {
     vi.resetModules();
     mod = await import('../src/lib/db');
     db = mod.getDb();
-    expect(db.pragma('user_version', { simple: true })).toBe(48);
+    expect(db.pragma('user_version', { simple: true })).toBe(49);
     expect(
       db
         .prepare(
