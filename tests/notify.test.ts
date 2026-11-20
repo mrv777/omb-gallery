@@ -298,6 +298,35 @@ describe('runNotifyFanout delivery dedupe', () => {
     ).toEqual({ price_sats: 2_178_000 });
   });
 
+  it('treats a Satflow re-listing as new once the last Discord alert is 7 days old', async () => {
+    const fetchMock = vi.fn(async () => Response.json({}));
+    vi.stubGlobal('fetch', fetchMock);
+    await subscribeDiscordTargets(WEBHOOK_A);
+    const { runNotifyFanout } = await import('../src/lib/notify');
+    const ageBaseline = (sec: number) =>
+      dbModule
+        .getDb()
+        .exec(`UPDATE notify_discord_satflow_listings SET delivered_at = unixepoch() - ${sec}`);
+
+    enqueueListedEvent('first-order');
+    expect((await runNotifyFanout()).delivered).toBe(1);
+
+    ageBaseline(7 * 24 * 3600 - 60);
+    enqueueListedEvent('same-price-almost-a-week', { priceSats: 2_200_000 });
+    expect(await runNotifyFanout()).toMatchObject({ delivered: 0, events_dequeued: 1 });
+
+    ageBaseline(7 * 24 * 3600);
+    enqueueListedEvent('higher-price-after-a-week', { priceSats: 2_500_000 });
+    expect((await runNotifyFanout()).delivered).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // The comeback price becomes the new baseline, so churn right after it is throttled again.
+    expect(
+      dbModule.getDb().prepare(`SELECT price_sats FROM notify_discord_satflow_listings`).get()
+    ).toEqual({ price_sats: 2_500_000 });
+    enqueueListedEvent('small-cut-after-comeback', { priceSats: 2_499_000 });
+    expect(await runNotifyFanout()).toMatchObject({ delivered: 0, events_dequeued: 1 });
+  });
+
   it('keeps Satflow alert history per webhook, seller and OMB and allows other markets', async () => {
     const posts: PostedWebhook[] = [];
     vi.stubGlobal('fetch', async (input: URL, init: RequestInit) => {

@@ -68,6 +68,9 @@ const NOTIFY_LOCK_STALE_SEC = 120;
 const LISTED_NOTIFY_GRACE_SEC = 30;
 const DISCORD_RELIST_COOLDOWN_SEC = 60 * 60;
 const DISCORD_RELIST_MIN_DROP_PERCENT = 1;
+// After this long without an alert, a re-listing is news again at any price
+// (a seller back on the market), not bot churn.
+const DISCORD_RELIST_BASELINE_TTL_SEC = 7 * 24 * 60 * 60;
 
 function siteUrl(): string {
   return (process.env.NEXT_PUBLIC_SITE_URL || 'https://ordinalmaxibiz.wiki').replace(/\/$/, '');
@@ -462,7 +465,7 @@ function shouldSendDiscordSatflowListing(
     ev.inscription_number,
     ev.old_owner
   ) as { price_sats: number; delivered_at: number } | undefined;
-  if (!prior) return true;
+  if (!prior || nowSec - prior.delivered_at >= DISCORD_RELIST_BASELINE_TTL_SEC) return true;
   const minDropSats = Math.ceil((prior.price_sats * DISCORD_RELIST_MIN_DROP_PERCENT) / 100);
   return (
     nowSec - prior.delivered_at >= DISCORD_RELIST_COOLDOWN_SEC &&
