@@ -59,7 +59,8 @@ export async function POST(req: NextRequest) {
   if (!intent || intent.buyer_ord_addr !== session.ord_addr) {
     return NextResponse.json({ error: 'intent not found' }, { status: 404 });
   }
-  if (intent.status === 'broadcast' && intent.txid) {
+  // A retry after the reconciler marked the sale confirmed must replay, not 409.
+  if (hasSubmittedTxid(intent)) {
     return NextResponse.json({
       intent_id: intent.id,
       txid: intent.txid,
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
   const claimToken = randomUUID();
   if (!claimIntentBroadcast(intentId, claimToken)) {
     const latest = getBuyIntent(intentId);
-    if (latest?.status === 'broadcast' && latest.txid) {
+    if (latest && hasSubmittedTxid(latest)) {
       return NextResponse.json({
         intent_id: latest.id,
         txid: latest.txid,
@@ -168,4 +169,11 @@ async function broadcastOrdnet(
     );
   }
   return broadcastOrdnetPurchase({ intent, signedPsbt, ordnetSession });
+}
+
+function hasSubmittedTxid(intent: { status: string; txid: string | null }): intent is {
+  status: string;
+  txid: string;
+} {
+  return (intent.status === 'broadcast' || intent.status === 'confirmed') && !!intent.txid;
 }
